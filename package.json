@@ -25,7 +25,8 @@
     "db:seed": "pnpm --filter @jomma/web db:seed",
     "db:studio": "pnpm --filter @jomma/web db:studio",
     "db:reset": "docker compose down -v && docker compose up -d postgres && sleep 4 && pnpm db:migrate && pnpm db:seed",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "test:integration": "pnpm --filter @jomma/web test:integration"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.4",

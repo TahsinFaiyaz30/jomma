@@ -144,7 +144,8 @@ export type DeviceCommand =
   | { type: 'rotate_token' }
   | { type: 'stop' }
 
-export const DEVICE_STATUSES = ['active', 'revoked'] as const
+/** `pending` is a device that has a provisioning QR but has not scanned it yet. */
+export const DEVICE_STATUSES = ['pending', 'active', 'revoked'] as const
 export type DeviceStatus = (typeof DEVICE_STATUSES)[number]
 
 export const KEY_ENVIRONMENTS = ['live', 'test'] as const
@@ -176,6 +177,11 @@ export const AUDIT_ACTIONS = [
   'account.degraded',
   'account.recovered',
   'balance.drift',
+  'apikey.created',
+  'apikey.revoked',
+  'endpoint.created',
+  'webhook.replayed',
+  'statement.imported',
 ] as const
 export type AuditAction = (typeof AUDIT_ACTIONS)[number]
 

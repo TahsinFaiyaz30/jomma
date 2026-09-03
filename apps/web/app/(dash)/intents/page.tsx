@@ -1,18 +1,22 @@
 import type { Metadata } from 'next'
-import { StubPage } from '@/components/dash/stub-page'
+import { IntentsView } from '@/components/dash/intents-view'
+import { PageHeader } from '@/components/dash/page-header'
+import { getIntentFilterOptions, listIntents } from '@/lib/services/intent-admin'
+import { loadIntentDetail } from './actions'
 
 export const metadata: Metadata = { title: 'Intents' }
+export const dynamic = 'force-dynamic'
 
-export default function IntentsPage() {
+export default async function IntentsPage() {
+  const [intents, options] = await Promise.all([listIntents(), getIntentFilterOptions()])
+
   return (
-    <StubPage
-      title="Intents"
-      purpose="Open and recent payment requests, filterable by status and account."
-      planned={[
-        'Table of intents with status, amount, reference code, and time to expiry',
-        'Detail sheet showing the full timeline read from payment_audit',
-        'Filter by status and receiving account',
-      ]}
-    />
+    <div className="flex h-svh min-h-0 flex-col">
+      <PageHeader
+        title="Intents"
+        description={`${options.counts.open} open · ${options.counts.matched} matched · ${options.counts.partial} partial`}
+      />
+      <IntentsView intents={intents} accounts={options.accounts} detailFor={loadIntentDetail} />
+    </div>
   )
 }

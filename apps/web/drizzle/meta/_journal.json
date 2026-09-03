@@ -29,6 +29,27 @@
       "when": 1788463373344,
       "tag": "0003_account_issuer",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788464471914,
+      "tag": "0004_device_status_pending",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788464471915,
+      "tag": "0004_device_provisioning",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788465006697,
+      "tag": "0006_audit_admin_actions",
+      "breakpoints": true
     }
   ]
 }

@@ -106,7 +106,9 @@ export async function authenticateDevice(request: Request): Promise<Authenticate
     .limit(1)
     .then((rows) => rows[0])
 
-  if (!row) {
+  // A `pending` device has no hash yet — it has a provisioning QR that nobody
+  // has scanned. Treat it exactly like an unknown prefix.
+  if (!row?.tokenHash) {
     await verifyCredential(DUMMY_HASH, token)
     throw ApiError.unauthorized()
   }

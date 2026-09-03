@@ -1,5 +1,5 @@
 import type { DeviceCommand } from '@jomma/shared'
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core'
 import { createdAt, fkId, poisha, primaryId, timestampTz, updatedAt } from './_shared'
 import {
@@ -59,9 +59,25 @@ export const devices = pgTable(
     name: text('name').notNull(),
     platform: text('platform').notNull().default('android'),
 
-    tokenPrefix: text('token_prefix').notNull(),
-    tokenHash: text('token_hash').notNull(),
-    status: deviceStatusEnum('status').notNull().default('active'),
+    /**
+     * Null until the device claims its provisioning token. A `pending` device
+     * has a QR waiting to be scanned and cannot authenticate yet.
+     */
+    tokenPrefix: text('token_prefix'),
+    tokenHash: text('token_hash'),
+    status: deviceStatusEnum('status').notNull().default('pending'),
+
+    /**
+     * One-time provisioning, per docs/android.md: the dashboard shows a QR, the
+     * app exchanges it for a long-lived device token, and the one-time value is
+     * burned. Hashed like every other credential — a screenshot of a QR left in
+     * a chat is not a way into the capture endpoint.
+     */
+    provisioningHash: text('provisioning_hash'),
+    provisioningExpiresAt: timestampTz('provisioning_expires_at'),
+    provisionedAt: timestampTz('provisioned_at'),
+    /** Bumped on every rotation, so the dashboard can show token age. */
+    tokenIssuedAt: timestampTz('token_issued_at'),
 
     appVersion: text('app_version'),
     lastHeartbeatAt: timestampTz('last_heartbeat_at'),
@@ -81,7 +97,10 @@ export const devices = pgTable(
     revokedAt: timestampTz('revoked_at'),
   },
   (table) => [
-    uniqueIndex('ux_devices_token_prefix').on(table.tokenPrefix),
+    // Partial: many devices can sit at 'pending' with a null prefix at once.
+    uniqueIndex('ux_devices_token_prefix')
+      .on(table.tokenPrefix)
+      .where(sql`token_prefix is not null`),
     index('ix_devices_account').on(table.receivingAccountId, table.status),
   ],
 )

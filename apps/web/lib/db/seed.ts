@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { env } from '@jomma/shared/env'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { generateApiKey, generateDeviceToken } from '../auth/tokens'
 import { db, pool } from './client'
 import { apiKeys, apps, devices, receivingAccounts, users, webhookEndpoints } from './schema'
@@ -64,11 +64,25 @@ async function main() {
    * needed in production.
    */
   const ACCOUNT_SPECS = [
-    { provider: 'bkash' as const, msisdn: '8801799887766', label: 'Jomma Store — bKash', device: 'Shop phone' },
-    { provider: 'bkash' as const, msisdn: '8801611223344', label: 'Jomma Store — bKash 2', device: 'Back office phone' },
+    {
+      provider: 'bkash' as const,
+      msisdn: '8801799887766',
+      label: 'Jomma Store — bKash',
+      device: 'Shop phone',
+    },
+    {
+      provider: 'bkash' as const,
+      msisdn: '8801611223344',
+      label: 'Jomma Store — bKash 2',
+      device: 'Back office phone',
+    },
   ]
 
-  const seeded: Array<{ account: typeof receivingAccounts.$inferSelect; deviceId: string; token: string }> = []
+  const seeded: Array<{
+    account: typeof receivingAccounts.$inferSelect
+    deviceId: string
+    token: string
+  }> = []
 
   for (const spec of ACCOUNT_SPECS) {
     const healthy = {
@@ -110,6 +124,8 @@ async function main() {
           tokenPrefix: deviceToken.prefix,
           tokenHash: deviceToken.hash,
           status: 'active',
+          tokenIssuedAt: new Date(),
+          provisionedAt: new Date(),
           lastHeartbeatAt: new Date(),
         })
         .where(eq(devices.id, existingDevice.id))
@@ -122,6 +138,9 @@ async function main() {
           platform: 'android',
           tokenPrefix: deviceToken.prefix,
           tokenHash: deviceToken.hash,
+          status: 'active',
+          tokenIssuedAt: new Date(),
+          provisionedAt: new Date(),
           appVersion: '1.4.0',
           lastHeartbeatAt: new Date(),
           permissions: { notification_listener: true, sms: true },
@@ -134,11 +153,21 @@ async function main() {
     seeded.push({ account, deviceId, token: deviceToken.plaintext })
   }
 
-  const primary = seeded[0]
-  if (!primary) throw new Error('No accounts seeded')
-  const account = primary.account
-  const deviceId = primary.deviceId
-  const deviceToken = { plaintext: primary.token }
+  if (seeded.length === 0) throw new Error('No accounts seeded')
+
+  /*
+   * Retire the previous seed key before minting a new one.
+   *
+   * Without this, every `pnpm db:seed` leaves another live credential behind
+   * and a development database ends up with a dozen working keys nobody is
+   * tracking. Only keys this script created are touched.
+   */
+  await db
+    .update(apiKeys)
+    .set({ status: 'revoked', revokedAt: new Date() })
+    .where(
+      and(eq(apiKeys.appId, app.id), eq(apiKeys.name, 'Seed key'), eq(apiKeys.status, 'active')),
+    )
 
   const key = await generateApiKey('live')
   await db.insert(apiKeys).values({

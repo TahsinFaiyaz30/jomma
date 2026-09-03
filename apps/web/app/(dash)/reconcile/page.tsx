@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { PageHeader } from '@/components/dash/page-header'
+import { StatementImport } from '@/components/dash/statement-import'
 import { StatusDot } from '@/components/status'
+import { listAccountHealth } from '@/lib/services/accounts'
 import {
   getOverdueIntentCount,
   getPaidWithoutPaymentCount,
@@ -21,11 +23,12 @@ export const dynamic = 'force-dynamic'
  * whether or not the rest of the page exists.
  */
 export default async function ReconcilePage() {
-  const [paidWithoutPayment, overdue, parseFailures, queue] = await Promise.all([
+  const [paidWithoutPayment, overdue, parseFailures, queue, accounts] = await Promise.all([
     getPaidWithoutPaymentCount(),
     getOverdueIntentCount(),
     getParseFailureCount(),
     getQueueDepth(),
+    listAccountHealth(),
   ])
 
   return (
@@ -70,14 +73,11 @@ export default async function ReconcilePage() {
           />
         </section>
 
-        <section className="space-y-2">
+        <section className="space-y-3">
           <h2 className="text-title font-medium">Statement import</h2>
-          <p className="max-w-xl text-small text-muted-foreground">
-            Not built yet. The weekly bKash CSV export imports with{' '}
-            <span className="figure">source = statement</span>; the unique index on{' '}
-            <span className="figure">trx_id</span> absorbs everything already known, and what
-            remains is money the notifier never saw.
-          </p>
+          <StatementImport
+            accounts={accounts.map((a) => ({ id: a.id, label: a.label, msisdn: a.msisdn }))}
+          />
         </section>
       </div>
     </div>
