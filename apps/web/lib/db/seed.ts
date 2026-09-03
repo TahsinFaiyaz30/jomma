@@ -54,36 +54,91 @@ async function main() {
     .returning()
   if (!app) throw new Error('Failed to upsert app')
 
-  const [account] = await db
-    .insert(receivingAccounts)
-    .values({
-      provider: 'bkash',
-      msisdn: '8801799887766',
-      label: 'Jomma Store — bKash',
-      status: 'active',
-      dailyLimitCents: 25_000_000,
-      monthlyLimitCents: 300_000_000,
+  /*
+   * Two receiving accounts, each with its own phone.
+   *
+   * Not a nicety. docs/matching.md is blunt about it: one phone is a single
+   * point of failure for the entire revenue stream, and checkout has to be able
+   * to route around a `disabled` or drifting account. Seeding one account means
+   * the failover path never runs in development and breaks the first time it is
+   * needed in production.
+   */
+  const ACCOUNT_SPECS = [
+    { provider: 'bkash' as const, msisdn: '8801799887766', label: 'Jomma Store — bKash', device: 'Shop phone' },
+    { provider: 'bkash' as const, msisdn: '8801611223344', label: 'Jomma Store — bKash 2', device: 'Back office phone' },
+  ]
+
+  const seeded: Array<{ account: typeof receivingAccounts.$inferSelect; deviceId: string; token: string }> = []
+
+  for (const spec of ACCOUNT_SPECS) {
+    const healthy = {
+      label: spec.label,
+      status: 'active' as const,
+      statusReason: null,
+      balanceDrift: false,
+      balanceDriftCents: null,
       lastKnownBalanceCents: 4_532_000,
       balanceCheckedAt: new Date(),
       lastHeartbeatAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: receivingAccounts.msisdn,
+    }
+
+    const [account] = await db
+      .insert(receivingAccounts)
+      .values({
+        provider: spec.provider,
+        msisdn: spec.msisdn,
+        dailyLimitCents: 25_000_000,
+        monthlyLimitCents: 300_000_000,
+        ...healthy,
+      })
       // Re-seeding is the documented way to get a development account back to
       // healthy after the smoke test deliberately trips the drift detector.
-      set: {
-        label: 'Jomma Store — bKash',
-        status: 'active',
-        statusReason: null,
-        balanceDrift: false,
-        balanceDriftCents: null,
-        lastKnownBalanceCents: 4_532_000,
-        balanceCheckedAt: new Date(),
-        lastHeartbeatAt: new Date(),
-      },
+      .onConflictDoUpdate({ target: receivingAccounts.msisdn, set: healthy })
+      .returning()
+    if (!account) throw new Error(`Failed to upsert receiving account ${spec.msisdn}`)
+
+    const deviceToken = await generateDeviceToken()
+    const existingDevice = await db.query.devices.findFirst({
+      where: eq(devices.receivingAccountId, account.id),
     })
-    .returning()
-  if (!account) throw new Error('Failed to upsert receiving account')
+
+    let deviceId = existingDevice?.id
+    if (existingDevice) {
+      await db
+        .update(devices)
+        .set({
+          tokenPrefix: deviceToken.prefix,
+          tokenHash: deviceToken.hash,
+          status: 'active',
+          lastHeartbeatAt: new Date(),
+        })
+        .where(eq(devices.id, existingDevice.id))
+    } else {
+      const [created] = await db
+        .insert(devices)
+        .values({
+          receivingAccountId: account.id,
+          name: spec.device,
+          platform: 'android',
+          tokenPrefix: deviceToken.prefix,
+          tokenHash: deviceToken.hash,
+          appVersion: '1.4.0',
+          lastHeartbeatAt: new Date(),
+          permissions: { notification_listener: true, sms: true },
+        })
+        .returning()
+      deviceId = created?.id
+    }
+
+    if (!deviceId) throw new Error(`Failed to upsert device for ${spec.msisdn}`)
+    seeded.push({ account, deviceId, token: deviceToken.plaintext })
+  }
+
+  const primary = seeded[0]
+  if (!primary) throw new Error('No accounts seeded')
+  const account = primary.account
+  const deviceId = primary.deviceId
+  const deviceToken = { plaintext: primary.token }
 
   const key = await generateApiKey('live')
   await db.insert(apiKeys).values({
@@ -94,38 +149,6 @@ async function main() {
     lastFour: key.lastFour,
     keyHash: key.hash,
   })
-
-  const deviceToken = await generateDeviceToken()
-  const existingDevice = await db.query.devices.findFirst({
-    where: eq(devices.receivingAccountId, account.id),
-  })
-
-  let deviceId = existingDevice?.id
-  if (existingDevice) {
-    await db
-      .update(devices)
-      .set({
-        tokenPrefix: deviceToken.prefix,
-        tokenHash: deviceToken.hash,
-        status: 'active',
-      })
-      .where(eq(devices.id, existingDevice.id))
-  } else {
-    const [created] = await db
-      .insert(devices)
-      .values({
-        receivingAccountId: account.id,
-        name: 'Shop phone',
-        platform: 'android',
-        tokenPrefix: deviceToken.prefix,
-        tokenHash: deviceToken.hash,
-        appVersion: '1.4.0',
-        lastHeartbeatAt: new Date(),
-        permissions: { notification_listener: true, sms: true },
-      })
-      .returning()
-    deviceId = created?.id
-  }
 
   const webhookSecret = `whsec_${randomBytes(24).toString('hex')}`
   await db
@@ -155,17 +178,17 @@ async function main() {
 Seed complete.
 
   App                 ${app.name} (${app.slug})
-  Receiving account   ${account.label} — ${account.msisdn}
-  Device              Shop phone (${deviceId})
+${seeded.map((s) => `  Account             ${s.account.label} — ${s.account.msisdn}`).join('\n')}
 
   These are shown once. Copy them now.
 
   Dashboard login     ${adminEmail}
   Dashboard password  ${adminCreated ? adminPassword : '(unchanged — that admin already existed)'}
   API key             ${key.plaintext}
-  Device token        ${deviceToken.plaintext}
-  Device id           ${deviceId}
   Webhook secret      ${webhookSecret}
+
+  Devices (one per account, for failover):
+${seeded.map((s) => `    ${s.account.msisdn}   token ${s.token}   id ${s.deviceId}`).join('\n')}
 
   Try it:
 

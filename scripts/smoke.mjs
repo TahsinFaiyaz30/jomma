@@ -12,13 +12,18 @@
  */
 
 const BASE = process.env.JOMMA_URL ?? 'http://localhost:3000'
-const [apiKey, deviceToken, deviceId] = process.argv.slice(2)
+const [apiKey, deviceToken, deviceId, deviceToken2, deviceId2] = process.argv.slice(2)
 
 if (!apiKey || !deviceToken || !deviceId) {
-  console.error('Usage: node scripts/smoke.mjs <api_key> <device_token> <device_id>')
-  console.error('Run `pnpm db:seed` to mint a set.')
+  console.error(
+    'Usage: node scripts/smoke.mjs <api_key> <device_token> <device_id> [<device_token_2> <device_id_2>]',
+  )
+  console.error('Run `pnpm db:seed` to mint a set. Pass the second device to test failover.')
   process.exit(2)
 }
+
+/** Failover needs two accounts, so that section is skipped without a second device. */
+const hasSecondDevice = Boolean(deviceToken2 && deviceId2)
 
 let passed = 0
 let failed = 0
@@ -87,6 +92,56 @@ const event = await device('POST', '/device/v1/events', {
 })
 check('event accepted', event.status === 200)
 
+const deviceB = hasSecondDevice
+  ? (method, path, body) =>
+      call(method, path, body, {
+        authorization: `Bearer ${deviceToken2}`,
+        'x-device-id': deviceId2,
+      })
+  : null
+
+/*
+ * Which device belongs to which account.
+ *
+ * `/v1/accounts` deliberately exposes no device ids, so beat one device at a
+ * time and watch which account's `last_heartbeat_at` moves. Everything after
+ * this needs the mapping: a capture sent from the wrong device lands on the
+ * wrong account and correctly refuses to match, which looks like a matcher bug
+ * and is not one.
+ */
+let deviceAMsisdn = null
+let deviceBMsisdn = null
+
+if (deviceB) {
+  await deviceB('POST', '/device/v1/heartbeat', {
+    battery: 90,
+    charging: true,
+    network: 'wifi',
+    queue_depth: 0,
+    permissions: { notification_listener: true, sms: true },
+    app_version: '1.4.0',
+  })
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  await device('POST', '/device/v1/heartbeat', { queue_depth: 0 })
+
+  const beats = await client('GET', '/v1/accounts')
+  const newest = [...(beats.json.accounts ?? [])].sort(
+    (a, b) => Date.parse(b.health.last_heartbeat_at) - Date.parse(a.health.last_heartbeat_at),
+  )
+  deviceAMsisdn = newest[0]?.msisdn ?? null
+  deviceBMsisdn = newest[1]?.msisdn ?? null
+  check('device-to-account mapping resolved', Boolean(deviceAMsisdn && deviceBMsisdn))
+}
+
+/** The device that can actually capture for a given receiving number. */
+function deviceFor(msisdn) {
+  if (!deviceB) return device
+  return msisdn === deviceBMsisdn ? deviceB : device
+}
+
+const accountsAtStart = await client('GET', '/v1/accounts')
+const accountCount = accountsAtStart.json.accounts?.length ?? 1
+
 /* ── 2. Intent lifecycle ──────────────────────────────────────────────────── */
 
 section('Intent lifecycle')
@@ -134,8 +189,22 @@ const collision = await client(
   { amount, client_reference: 'ORD-COLLIDE' },
   { 'idempotency-key': `smoke-collide-${nonce}` },
 )
-check('same amount on the only account is 409', collision.status === 409, `got ${collision.status}`)
-check('with code no_capacity', collision.json.error?.code === 'no_capacity')
+if (accountCount === 1) {
+  check(
+    'same amount on the only account is 409',
+    collision.status === 409,
+    `got ${collision.status}`,
+  )
+  check('with code no_capacity', collision.json.error?.code === 'no_capacity')
+} else {
+  // With redundancy the same amount is not a conflict, it is a routing decision.
+  // Section 8 drives that to exhaustion.
+  check(
+    'same amount routes to another account',
+    collision.status === 201,
+    `got ${collision.status}`,
+  )
+}
 
 /* ── 3. Auth and validation ───────────────────────────────────────────────── */
 
@@ -180,7 +249,8 @@ const trxId = `BK${nonce}${Math.floor(Math.random() * 9000 + 1000)}`
 // check has nothing to compare, so a repeated run does not accumulate drift.
 // Section 8 exercises the continuity check on its own.
 
-const capture = await device('POST', '/device/v1/capture', {
+const captureDevice = deviceFor(created.json.receiving_account?.msisdn)
+const capture = await captureDevice('POST', '/device/v1/capture', {
   captures: [
     {
       local_id: 'c_smoke_1',
@@ -200,7 +270,7 @@ check(
 )
 check('trx_id echoed back', capture.json.results?.[0]?.trx_id === trxId)
 
-const duplicate = await device('POST', '/device/v1/capture', {
+const duplicate = await captureDevice('POST', '/device/v1/capture', {
   captures: [
     {
       local_id: 'c_smoke_1_sms',
@@ -212,7 +282,7 @@ const duplicate = await device('POST', '/device/v1/capture', {
 })
 check('dual capture deduplicates', duplicate.json.results?.[0]?.status === 'duplicate')
 
-const unparsed = await device('POST', '/device/v1/capture', {
+const unparsed = await captureDevice('POST', '/device/v1/capture', {
   captures: [
     {
       local_id: 'c_smoke_junk',
@@ -287,7 +357,7 @@ section('Underpayment')
 
 const shortAmount = fresh.json.amount - 20_000
 const shortTrx = `BK${nonce}SHORT`
-await device('POST', '/device/v1/capture', {
+await deviceFor(fresh.json.receiving_account?.msisdn)('POST', '/device/v1/capture', {
   captures: [
     {
       local_id: 'c_smoke_short',
@@ -327,7 +397,73 @@ check('accounts listed', Array.isArray(accounts.json.accounts) && accounts.json.
 check('limits reported', typeof accounts.json.accounts?.[0]?.limits?.utilization === 'number')
 check('no device ids leaked to clients', !JSON.stringify(accounts.json).includes('device'))
 
-/* ── 8. Balance continuity ────────────────────────────────────────────────── */
+/* ── 8. Two-account routing and failover ──────────────────────────────────── */
+
+if (hasSecondDevice) {
+  section('Failover')
+
+  // Device-to-account mapping was resolved in section 1.
+
+  const foAmount = 500_000 + (Date.now() % 90_000)
+
+  const first = await client(
+    'POST',
+    '/v1/intents',
+    { amount: foAmount, client_reference: `FO-1-${nonce}` },
+    { 'idempotency-key': `fo-1-${nonce}` },
+  )
+  const second = await client(
+    'POST',
+    '/v1/intents',
+    { amount: foAmount, client_reference: `FO-2-${nonce}` },
+    { 'idempotency-key': `fo-2-${nonce}` },
+  )
+
+  check('first intent created', first.status === 201, `got ${first.status}`)
+  // The whole point of a second account: the same amount is no longer a 409.
+  check('same amount routes to the second account', second.status === 201, `got ${second.status}`)
+  check(
+    'the two intents are on different accounts',
+    first.json.receiving_account?.msisdn !== second.json.receiving_account?.msisdn,
+    `${first.json.receiving_account?.msisdn} vs ${second.json.receiving_account?.msisdn}`,
+  )
+
+  const third = await client(
+    'POST',
+    '/v1/intents',
+    { amount: foAmount, client_reference: `FO-3-${nonce}` },
+    { 'idempotency-key': `fo-3-${nonce}` },
+  )
+  check('a third at that amount exhausts capacity', third.status === 409, `got ${third.status}`)
+
+  // A capture on the wrong account must not match, however perfect it looks.
+  // The receiving account is a gate exactly like the amount is.
+  const wrongAccountTrx = `BK${nonce}WRONGACC`
+  // Capture from the device that does *not* own the first intent's account.
+  const senderOnOtherAccount =
+    first.json.receiving_account?.msisdn === deviceAMsisdn ? deviceB : device
+
+  await senderOnOtherAccount('POST', '/device/v1/capture', {
+    captures: [
+      {
+        local_id: 'c_wrong_account',
+        source: 'notification',
+        package: 'com.bKash.customerapp',
+        raw: `You have received Tk ${(foAmount / 100).toFixed(2)} from 01712345678. Ref ${first.json.ref_code}. Fee Tk 0.00. TrxID ${wrongAccountTrx} at 03/09/2026 18:35`,
+        captured_at: new Date().toISOString(),
+      },
+    ],
+  })
+
+  const stillOpen = await client('GET', `/v1/intents/${first.json.id}`)
+  check(
+    'exact reference on the wrong account does not match',
+    stillOpen.json.status === 'open',
+    stillOpen.json.status,
+  )
+}
+
+/* ── 9. Balance continuity ────────────────────────────────────────────────── */
 
 section('Balance continuity')
 
@@ -348,24 +484,49 @@ const drifted = await device('POST', '/device/v1/capture', {
 check('a drifting capture is still accepted', drifted.json.results?.[0]?.status === 'accepted')
 
 const afterDrift = await client('GET', '/v1/accounts')
-const account = afterDrift.json.accounts?.[0]
-check(
-  'drift is reported to clients',
-  account?.health?.balance_drift === true,
-  JSON.stringify(account?.health),
-)
-check('account stops being routable', account?.status === 'degraded', account?.status)
+const drifting = afterDrift.json.accounts?.find((a) => a.health?.balance_drift === true)
+check('drift is reported to clients', Boolean(drifting), JSON.stringify(afterDrift.json.accounts))
+check('the drifting account is degraded', drifting?.status === 'degraded', drifting?.status)
 
-const blocked = await client(
+const healthyRemaining = (afterDrift.json.accounts ?? []).filter(
+  (a) => a.status === 'active' && !a.health?.balance_drift,
+)
+
+const afterwards = await client(
   'POST',
   '/v1/intents',
-  { amount: 12_345, client_reference: 'ORD-AFTER-DRIFT' },
+  { amount: 700_000 + (Date.now() % 90_000), client_reference: `ORD-AFTER-DRIFT-${nonce}` },
   { 'idempotency-key': `smoke-drift-${nonce}` },
 )
-check('no pay page while an account is drifting', blocked.status === 503, `got ${blocked.status}`)
-check('with code no_healthy_account', blocked.json.error?.code === 'no_healthy_account')
 
-console.log('\n  note: this section intentionally degrades the account.')
+if (healthyRemaining.length > 0) {
+  /*
+   * With a second account still healthy, a drifting account must NOT stop
+   * checkout — it must route around it. That is the entire reason two accounts
+   * are described as non-optional.
+   */
+  check(
+    'checkout routes around the drifting account',
+    afterwards.status === 201,
+    `got ${afterwards.status}`,
+  )
+  check(
+    'and lands on a healthy one',
+    afterwards.json.receiving_account?.msisdn !== drifting?.msisdn,
+    afterwards.json.receiving_account?.msisdn,
+  )
+} else {
+  // Single-account deployment: nothing to fail over to, so the client must not
+  // be shown a pay page at all.
+  check(
+    'no pay page when the only account is drifting',
+    afterwards.status === 503,
+    `got ${afterwards.status}`,
+  )
+  check('with code no_healthy_account', afterwards.json.error?.code === 'no_healthy_account')
+}
+
+console.log('\n  note: this section intentionally degrades an account.')
 console.log('        run `pnpm db:seed` to re-anchor its balance before the next run.')
 
 /* ── Summary ──────────────────────────────────────────────────────────────── */
