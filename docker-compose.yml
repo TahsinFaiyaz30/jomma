@@ -1,0 +1,40 @@
+# Local development only.
+#
+# The deployment target is still an open decision (AGENTS.md, "Open decisions" #1),
+# so this file deliberately runs Postgres alone. `web` and `worker` run on the host
+# via `pnpm dev` / `pnpm dev:worker`. No production compose profile is written yet.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: jomma-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jomma
+      POSTGRES_PASSWORD: jomma
+      POSTGRES_DB: jomma
+      # Deterministic collation so ORDER BY on ref codes matches app-side sorting.
+      POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=en-US --encoding=UTF8'
+    ports:
+      - '5433:5432'
+    volumes:
+      # Postgres 18 changed the recommended mount point: a single mount at
+      # /var/lib/postgresql (not .../data), so the version-specific subdirectory
+      # lives inside the volume and `pg_upgrade --link` works across the mount.
+      - jomma_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jomma -d jomma']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    command:
+      - postgres
+      # pg-boss polls; keep the connection ceiling generous for web + worker + studio.
+      - '-c'
+      - 'max_connections=200'
+      - '-c'
+      - 'log_statement=none'
+
+volumes:
+  jomma_pgdata:
+    name: jomma_pgdata

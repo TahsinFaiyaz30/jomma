@@ -1,0 +1,113 @@
+# ── Secrets ───────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.keystore
+*.jks
+secrets/
+google-services.json
+
+# ── Dependencies ──────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/releases
+!.yarn/plugins
+!.yarn/versions
+
+# ── Next.js ───────────────────────────────────────────────────────────
+.next/
+out/
+build/
+dist/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# ── Testing ───────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# ── Database ──────────────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+pgdata/
+postgres-data/
+dumps/
+*.dump
+*.sql.gz
+
+# Keep migrations. Ignore local drift snapshots only.
+apps/web/drizzle/meta/_journal.json.bak
+
+# ── Captured message fixtures ─────────────────────────────────────────
+# Real captures contain live phone numbers and transaction IDs.
+# Commit REDACTED fixtures only — see docs/android.md.
+apps/web/lib/parsers/fixtures/raw/
+*.raw-capture.txt
+
+# ── Android ───────────────────────────────────────────────────────────
+apps/android/build/
+apps/android/*/build/
+apps/android/.gradle/
+apps/android/local.properties
+apps/android/.cxx/
+apps/android/captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+.externalNativeBuild/
+release/
+
+# ── Logs ──────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Editors ───────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+.idea/
+*.swp
+*.swo
+*.iml
+*~
+
+# ── OS ────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ── Misc ──────────────────────────────────────────────────────────────
+.vercel/
+.cache/
+tmp/
+temp/
+*.tgz
+.eslintcache
+.biome-cache/
+
+# Next.js generates these into apps/web; disabled via agentRules:false
+apps/web/AGENTS.md
+apps/web/CLAUDE.md

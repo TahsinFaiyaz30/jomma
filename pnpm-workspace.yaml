@@ -1,0 +1,12 @@
+packages:
+  - apps/web
+  - apps/worker
+  - packages/*
+
+# pnpm 10 blocks lifecycle scripts by default. Only these need to run.
+onlyBuiltDependencies:
+  - '@biomejs/biome'
+  - '@tailwindcss/oxide'
+  - esbuild
+  - sharp
+  - unrs-resolver
