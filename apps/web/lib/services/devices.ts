@@ -160,38 +160,75 @@ export async function claimProvisioning(options: {
 }
 
 /**
- * Rotation. Issues a new token immediately and queues `rotate_token` so the app
- * learns about it on its next heartbeat.
+ * Asks a device to rotate its token.
  *
- * The old token stops working the moment this commits, which is deliberate: a
- * rotation you asked for because a token leaked is worthless if the leaked one
- * keeps working until the device notices.
+ * This queues the command and changes nothing else. The swap is device-initiated
+ * (`POST /device/v1/rotate`) for a reason: the new plaintext can only be handed
+ * to whoever is holding the current token, and issuing it here would mean either
+ * storing a plaintext token so the device could collect it later, or cutting the
+ * device off the moment an admin clicked a button.
+ *
+ * So the old token stays valid until the device actually swaps. If the rotation
+ * is because something leaked, revoke instead — that is immediate.
  */
-export async function rotateDeviceToken(options: {
+export async function requestTokenRotation(options: {
   deviceId: string
   actorId: string
-}): Promise<{ deviceToken: string }> {
-  const issued = await generateDeviceToken()
-
+}): Promise<void> {
   await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(devices)
-      .set({
-        tokenPrefix: issued.prefix,
-        tokenHash: issued.hash,
-        status: 'active',
-        tokenIssuedAt: new Date(),
-        pendingCommands: [{ type: 'rotate_token' }],
-      })
-      .where(eq(devices.id, options.deviceId))
+      .set({ pendingCommands: [{ type: 'rotate_token' }] })
+      .where(and(eq(devices.id, options.deviceId), eq(devices.status, 'active')))
       .returning({ id: devices.id })
 
-    if (!updated) throw new Error('Unknown device')
+    if (!updated) throw new Error('That device is not active.')
 
     await audit(tx, {
       action: 'device.provisioned',
       actorId: options.actorId,
       actorType: 'admin',
+      payload: { device_id: options.deviceId, stage: 'rotation_requested' },
+    })
+  })
+}
+
+/**
+ * The swap itself, called by the device with its current (still valid) token.
+ *
+ * Conditional on the current prefix so a replayed rotation cannot mint a second
+ * token: whichever request arrives first wins, and the second finds the prefix
+ * already changed.
+ */
+export async function completeTokenRotation(options: {
+  deviceId: string
+  currentPrefix: string
+}): Promise<{ deviceToken: string }> {
+  const issued = await generateDeviceToken()
+
+  await db.transaction(async (tx) => {
+    const [rotated] = await tx
+      .update(devices)
+      .set({
+        tokenPrefix: issued.prefix,
+        tokenHash: issued.hash,
+        tokenIssuedAt: new Date(),
+        pendingCommands: [],
+      })
+      .where(
+        and(
+          eq(devices.id, options.deviceId),
+          eq(devices.status, 'active'),
+          eq(devices.tokenPrefix, options.currentPrefix),
+        ),
+      )
+      .returning({ id: devices.id })
+
+    if (!rotated) throw new Error('rotation_conflict')
+
+    await audit(tx, {
+      action: 'device.provisioned',
+      actorType: 'device',
       payload: { device_id: options.deviceId, stage: 'rotated' },
     })
   })

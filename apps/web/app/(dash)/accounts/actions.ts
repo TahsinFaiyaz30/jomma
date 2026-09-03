@@ -5,8 +5,8 @@ import { requireAdmin } from '@/lib/auth/session'
 import { acknowledgeAlert, setAccountStatus } from '@/lib/services/account-admin'
 import {
   createDeviceWithProvisioning,
+  requestTokenRotation,
   revokeDevice,
-  rotateDeviceToken,
 } from '@/lib/services/devices'
 
 export interface DeviceActionResult {
@@ -45,13 +45,19 @@ export async function rotateTokenAction(deviceId: string): Promise<DeviceActionR
   const admin = await requireAdmin()
 
   try {
-    const { deviceToken } = await rotateDeviceToken({ deviceId, actorId: admin.id })
+    await requestTokenRotation({ deviceId, actorId: admin.id })
     revalidatePath('/accounts')
     return {
       ok: true,
-      // The old token stopped working the moment this committed.
-      message: 'Rotated. The previous token is already invalid.',
-      secret: { kind: 'token', value: deviceToken },
+      /*
+       * No secret to show. The device collects its new token itself on the next
+       * heartbeat, using the one it still holds — which is the only way to hand
+       * it over without either storing a plaintext token or cutting the phone
+       * off the instant someone clicked a button.
+       *
+       * If the point is that a token leaked, revoke instead. That is immediate.
+       */
+      message: 'Queued. The device swaps its token on the next heartbeat.',
     }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Could not rotate.' }

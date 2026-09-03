@@ -30,7 +30,22 @@ export const POST = route(async (request, context) => {
   const now = new Date()
 
   const commands = await db.transaction(async (tx) => {
-    const [updated] = await tx
+    /*
+     * Read the queue before clearing it.
+     *
+     * `UPDATE ... RETURNING` in Postgres returns the *new* row, so draining and
+     * returning in one statement hands back the empty array it just wrote and
+     * every command is silently lost. Two statements in one transaction, with
+     * the row locked, is the correct drain.
+     */
+    const [current] = await tx
+      .select({ pending: devices.pendingCommands })
+      .from(devices)
+      .where(eq(devices.id, device.deviceId))
+      .for('update')
+      .limit(1)
+
+    await tx
       .update(devices)
       .set({
         lastHeartbeatAt: now,
@@ -44,7 +59,6 @@ export const POST = route(async (request, context) => {
         pendingCommands: [],
       })
       .where(eq(devices.id, device.deviceId))
-      .returning({ pending: devices.pendingCommands })
 
     await tx
       .update(receivingAccounts)
@@ -82,7 +96,7 @@ export const POST = route(async (request, context) => {
       })
     }
 
-    return (updated?.pending ?? []) as DeviceCommand[]
+    return (current?.pending ?? []) as DeviceCommand[]
   })
 
   return {
