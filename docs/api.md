@@ -280,6 +280,69 @@ Response can carry commands back:
 
 Command types: `flush_queue`, `resend_since`, `rotate_token`, `stop`.
 
+Commands are delivered **once** — the queue is read and cleared inside one
+transaction, under a row lock. A device that crashes between receiving a command
+and acting on it will not see it again, so no command may be required for
+correctness. Each one is a hint the server can repeat by re-queueing.
+
+Unknown command types must be ignored rather than treated as an error, so new
+ones can be added without an app update.
+
+### `POST /device/v1/provision`
+
+The one device endpoint reachable without a device token, because the device does
+not have one yet. The dashboard mints a pending device and shows a QR containing
+the server URL, a one-time token, and the device id.
+
+```jsonc
+// Request
+{
+  "device_id": "01a068a8-7499-7c13-85cb-7936ca348533",
+  "provisioning_token": "jmp_..."
+}
+
+// 200
+{
+  "device_token": "jmd_...",
+  "device_id": "01a068a8-7499-7c13-85cb-7936ca348533",
+  "account": { "msisdn": "8801799887766", "provider": "bkash" }
+}
+```
+
+The one-time token is Argon2-hashed at rest, expires after 15 minutes, and is
+burned on use by a conditional update — two phones scanning the same code cannot
+both end up holding a valid token. Expired, already-claimed, and simply wrong all
+return the same `401`; anything more specific tells a holder of a stale QR which
+part to change.
+
+### `POST /device/v1/rotate`
+
+```
+Authorization: Bearer jmd_<current token>
+X-Device-Id:   <uuid>
+```
+
+Swaps this device's token, using the one it currently holds. Called after a
+heartbeat returns `rotate_token`.
+
+```jsonc
+// 200
+{ "device_token": "jmd_<new>" }
+```
+
+Device-initiated on purpose. The new plaintext can only be handed to whoever is
+already holding the current one, so the alternatives were storing a plaintext
+token for the device to collect later, or invalidating the old one the moment an
+admin clicked a button and hoping the phone noticed — on the single device
+watching for incoming money.
+
+So the old token stays valid until the swap succeeds, and dies at that moment.
+The update is conditional on the current token prefix, so one command cannot mint
+two tokens.
+
+**Rotation is the orderly path. If a token has actually leaked, revoke instead —
+that is immediate.**
+
 ### `POST /device/v1/events`
 
 ```jsonc

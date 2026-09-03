@@ -46,29 +46,34 @@ pnpm dev:worker
 
 `PORT=3100 pnpm dev` if 3000 is taken.
 
+Sign in with the admin email and password the seed prints. There is no signup —
+accounts are created by the seed or by another admin, and `POST
+/api/auth/sign-up/email` is disabled.
+
 ### Verifying it works
 
 ```bash
-pnpm smoke <api_key> <device_token> <device_id>
+pnpm smoke <api_key> <device_token> <device_id> [<device_token_2> <device_id_2>]
 ```
 
-47 assertions over the real HTTP surface: intent lifecycle, idempotent replay,
-lock collision, auth, validation, device capture, automatic matching, all the
-submission outcomes, underpayment, and the balance continuity check. Exits
-non-zero on failure.
+52 assertions over the real HTTP surface: intent lifecycle, idempotent replay,
+auth, validation, device capture, automatic matching, all the submission
+outcomes, underpayment, two-account failover, and the balance continuity check.
+Pass the second device to exercise failover. Exits non-zero on failure.
 
-The last section deliberately trips the drift detector, which leaves the seeded
+The last section deliberately trips the drift detector, which leaves one seeded
 account `degraded`. Re-run `pnpm db:seed` to re-anchor it.
 
 ### Everything else
 
 ```bash
-pnpm test          # 65 unit tests — matcher, parsers, webhook signatures
-pnpm typecheck     # all four packages
-pnpm lint          # Biome
-pnpm build         # production build
-pnpm db:reset      # drop, recreate, migrate, seed
-pnpm db:studio     # Drizzle Studio
+pnpm test              # 81 unit tests — matcher, parsers, CSV, signatures
+pnpm test:integration  # needs a live database; statement import, device commands
+pnpm typecheck         # all four packages
+pnpm lint              # Biome
+pnpm build             # production build
+pnpm db:reset          # drop, recreate, migrate, seed
+pnpm db:studio         # Drizzle Studio
 ```
 
 ---
@@ -86,10 +91,17 @@ apps/
     lib/services/        Money logic — one implementation of each decision
     lib/db/schema/       Drizzle schema
   worker/      pg-boss — webhook delivery, expiry sweeps, health alerts
+  android/     Kotlin notifier. Written, never compiled — see its README.
 packages/
   shared/      Types, env loading, id codec, webhook contract
   sdk/         Typed client for client apps
 ```
+
+Screens: **Feed** (live, virtualized, keyboard-driven), **Queue** (approve and
+reject with `a`/`r`), **Intents** (with the audit timeline and reversal),
+**Accounts** (devices, provisioning QR, rotation, limits), **Reconcile**
+(integrity checks and statement import), **Apps** (keys, endpoints, delivery log
+with replay), **Settings**.
 
 The route files live under `app/api/` per AGENTS.md, and `next.config.ts`
 rewrites `/v1/*` and `/device/v1/*` onto them so the public URLs match
@@ -112,16 +124,30 @@ lock update and the cumulative-sum logic.
 catches its own throws — so a provider changing its format costs an alert and a
 manual review, never a lost payment.
 
+**Two receiving accounts are seeded by default**, because one phone is a single
+point of failure for the whole revenue stream. Two intents at the same amount
+route to different accounts; a drifting or disabled account is routed around
+rather than blocking checkout. The smoke suite exercises this.
+
 ---
 
 ## Where it is unfinished
 
-- **The dashboard has no authentication.** Better Auth is not wired. The
-  `(dash)` layout refuses to render in production unless you explicitly opt out.
-- **No Nagad parser.** The message format is unverified; Nagad captures store
-  their raw text, fail parsing loudly, and wait for a human.
-- **The bKash parser is written against the sample in docs/api.md**, not a real
-  capture. Send ৳10 between two of your own numbers, via both the app and
-  `*247#`, and replace the fixtures before trusting it.
-- Queue, Intents, Accounts, and Apps are shell pages. Feed and Reconcile are real.
-- No Android app, no statement import, no Messages bridge.
+Two of these are blocked on you, not on code.
+
+- **The bKash parser is written against the illustrative sample in docs/api.md**,
+  not a real capture. Send ৳10 between two of your own numbers, via both the app
+  and `*247#`, capture the exact notification and SMS text, and replace the
+  fixtures. Until then the matcher's strongest signal is unverified.
+  (AGENTS.md open decision #3.)
+- **No Nagad parser.** The message format is unknown. Nagad captures store their
+  raw text, fail parsing loudly, and wait for a human — never dropped, and
+  recoverable by re-parsing once the format is known.
+  (AGENTS.md open decision #2.)
+- **The Android app has never been compiled.** Written from docs/android.md on a
+  machine with no Android SDK. See [apps/android/README.md](apps/android/README.md).
+- **No deploy config.** The compose file runs Postgres for development only;
+  the deployment target is still open (AGENTS.md #1).
+- Rate limiting is in-process, so it is per-instance. Fine for one VPS; the
+  per-intent submission limit is database-backed and survives restarts either way.
+- No Messages bridge. The feature flag exists and is off.
