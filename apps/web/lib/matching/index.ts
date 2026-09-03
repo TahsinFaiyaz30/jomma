@@ -1,3 +1,5 @@
+export type { CandidateDiagnosis } from './diagnose'
+export { diagnoseCandidates } from './diagnose'
 export {
   isFuzzyRefMatch,
   levenshtein,

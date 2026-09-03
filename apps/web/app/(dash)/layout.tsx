@@ -1,23 +1,19 @@
 import { AppSidebar } from '@/components/dash/app-sidebar'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import { requireAdmin } from '@/lib/auth/session'
 import { getAccountFooter, getSidebarCounts } from '@/lib/services/dashboard'
 
 /**
  * The dashboard shell.
  *
- * ⚠ Unauthenticated. Better Auth is not wired yet (PROMPTS.md step 8), so these
- * routes are open to anyone who can reach the origin. Fine on localhost, not
- * fine anywhere else — see the production guard below.
+ * Every route under this layout requires a signed-in admin. `requireAdmin`
+ * redirects to /login rather than rendering an empty shell, so there is no state
+ * where the chrome is visible without a session behind it.
  */
 export const dynamic = 'force-dynamic'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  if (process.env.NODE_ENV === 'production' && !process.env.JOMMA_ALLOW_UNAUTHENTICATED_DASHBOARD) {
-    throw new Error(
-      'The dashboard has no authentication yet. Wire Better Auth before deploying, or set ' +
-        'JOMMA_ALLOW_UNAUTHENTICATED_DASHBOARD=1 if the origin is protected some other way.',
-    )
-  }
+  const admin = await requireAdmin()
 
   const [counts, accounts] = await Promise.all([getSidebarCounts(), getAccountFooter()])
 
@@ -25,6 +21,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <SidebarProvider>
       <AppSidebar
         counts={counts}
+        admin={admin}
         accounts={accounts.map((account) => ({
           id: account.id,
           provider: account.provider,

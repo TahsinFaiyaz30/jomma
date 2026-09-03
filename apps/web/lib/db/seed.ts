@@ -3,7 +3,7 @@ import { env } from '@jomma/shared/env'
 import { eq } from 'drizzle-orm'
 import { generateApiKey, generateDeviceToken } from '../auth/tokens'
 import { db, pool } from './client'
-import { apiKeys, apps, devices, receivingAccounts, webhookEndpoints } from './schema'
+import { apiKeys, apps, devices, receivingAccounts, users, webhookEndpoints } from './schema'
 
 /**
  * Development seed. One app, one API key, one receiving account, one device.
@@ -16,6 +16,35 @@ import { apiKeys, apps, devices, receivingAccounts, webhookEndpoints } from './s
 async function main() {
   if (env().NODE_ENV === 'production') {
     throw new Error('Refusing to seed a production database.')
+  }
+
+  /*
+   * The admin account. Signup is disabled in the Better Auth config, so this is
+   * the only way one comes into existence. Created through the auth API rather
+   * than by inserting rows, so the password is hashed exactly the way sign-in
+   * expects it to be.
+   */
+  const adminEmail = process.env.JOMMA_ADMIN_EMAIL ?? 'admin@jomma.local'
+  const adminPassword = process.env.JOMMA_ADMIN_PASSWORD ?? randomBytes(12).toString('base64url')
+
+  const existingAdmin = await db.query.users.findFirst({ where: eq(users.email, adminEmail) })
+  let adminCreated = false
+
+  if (!existingAdmin) {
+    /*
+     * A signup-enabled instance, used only here.
+     *
+     * `createUser` lives in Better Auth's admin plugin and the internal adapter
+     * is not public API, so the stable way to mint the first admin is to stand
+     * up a second instance with signup on and call the ordinary sign-up
+     * endpoint. Same adapter, same tables, same scrypt hashing — so the account
+     * it creates is exactly what the real instance expects at sign-in.
+     */
+    const { seedAuth } = await import('../auth/seed-auth')
+    await seedAuth.api.signUpEmail({
+      body: { email: adminEmail, password: adminPassword, name: 'Admin' },
+    })
+    adminCreated = true
   }
 
   const [app] = await db
@@ -131,6 +160,8 @@ Seed complete.
 
   These are shown once. Copy them now.
 
+  Dashboard login     ${adminEmail}
+  Dashboard password  ${adminCreated ? adminPassword : '(unchanged — that admin already existed)'}
   API key             ${key.plaintext}
   Device token        ${deviceToken.plaintext}
   Device id           ${deviceId}

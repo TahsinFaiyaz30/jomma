@@ -4,7 +4,6 @@ import {
   Activity01Icon,
   Layers01Icon,
   ListViewIcon,
-  MoreVerticalIcon,
   RefreshIcon,
   Settings02Icon,
   SourceCodeIcon,
@@ -13,15 +12,6 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LocaleToggleItems } from '@/components/locale-toggle'
-import { ThemeToggleItems } from '@/components/theme-toggle'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   Sidebar,
   SidebarContent,
@@ -39,6 +29,7 @@ import type { MessageKey } from '@/lib/i18n/messages'
 import { useI18n } from '@/lib/i18n/provider'
 import type { SidebarCounts } from '@/lib/services/dashboard'
 import { type AccountFooterItem, AccountHealthFooter } from './account-health'
+import { UserMenu } from './user-menu'
 
 /**
  * Counts live on nav items as badges, where they are always visible — not as KPI
@@ -82,9 +73,11 @@ const NAV = [
 export function AppSidebar({
   counts,
   accounts,
+  admin,
 }: {
   counts: SidebarCounts
   accounts: AccountFooterItem[]
+  admin: { name: string; email: string }
 }) {
   const pathname = usePathname()
   const { t, number } = useI18n()
@@ -155,24 +148,7 @@ export function AppSidebar({
           <AccountHealthFooter accounts={accounts} />
         </div>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <SidebarMenuButton className="mt-1">
-                <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} className="size-4" />
-                <span>{t('nav.settings')}</span>
-              </SidebarMenuButton>
-            }
-          />
-          <DropdownMenuContent side="top" align="start" className="w-48">
-            {/* Theme lives in the user menu, not the top bar — set once, not adjusted. */}
-            <DropdownMenuLabel>{t('theme.label')}</DropdownMenuLabel>
-            <ThemeToggleItems />
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>{t('locale.label')}</DropdownMenuLabel>
-            <LocaleToggleItems />
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <UserMenu admin={admin} />
       </SidebarFooter>
     </Sidebar>
   )

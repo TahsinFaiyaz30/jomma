@@ -1,20 +1,32 @@
 import type { Metadata } from 'next'
-import { StubPage } from '@/components/dash/stub-page'
+import { PageHeader } from '@/components/dash/page-header'
+import { QueueList } from '@/components/dash/queue-list'
+import { getQueue } from '@/lib/services/queue'
 
 export const metadata: Metadata = { title: 'Queue' }
+export const dynamic = 'force-dynamic'
 
-export default function QueuePage() {
+/**
+ * Payments that need a human, oldest first.
+ *
+ * The matcher escalates here rather than ranking two close candidates.
+ * Approving calls straight into `applyPayment` — the same transaction path as
+ * automatic matching, not a second implementation of it.
+ */
+export default async function QueuePage() {
+  const items = await getQueue()
+
   return (
-    <StubPage
-      title="Queue"
-      purpose="Payments that need a human, oldest first. The matcher escalates here rather than guessing between two candidates."
-      planned={[
-        'Each row shows the incoming payment beside the candidate intents the scorer found',
-        'Discrepancy highlighted: amount delta, reference edit distance, sender mismatch',
-        'One-click approve and reject, operable with `a` and `r` — never requires a pointer',
-        'Approval calls applyPayment(), the same transaction path as automatic matching',
-        'Waiting time per item, so the oldest is obviously the oldest',
-      ]}
-    />
+    <div className="flex h-svh min-h-0 flex-col">
+      <PageHeader
+        title="Queue"
+        description={
+          items.length === 0
+            ? 'Nothing waiting'
+            : `${items.length} payment${items.length === 1 ? '' : 's'} waiting, oldest first`
+        }
+      />
+      <QueueList items={items} />
+    </div>
   )
 }

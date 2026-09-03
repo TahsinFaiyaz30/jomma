@@ -174,7 +174,9 @@
         "apps/web/lib/services/apply.ts",
         "apps/web/lib/services/submissions.ts",
         "apps/web/lib/services/intents.ts",
-        "packages/sdk/src/client.ts"
+        "packages/sdk/src/client.ts",
+        "apps/web/components/dash/queue-list.tsx",
+        "apps/web/lib/matching/diagnose.ts"
       ],
       "linter": {
         "rules": {
