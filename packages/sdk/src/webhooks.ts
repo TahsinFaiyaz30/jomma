@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { SignatureVerificationError } from './errors'
-import type { PaymentEventData, WebhookEvent } from './types'
+import { SignatureVerificationError } from './errors.js'
+import type { PaymentEventData, WebhookEvent } from './types.js'
 
 /** Reject anything signed more than five minutes ago. */
 export const DEFAULT_TOLERANCE_SECONDS = 300

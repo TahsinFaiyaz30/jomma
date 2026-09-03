@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { SignatureVerificationError } from './errors'
-import { constructEvent, signPayload } from './webhooks'
+import { SignatureVerificationError } from './errors.js'
+import { constructEvent, signPayload } from './webhooks.js'
 
 const SECRET = 'whsec_test_0123456789abcdef0123456789abcdef'
 

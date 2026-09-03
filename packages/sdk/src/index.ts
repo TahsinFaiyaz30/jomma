@@ -1,5 +1,5 @@
-export { Jomma, type JommaOptions } from './client'
-export { JommaError, SignatureVerificationError } from './errors'
+export { Jomma, type JommaOptions } from './client.js'
+export { JommaError, SignatureVerificationError } from './errors.js'
 export type {
   AccountSummary,
   AppliedPayment,
@@ -18,9 +18,9 @@ export type {
   SubmissionResult,
   WebhookEvent,
   WebhookEventType,
-} from './types'
+} from './types.js'
 export {
   constructEvent,
   DEFAULT_TOLERANCE_SECONDS,
   signPayload,
-} from './webhooks'
+} from './webhooks.js'

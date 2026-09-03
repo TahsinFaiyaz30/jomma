@@ -1,4 +1,4 @@
-import type { ErrorCode } from './types'
+import type { ErrorCode } from './types.js'
 
 /**
  * Every Jomma error carries a `request_id`. Keep it — it is what turns a support

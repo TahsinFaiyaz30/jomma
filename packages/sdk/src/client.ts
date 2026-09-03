@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import { JommaError } from './errors'
+import { JommaError } from './errors.js'
 import type {
   AccountSummary,
   CreateIntentParams,
   Intent,
   SubmissionParams,
   SubmissionResult,
-} from './types'
-import { constructEvent } from './webhooks'
+} from './types.js'
+import { constructEvent } from './webhooks.js'
 
 export interface JommaOptions {
   apiKey: string
