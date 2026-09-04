@@ -42,6 +42,17 @@ export const GET = route(async (request, context) => {
       amount: view.amountCents,
       received_amount: view.receivedAmountCents,
       shortfall: view.shortfallCents,
+      excess: view.excessCents,
+      // Included so a split payment landing mid-poll updates the list the buyer
+      // is looking at, rather than only moving the outstanding total.
+      payments: view.payments.map((payment) => ({
+        trx_id: payment.trxId,
+        amount: payment.amountCents,
+        applied_at: payment.appliedAt,
+      })),
+      receiving_msisdn: view.receivingMsisdn,
+      provider: view.provider,
+      ref_code: view.refCode,
       expires_at: view.expiresAt,
       return_url: view.returnUrl,
       request_id: context.requestId,

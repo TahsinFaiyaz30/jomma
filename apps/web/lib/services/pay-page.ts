@@ -31,6 +31,14 @@ export interface PayView {
   /** The public id, echoed back so the poller knows what it is watching. */
   id: string
   status: 'open' | 'partial' | 'matched' | 'expired' | 'cancelled'
+  /**
+   * How much more than the asking price arrived, if any.
+   *
+   * `over` is a completed state — the ref code is consumed and
+   * `payment.overpaid` has already fired — so the buyer is done. They are still
+   * told, because being out of pocket and not knowing is worse than knowing.
+   */
+  excessCents: number
 
   provider: 'bkash' | 'nagad'
   /** Local format, 01XXXXXXXXX — what the buyer types into bKash. */
@@ -87,7 +95,14 @@ function deriveStatus(
   receivedCents: number,
   amountCents: number,
 ): PayView['status'] {
-  if (status === 'matched' || status === 'paid') return 'matched'
+  /*
+   * `over` is a *completed* state, not a problem to solve. applyPayment sets it
+   * when more arrived than was asked for: the reference code is consumed,
+   * matchedAt is stamped and `payment.overpaid` has already gone to the store.
+   * Missing it here left a buyer who paid too much looking at a page still
+   * asking them to pay.
+   */
+  if (status === 'matched' || status === 'over' || status === 'paid') return 'matched'
   if (status === 'cancelled') return 'cancelled'
   if (status === 'expired') return 'expired'
   if (expiresAt.getTime() <= Date.now()) return 'expired'
@@ -146,6 +161,7 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
     amountCents: row.amountCents,
     receivedAmountCents: row.receivedAmountCents,
     shortfallCents: Math.max(0, row.amountCents - row.receivedAmountCents),
+    excessCents: Math.max(0, row.receivedAmountCents - row.amountCents),
     refCode: row.refCode,
     payments: applied.map((payment) => ({
       trxId: payment.trxId,
