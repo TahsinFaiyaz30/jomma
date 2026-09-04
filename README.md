@@ -91,7 +91,7 @@ apps/
     lib/services/        Money logic — one implementation of each decision
     lib/db/schema/       Drizzle schema
   worker/      pg-boss — webhook delivery, expiry sweeps, health alerts
-  android/     Kotlin notifier. Written, never compiled — see its README.
+  android/     Kotlin notifier. Builds and runs; unproven on real hardware.
 packages/
   shared/      Types, env loading, id codec, webhook contract
   sdk/         Typed client for client apps
@@ -144,8 +144,10 @@ Two of these are blocked on you, not on code.
   raw text, fail parsing loudly, and wait for a human — never dropped, and
   recoverable by re-parsing once the format is known.
   (AGENTS.md open decision #2.)
-- **The Android app has never been compiled.** Written from docs/android.md on a
-  machine with no Android SDK. See [apps/android/README.md](apps/android/README.md).
+- **The Android app builds and runs, but only on an emulator.** No emulator has
+  a bKash app, a SIM, or a camera to scan a provisioning QR, so real capture,
+  reboot survival and provisioning are still unproven on hardware.
+  See [apps/android/README.md](apps/android/README.md).
 - **No deploy config.** The compose file runs Postgres for development only;
   the deployment target is still open (AGENTS.md #1).
 - Rate limiting is in-process, so it is per-instance. Fine for one VPS; the

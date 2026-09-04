@@ -8,25 +8,35 @@ Spec: [docs/android.md](../../docs/android.md).
 
 ---
 
-## ⚠ This has never been compiled
+## What has and hasn't been verified
 
-Written from the spec, but the machine it was written on has no Android SDK, no
-Gradle, and Java 8. **Nothing here has been built, installed, or run.** Expect to
-fix compile errors on first build — API-level details and library versions are
-the likely culprits, not the structure.
+**Built and run.** It compiles to a ~14 MB APK, installs on an API 36 emulator,
+launches, and renders all three screens with no crash in logcat. Material You
+dynamic colour is working — the app takes its palette from the wallpaper.
 
-The server side it talks to *is* verified end to end: provisioning, capture,
-dedupe, heartbeat, and commands all have passing tests against a real database.
-So the contract this app codes against is known-good even though the app is not.
+**Not verified on real hardware, and that is the part that matters.** An emulator
+has no bKash app, no SIM, and no camera to scan a provisioning QR with, so none
+of the following has ever actually run:
+
+- capturing a real notification or SMS
+- the Room queue surviving a reboot
+- the foreground service surviving an OEM's battery killer
+- provisioning by QR
+- token rotation on a live device
+
+The server side of every one of those *is* verified against a real database —
+provisioning, capture, dedupe, heartbeat, command delivery and rotation all have
+passing tests. So the contract is known-good; it is the device half that is
+unproven.
 
 Before trusting it:
 
-1. Open in Android Studio, let it sync, fix whatever the compiler says.
-2. Sideload onto the dedicated phone.
-3. Grant notification access, SMS, and the battery exemption from the Setup tab.
-4. Provision by scanning the QR from **Accounts → Add device** in the dashboard.
-5. Send a real ৳10 transfer and watch it land in the Feed.
-6. **Reboot the phone** and confirm it comes back on its own. Do not assume.
+1. Sideload onto the dedicated phone.
+2. Grant notification access, SMS, and the battery exemption from the Setup tab.
+3. Provision by scanning the QR from **Accounts → Add device** in the dashboard.
+4. Send a real ৳10 transfer and watch it land in the Feed.
+5. **Reboot the phone** and confirm it comes back on its own. Do not assume.
+6. Leave it overnight and check the dashboard has not raised a heartbeat gap.
 
 ---
 
@@ -38,7 +48,28 @@ cd apps/android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Needs JDK 17+ and the Android SDK (compileSdk 35, minSdk 26).
+Needs JDK 17+ and an Android SDK with platform 37. Android Studio's bundled JBR
+works:
+
+```bash
+export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+```
+
+`local.properties` is machine-local and gitignored. If you need to write one by
+hand, **use forward slashes** — a Java properties file treats a single backslash
+as an escape, so `C:\Users\...` parses to `C:Users...` and the build fails with
+an unhelpful "Invalid file path":
+
+```properties
+sdk.dir=C:/Users/you/AppData/Local/Android/Sdk
+```
+
+### Versions
+
+AGP 9.4 / Gradle 9.7.1 / Kotlin 2.3.21 / compileSdk 37, minSdk 26. That stack is
+not arbitrary — it is the oldest one that builds against the SDK platform Android
+Studio installs today. AGP 9 has Kotlin support built in, so there is
+deliberately no `kotlin-android` plugin; adding one back will fail the build.
 
 ---
 
