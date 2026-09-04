@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Running it — Jomma</title>
+<meta name="description" content="Local setup, deploying, and the phone app." />
+<meta name="color-scheme" content="light dark" />
+<meta property="og:title" content="Running it — Jomma" />
+<meta property="og:description" content="Local setup, deploying, and the phone app." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23292524'/><text y='71' x='50' text-anchor='middle' font-size='58' font-family='Georgia,serif' fill='white'>J</text></svg>" />
+<link rel="stylesheet" href="assets/docs.css" />
+<script>
+  // Applied before first paint so a reader who chose dark never sees a flash of
+  // light. Inline and tiny for that reason; everything else is in docs.js.
+  try {
+    const t = localStorage.getItem('jomma-theme')
+    if (t) document.documentElement.setAttribute('data-theme', t)
+  } catch {}
+</script>
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="index.html"><span class="mark">J</span> Jomma</a>
+  <nav>
+    <a class="hide-sm" href="quickstart.html">Quick start</a>
+    <a class="hide-sm" href="api.html">API</a>
+    <a class="hide-sm" href="webhooks.html">Webhooks</a>
+    <a class="hide-sm" href="https://github.com/TahsinFaiyaz30/jomma">GitHub</a>
+    <button type="button" class="iconbtn" id="theme-btn" aria-label="Toggle colour theme"><svg class="i" data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.6M12 19.4V22M4.2 4.2l1.9 1.9M17.9 17.9l1.9 1.9M2 12h2.6M19.4 12H22M4.2 19.8l1.9-1.9M17.9 6.1l1.9-1.9"/></svg><svg class="i" data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="i" data-theme-icon="auto" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6v16.8a8.4 8.4 0 0 0 0-16.8z" fill="currentColor" stroke="none"/></svg></button>
+    <button type="button" class="iconbtn" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </nav>
+</header>
+
+<div class="shell">
+<aside id="sidebar">
+    <h4>Start here</h4>
+    <a href="index.html">Overview</a>
+    <a href="quickstart.html">Quick start</a>
+    <h4>Reference</h4>
+    <a href="api.html">API reference</a>
+    <a href="webhooks.html">Webhooks</a>
+    <h4>Understanding it</h4>
+    <a href="matching.html">Matching rules</a>
+    <h4>Operating it</h4>
+    <a href="self-hosting.html" aria-current="page">Running it</a>
+    <a class="sub" href="#local">Running locally</a>
+    <a class="sub" href="#env">Configuration</a>
+    <a class="sub" href="#dashboard">The dashboard</a>
+    <a class="sub" href="#phone">The phone app</a>
+    <a class="sub" href="#deploy">Deploying</a>
+    <a class="sub" href="#free">The free tier</a>
+    <a class="sub" href="#ops">Backups & upgrades</a>
+    <a href="testing.html">Testing & status</a>
+</aside>
+
+<main>
+<section id="top">
+  <p class="eyebrow">Operating it</p>
+  <h1>Running Jomma</h1>
+  <p class="lede">
+    Jomma is self-hosted. You run the server, you hold the database, and the
+    phone with your SIM in it is yours. Nothing about a payment leaves your
+    infrastructure.
+  </p>
+</section>
+
+<section id="local">
+  <h2>Running locally</h2>
+  <p>Needs <strong>Node 22+</strong>, <strong>pnpm</strong> and <strong>Docker</strong>.</p>
+
+  <div class="code" data-lang="bash"><pre>git clone https://github.com/TahsinFaiyaz30/jomma
+cd jomma
+pnpm install
+cp .env.example .env</pre></div>
+
+  <p>Generate the two secrets that <code>.env</code> needs, and paste them in:</p>
+  <div class="code" data-lang="bash"><pre>node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"</pre></div>
+
+  <div class="code" data-lang="bash"><pre>pnpm db:up        # Postgres 18 in Docker, on localhost:5433
+pnpm db:migrate   # create the schema
+pnpm db:seed      # prints an API key and device tokens ONCE</pre></div>
+
+  <p>Then, in two terminals:</p>
+  <div class="code" data-lang="bash"><pre>pnpm dev          # dashboard, API and pay page on http://localhost:3000
+pnpm dev:worker   # the scheduler</pre></div>
+
+  <p>
+    Sign in at <code>/login</code> with the admin email and password the seed
+    printed. <strong>There is no signup</strong> &mdash; accounts come from the
+    seed or from another admin, and the sign-up endpoint is disabled outright.
+  </p>
+
+  <div class="note warn"><p>
+    <strong>Postgres 18 is required.</strong> Primary keys default to
+    <code>uuidv7()</code>, which is core in 18 and absent in 17, so migrations
+    fail immediately on an older server. On Neon, choose version 18 when you
+    create the project &mdash; the default may be older.
+  </p></div>
+
+  <div class="note danger"><p>
+    <strong>The seed creates demo data.</strong> Two demo receiving accounts and
+    a demo app, so the smoke suites have something to work with. Delete them from
+    the dashboard before you point a real phone at this.
+  </p></div>
+
+  <p>Port 3000 taken? Use another, and set <code>APP_URL</code> to match:</p>
+  <div class="code" data-lang="bash"><pre>PORT=3100 pnpm dev</pre></div>
+  <p>
+    If <code>APP_URL</code> disagrees with the address you are actually using,
+    sign-in fails the origin check and looks exactly like a wrong password.
+  </p>
+</section>
+
+<section id="env">
+  <h2>Configuration</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Variable</th><th>Required</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>DATABASE_URL</code></td><td>yes</td><td>Postgres 18. Managed providers want <code>?sslmode=require</code>.</td></tr>
+      <tr><td><code>AUTH_SECRET</code></td><td>yes</td><td>Signs dashboard sessions. Also the credential for the internal sweep endpoint.</td></tr>
+      <tr><td><code>WEBHOOK_SIGNING_SECRET</code></td><td>yes</td><td>Signs outbound webhooks and verifies inbound ingest calls.</td></tr>
+      <tr><td><code>APP_URL</code></td><td>yes in production</td><td>The instance's own public URL. Used for the sign-in origin check, device provisioning, and the scheduler.</td></tr>
+      <tr><td><code>DATABASE_POOL_MAX</code></td><td>no</td><td>Lower it on free Postgres tiers, which cap connections hard. <code>5</code> is a safe default there.</td></tr>
+      <tr><td><code>LOG_LEVEL</code></td><td>no</td><td><code>info</code> in production, <code>debug</code> when something is wrong.</td></tr>
+      <tr><td><code>FEATURE_MESSAGES_BRIDGE</code></td><td>no</td><td>Leave <code>false</code>. The bridge is unproven and best-effort.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><p>
+    Secrets are validated at boot. A missing or obviously-wrong value stops the
+    process with a message naming the variable, rather than failing later on a
+    request that involved money.
+  </p></div>
+</section>
+
+<section id="dashboard">
+  <h2>The dashboard</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Screen</th><th>What it is for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Feed</strong></td><td>Every capture as it arrives, live and virtualised. Where you look first when something is wrong.</td></tr>
+      <tr><td><strong>Queue</strong></td><td>Payments that did not auto-match and need a human. Approve or reject with <code>a</code> and <code>r</code>.</td></tr>
+      <tr><td><strong>Intents</strong></td><td>One order's whole life: the ledger, the audit timeline, and reversal.</td></tr>
+      <tr><td><strong>Accounts</strong></td><td>Receiving numbers, their phones, provisioning QRs, token rotation and limits.</td></tr>
+      <tr><td><strong>Reconcile</strong></td><td>Integrity checks and CSV statement import, for catching what every other path missed.</td></tr>
+      <tr><td><strong>Apps</strong></td><td>API keys, webhook endpoints, the delivery log, and manual replay.</td></tr>
+      <tr><td><strong>Settings</strong></td><td>Which ingest adapters are enabled, and observed usage for each.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="phone">
+  <h2>The phone app</h2>
+  <p>
+    <code>apps/android/</code> is a Kotlin app that forwards payment
+    confirmations to your server. It is the only moving part that is not an
+    ordinary web service.
+  </p>
+  <h3>Setting one up</h3>
+  <ol>
+    <li>Build and install the APK on a phone holding your receiving SIM.</li>
+    <li>In the dashboard, go to <b>Accounts</b>, pick the receiving number, and add a device. A provisioning QR appears and is valid for fifteen minutes.</li>
+    <li>Scan it from the app. It exchanges the one-time code for a long-lived device token, and the one-time value is burned.</li>
+    <li>Grant notification-listener and SMS-read permission. Run both paths &mdash; they fail independently.</li>
+    <li>Send a small transfer and watch it appear on the <b>Feed</b>.</li>
+  </ol>
+  <div class="note"><p>
+    <strong>Tokens are hashed at rest</strong>, scoped to one receiving account,
+    and individually revocable. A screenshot of a provisioning QR left in a chat
+    is not a way into the capture endpoint, and a lost phone costs one device
+    rather than the integration.
+  </p></div>
+  <h3>Keeping it alive</h3>
+  <ul>
+    <li>Turn off battery optimisation for the app, or Android will eventually stop it.</li>
+    <li>Leave it charging. The app survives reboot, but a dead phone captures nothing.</li>
+    <li>Watch for <code>account.degraded</code> &mdash; a silent phone raises it, and that is your early warning that payments may be arriving unseen.</li>
+  </ul>
+</section>
+
+<section id="deploy">
+  <h2>Deploying</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Piece</th><th>Where</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr><td>API, dashboard, pay page</td><td>Render web service, Singapore</td><td>$7/mo, or free with a caveat</td></tr>
+      <tr><td>Postgres 18</td><td>Neon, Singapore</td><td>free</td></tr>
+      <tr><td>Scheduler</td><td>cron-job.org calling the sweep endpoint</td><td>free</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>
+    <code>render.yaml</code> in the repo is a working blueprint. There is
+    <strong>no separate worker to deploy</strong>: every scheduled job lives in
+    the web app under <code>lib/jobs</code> and is reached through one
+    authenticated endpoint, so a cron ping does exactly what the worker does.
+  </p>
+  <div class="code bare" data-lang="http"><pre>POST /api/internal/sweep?group=all</pre></div>
+
+  <p>Run the migrations and create the first admin from your own machine, once:</p>
+  <div class="code" data-lang="bash"><pre>DATABASE_URL='postgres://...?sslmode=require' pnpm db:migrate
+
+DATABASE_URL='postgres://...?sslmode=require' \
+JOMMA_ADMIN_EMAIL='you@example.com' \
+JOMMA_ADMIN_PASSWORD='...' \
+pnpm db:seed</pre></div>
+
+  <div class="note warn"><p>
+    <strong>Never use Render's own free Postgres.</strong> It is deleted after 30
+    days. That is not a database to put payment records in.
+  </p></div>
+</section>
+
+<section id="free">
+  <h2>The free tier, honestly</h2>
+  <p>A fully free deployment works. Two consequences you are accepting:</p>
+  <h3>A sleeping web service cannot receive a payment</h3>
+  <p>
+    Render's free tier sleeps after 15 minutes and takes 30&ndash;60 seconds to
+    wake. Nothing is lost &mdash; the phone retries from its local queue &mdash;
+    but a buyer watching your checkout waits for that cold start. A one-minute
+    cron ping keeps it awake in practice.
+  </p>
+  <h3>The cron interval is your webhook latency</h3>
+  <p>
+    Webhook delivery is driven entirely by the sweep, so however often the cron
+    runs is how long your store waits to hear about a payment. That interacts
+    with Neon's free compute allowance:
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Cron interval</th><th>Neon compute / month</th><th>Consequence</th></tr></thead>
+    <tbody>
+      <tr><td>1 minute</td><td>~180 CU-hours</td><td>Exceeds the 100 CU-hour free cap around day 16, and the database suspends.</td></tr>
+      <tr><td>10&ndash;15 minutes</td><td>~60&ndash;90 CU-hours</td><td>Fits, but your store waits that long for the webhook.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note ok"><p>
+    <strong>Buyers are unaffected either way.</strong> Matching happens inline on
+    capture and the pay page polls every 2.5 seconds, so a buyer sees their
+    confirmation immediately. Only the server-to-server notification waits.
+  </p></div>
+  <p>
+    For real money moving through it, the $7 Render Starter plan is the one
+    upgrade that matters: it stops the web service sleeping, which is the only
+    part a customer can see.
+  </p>
+</section>
+
+<section id="ops">
+  <h2>Backups and upgrades</h2>
+  <h3>Migrations are not automatic</h3>
+  <p>
+    On purpose. A migration that rewrites a payments table should be something a
+    person runs while watching, not something a deploy does on its way past. Run
+    <code>pnpm db:migrate</code> against production yourself, then deploy.
+  </p>
+  <h3>What to back up</h3>
+  <p>
+    The database, and nothing else. The application is stateless; every payment,
+    intent, ledger row and audit entry is in Postgres. Neon keeps point-in-time
+    restore on its free plan, which covers the common accident.
+  </p>
+  <h3>What not to lose</h3>
+  <p>
+    <code>WEBHOOK_SIGNING_SECRET</code> and <code>AUTH_SECRET</code>. Rotating
+    the first invalidates every registered endpoint's verification until you
+    update them; rotating the second signs everyone out.
+  </p>
+</section>
+<nav class="pagenav">
+  <a href="matching.html"><small>Previous</small><b>Matching rules</b></a>
+  <a class="next" href="testing.html"><small>Next</small><b>Testing & status</b></a>
+</nav>
+</main>
+</div>
+
+<footer>
+  Jomma &mdash; payment verification for Bangladeshi mobile financial services.
+  <br />It never moves money and never sees a PIN.
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jomma</title>
+<meta name="description" content="What Jomma is, how it works, and which providers it supports." />
+<meta name="color-scheme" content="light dark" />
+<meta property="og:title" content="Jomma" />
+<meta property="og:description" content="What Jomma is, how it works, and which providers it supports." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23292524'/><text y='71' x='50' text-anchor='middle' font-size='58' font-family='Georgia,serif' fill='white'>J</text></svg>" />
+<link rel="stylesheet" href="assets/docs.css" />
+<script>
+  // Applied before first paint so a reader who chose dark never sees a flash of
+  // light. Inline and tiny for that reason; everything else is in docs.js.
+  try {
+    const t = localStorage.getItem('jomma-theme')
+    if (t) document.documentElement.setAttribute('data-theme', t)
+  } catch {}
+</script>
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="index.html"><span class="mark">J</span> Jomma</a>
+  <nav>
+    <a class="hide-sm" href="quickstart.html">Quick start</a>
+    <a class="hide-sm" href="api.html">API</a>
+    <a class="hide-sm" href="webhooks.html">Webhooks</a>
+    <a class="hide-sm" href="https://github.com/TahsinFaiyaz30/jomma">GitHub</a>
+    <button type="button" class="iconbtn" id="theme-btn" aria-label="Toggle colour theme"><svg class="i" data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.6M12 19.4V22M4.2 4.2l1.9 1.9M17.9 17.9l1.9 1.9M2 12h2.6M19.4 12H22M4.2 19.8l1.9-1.9M17.9 6.1l1.9-1.9"/></svg><svg class="i" data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="i" data-theme-icon="auto" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6v16.8a8.4 8.4 0 0 0 0-16.8z" fill="currentColor" stroke="none"/></svg></button>
+    <button type="button" class="iconbtn" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </nav>
+</header>
+
+<div class="shell">
+<aside id="sidebar">
+    <h4>Start here</h4>
+    <a href="index.html" aria-current="page">Overview</a>
+    <a class="sub" href="#what">What it is</a>
+    <a class="sub" href="#how">How it works</a>
+    <a class="sub" href="#providers">Providers</a>
+    <a class="sub" href="#where">Where to go next</a>
+    <a href="quickstart.html">Quick start</a>
+    <h4>Reference</h4>
+    <a href="api.html">API reference</a>
+    <a href="webhooks.html">Webhooks</a>
+    <h4>Understanding it</h4>
+    <a href="matching.html">Matching rules</a>
+    <h4>Operating it</h4>
+    <a href="self-hosting.html">Running it</a>
+    <a href="testing.html">Testing & status</a>
+</aside>
+
+<main>
+<section id="top">
+  <h1>Money lands on your phone.<br />Jomma tells you whose order it was.</h1>
+  <p class="lede">
+    Your customer sends a mobile-money transfer. Jomma watches your receiving
+    account, works out which order that money was for, and tells your store with
+    a signed webhook &mdash; in seconds, without anybody reading SMS by hand.
+  </p>
+
+  <div class="pills">
+    <span class="pill on">No gateway approval</span>
+    <span class="pill on">No merchant account</span>
+    <span class="pill">Never touches a PIN</span>
+    <span class="pill">Never moves money</span>
+    <span class="pill">Self-hosted</span>
+  </div>
+
+  <div class="cta">
+    <a class="btn primary" href="quickstart.html">Start integrating</a>
+    <a class="btn" href="https://github.com/TahsinFaiyaz30/jomma">View on GitHub</a>
+  </div>
+</section>
+
+<section id="what">
+  <h2>What it is</h2>
+  <p>
+    Jomma is <strong>not a payment gateway</strong>. There is no integration with
+    any provider's servers and nothing to get approved. It reads the confirmation
+    messages that arrive on a phone you already control, and answers one question
+    with high confidence:
+  </p>
+  <div class="note"><p><strong>Which order does this payment belong to?</strong></p></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Jomma does</th><th>Jomma does not</th></tr></thead>
+    <tbody>
+      <tr><td>Issue a unique reference code per order</td><td>Move, hold, or refund money</td></tr>
+      <tr><td>Watch your receiving numbers for incoming transfers</td><td>Ask for or store anyone's PIN</td></tr>
+      <tr><td>Match a transfer to an order &mdash; or refuse to</td><td>Guess when it is unsure</td></tr>
+      <tr><td>Tell your store with a signed webhook</td><td>Need gateway approval</td></tr>
+      <tr><td>Handle part payments and overpayments</td><td>Charge a percentage of anything</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Who it is for</h3>
+  <p>
+    Anyone taking mobile-money payments in Bangladesh who cannot, or would rather
+    not, go through a payment gateway: a shop on social media, a small
+    storefront, a school collecting fees, a SaaS billing local customers. If you
+    already accept transfers and someone currently checks the phone by hand, that
+    person is what Jomma replaces.
+  </p>
+</section>
+
+<section id="how">
+  <h2>How it works</h2>
+  <div class="flow">
+    <div><div><b>Buyer checks out</b><span>Your store calls <code>POST /v1/intents</code> and gets a reference code &mdash; <code>7CX4Z8ZS</code>.</span></div></div>
+    <div><div><b>Buyer pays</b><span>They open their wallet app, send the exact amount to your number, and type that code into the <b>Reference</b> field.</span></div></div>
+    <div><div><b>The phone sees it</b><span>"You have received Tk 1,250.00 from 018... Ref 7CX4Z8ZS. TrxID DI4760E7CN"</span></div></div>
+    <div><div><b>Jomma matches it</b><span>Reference, sender, time window and receiving account all have to agree. If any one disagrees, it refuses rather than guessing.</span></div></div>
+    <div><div><b>Your store is told</b><span>A signed <code>payment.succeeded</code> webhook lands on your endpoint.</span></div></div>
+  </div>
+
+  <h3>Step three, in more detail</h3>
+  <p>
+    This is the part people ask about, because it is the only part that is not an
+    ordinary web service. An Android phone with your SIM in it runs the Jomma
+    notifier app. When a payment confirmation arrives, the app forwards it to
+    your server over HTTPS with a device token.
+  </p>
+  <ul>
+    <li><strong>Two independent paths.</strong> The app reads the provider's
+      <em>notification</em> and its <em>SMS</em>. They fail for different reasons,
+      so running both means one path breaking does not lose a payment.</li>
+    <li><strong>Local queue first.</strong> Every capture is written to the
+      phone's own database before it is sent, and only marked sent on a
+      <code>2xx</code>. A flat battery, a dead network or a sleeping server
+      delays a payment rather than losing it.</li>
+    <li><strong>Nothing is dropped on a parse failure.</strong> The raw message
+      is stored before anything tries to read it, so a provider changing its
+      wording costs an alert and a manual review, and the message can be
+      re-parsed later.</li>
+  </ul>
+  <p>
+    There is also a signed webhook endpoint (<code>POST /ingest/v1/webhook</code>)
+    if you have some other source of the same messages, and a manual paste box in
+    the dashboard for when everything else is down.
+  </p>
+
+  <div class="note warn"><p>
+    <strong>One phone is a single point of failure</strong> for your whole
+    revenue stream, which is why two receiving accounts are seeded by default. A
+    degraded account is routed around rather than blocking checkout.
+  </p></div>
+</section>
+
+<section id="providers">
+  <h2>Providers</h2>
+  <p class="lede">Everything except one file per provider is provider-agnostic.</p>
+  <p>
+    Intents, reference codes, the matching rules, the ledger, webhooks, the
+    dashboard and the hosted checkout know nothing about any particular wallet.
+    They deal in "a message arrived on a receiving account". What is
+    provider-specific is a <strong>parser</strong>: the regexes that turn one
+    provider's confirmation text into an amount, a sender, a reference and a
+    transaction id.
+  </p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Provider</th><th>Status</th><th>What is missing</th></tr></thead>
+    <tbody>
+      <tr><td><strong>bKash</strong></td><td>Live, verified against real transfers</td>
+          <td>Nothing. Three live captures in the fixtures; the app and <code>*247#</code> are both confirmed.</td></tr>
+      <tr><td><strong>Nagad</strong></td><td>Stubbed, deliberately</td>
+          <td>The message format. The parser fails loudly rather than guessing, and checkout lists Nagad as unavailable.</td></tr>
+      <tr><td>Banks, cards</td><td>Not started</td>
+          <td>The checkout method picker already lists them as unsupported, so adding one does not change the buyer's flow.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Adding one</h3>
+  <ol>
+    <li>Send a small transfer and save the <strong>exact</strong> confirmation text.</li>
+    <li>Add it to <code>apps/web/lib/parsers/fixtures/</code> with the fields you expect.</li>
+    <li>Write the regexes in <code>apps/web/lib/parsers/&lt;provider&gt;.ts</code> until it passes.</li>
+    <li>Optionally add a walkthrough in <code>apps/web/components/pay/guides.tsx</code>.
+      A provider with no guide degrades to plain instructions rather than showing
+      somebody else's screens.</li>
+  </ol>
+  <div class="note"><p>
+    <strong>Fixtures come first, on purpose.</strong> A parser written against a
+    guess is a parser that silently mis-reads money. Every provider starts from a
+    real captured message or it does not ship.
+  </p></div>
+</section>
+
+<section id="where">
+  <h2>Where to go next</h2>
+  <div class="grid2">
+    <a class="card" href="quickstart.html"><h3>Quick start</h3><p>Three steps, with working code, from checkout to fulfilment.</p></a>
+    <a class="card" href="api.html"><h3>API reference</h3><p>Every endpoint, field, status and error code.</p></a>
+    <a class="card" href="webhooks.html"><h3>Webhooks</h3><p>The nine events, signature verification, and retry behaviour.</p></a>
+    <a class="card" href="matching.html"><h3>Matching rules</h3><p>The six conditions a payment must satisfy, and why each exists.</p></a>
+    <a class="card" href="self-hosting.html"><h3>Running it</h3><p>Local setup, deployment, and the notifier app.</p></a>
+    <a class="card" href="testing.html"><h3>Testing &amp; status</h3><p>The suites, and an honest list of what is unfinished.</p></a>
+  </div>
+</section>
+<nav class="pagenav">
+  <span></span>
+  <a class="next" href="quickstart.html"><small>Next</small><b>Quick start</b></a>
+</nav>
+</main>
+</div>
+
+<footer>
+  Jomma &mdash; payment verification for Bangladeshi mobile financial services.
+  <br />It never moves money and never sees a PIN.
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

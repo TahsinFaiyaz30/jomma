@@ -127,9 +127,12 @@ export function admits(payment: ObservedPayment, intent: CandidateIntent): Refus
    *
    * Money that moved before the buyer even opened the page cannot be for this
    * order, and money that moved after it expired is for whatever they did next.
-   * Both bounds are real protection rather than tidiness: a reference code is
-   * reissued after its cooldown, so without this a payment carrying a recycled
-   * code could be attached to the wrong intent entirely.
+   *
+   * Both bounds are real protection rather than tidiness. A buyer who pays the
+   * same shop twice in a day has two references live at different times, and
+   * the clock is what stops a late-arriving capture for the first landing on
+   * the second. Measured against the provider's own message timestamp, not when
+   * Jomma saw it, so a phone that was off for an hour still matches correctly.
    */
   const at = paymentTime(payment).getTime()
   if (at < intent.payClickedAt.getTime() - WINDOW_GRACE_MS) return 'before_window'

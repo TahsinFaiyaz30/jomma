@@ -67,12 +67,30 @@ export interface CreateIntentParams {
   /** Poisha. Integer, always. */
   amount: number
   clientReference: string
-  /** Optional. Boosts match confidence when the buyer pays from this number. */
+  /**
+   * The number the buyer will send from.
+   *
+   * Required in practice, despite being optional here. Automatic matching
+   * refuses a payment whose intent has no declared sender — an intent without
+   * this can only ever be settled by the buyer submitting a TrxID by hand.
+   *
+   * Set it from your server if you know it. If you do not, use the hosted pay
+   * page, which asks the buyer before showing them anything to pay.
+   */
   payerMsisdn?: string | null
   provider?: ProviderPreference
   /** Default 300, max 3600. */
   ttlSeconds?: number
   metadata?: Record<string, unknown>
+  /**
+   * Where the hosted pay page sends the buyer afterwards.
+   *
+   * Both are checked against the hostnames registered for your app in
+   * Apps → Hosted checkout. An app with none registered gets no redirect at
+   * all, rather than any redirect it asks for.
+   */
+  returnUrl?: string | null
+  cancelUrl?: string | null
   /**
    * Replaying the same key within 24 hours returns the original intent rather
    * than allocating a second reference code. Generated per call if omitted,

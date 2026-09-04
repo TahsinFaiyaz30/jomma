@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Matching rules — Jomma</title>
+<meta name="description" content="How Jomma decides which order a payment belongs to." />
+<meta name="color-scheme" content="light dark" />
+<meta property="og:title" content="Matching rules — Jomma" />
+<meta property="og:description" content="How Jomma decides which order a payment belongs to." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23292524'/><text y='71' x='50' text-anchor='middle' font-size='58' font-family='Georgia,serif' fill='white'>J</text></svg>" />
+<link rel="stylesheet" href="assets/docs.css" />
+<script>
+  // Applied before first paint so a reader who chose dark never sees a flash of
+  // light. Inline and tiny for that reason; everything else is in docs.js.
+  try {
+    const t = localStorage.getItem('jomma-theme')
+    if (t) document.documentElement.setAttribute('data-theme', t)
+  } catch {}
+</script>
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="index.html"><span class="mark">J</span> Jomma</a>
+  <nav>
+    <a class="hide-sm" href="quickstart.html">Quick start</a>
+    <a class="hide-sm" href="api.html">API</a>
+    <a class="hide-sm" href="webhooks.html">Webhooks</a>
+    <a class="hide-sm" href="https://github.com/TahsinFaiyaz30/jomma">GitHub</a>
+    <button type="button" class="iconbtn" id="theme-btn" aria-label="Toggle colour theme"><svg class="i" data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.6M12 19.4V22M4.2 4.2l1.9 1.9M17.9 17.9l1.9 1.9M2 12h2.6M19.4 12H22M4.2 19.8l1.9-1.9M17.9 6.1l1.9-1.9"/></svg><svg class="i" data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="i" data-theme-icon="auto" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6v16.8a8.4 8.4 0 0 0 0-16.8z" fill="currentColor" stroke="none"/></svg></button>
+    <button type="button" class="iconbtn" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </nav>
+</header>
+
+<div class="shell">
+<aside id="sidebar">
+    <h4>Start here</h4>
+    <a href="index.html">Overview</a>
+    <a href="quickstart.html">Quick start</a>
+    <h4>Reference</h4>
+    <a href="api.html">API reference</a>
+    <a href="webhooks.html">Webhooks</a>
+    <h4>Understanding it</h4>
+    <a href="matching.html" aria-current="page">Matching rules</a>
+    <a class="sub" href="#rules">The six rules</a>
+    <a class="sub" href="#amount">Why not the amount</a>
+    <a class="sub" href="#reference">Reference codes</a>
+    <a class="sub" href="#clock">The time window</a>
+    <a class="sub" href="#arithmetic">Part and over payments</a>
+    <a class="sub" href="#integrity">How it stays correct</a>
+    <h4>Operating it</h4>
+    <a href="self-hosting.html">Running it</a>
+    <a href="testing.html">Testing & status</a>
+</aside>
+
+<main>
+<section id="top">
+  <p class="eyebrow">Understanding it</p>
+  <h1>Matching rules</h1>
+  <p class="lede">
+    The part worth understanding, because it decides whether money reaches the
+    right order. Jomma answers with a hard yes or a hard no &mdash; there is no
+    score to tune and no threshold to cross.
+  </p>
+</section>
+
+<section id="rules">
+  <h2>The six rules</h2>
+  <p>
+    A payment is credited automatically <strong>only if every one of these
+    holds</strong>. The first that fails names the refusal, and the payment is
+    kept and surfaced rather than dropped.
+  </p>
+
+  <div class="tw"><table>
+    <thead><tr><th>#</th><th>Requirement</th><th>Refusal if it fails</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>The message parsed, and the amount is above zero</td><td><code>unparsed</code>, <code>amount</code></td></tr>
+      <tr><td>2</td><td>It arrived on <em>this intent's</em> receiving number</td><td><code>account</code></td></tr>
+      <tr><td>3</td><td>The reference matches the code exactly</td><td><code>reference_missing</code>, <code>reference_inexact</code></td></tr>
+      <tr><td>4</td><td>The intent declared a payer number</td><td><code>sender_undeclared</code></td></tr>
+      <tr><td>5</td><td>The sender <em>is</em> that number</td><td><code>sender_mismatch</code></td></tr>
+      <tr><td>6</td><td>The provider's timestamp falls inside the checkout window</td><td><code>before_window</code>, <code>after_window</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <p>The logic is a single function with no I/O, which is why it can be tested exhaustively without a database:</p>
+  <div class="code" data-lang="typescript"><pre>export function admits(payment, intent): Refusal | null {
+  if (payment.amountCents === null) return 'unparsed'
+  if (payment.amountCents &lt;= 0) return 'amount'
+  if (payment.receivingAccountId !== intent.receivingAccountId) return 'account'
+
+  const reference = normalizeRef(payment.referenceRaw)
+  const code = normalizeRef(intent.refCode)
+  if (!reference || !code) return 'reference_missing'
+  if (reference !== code) return 'reference_inexact'
+
+  if (!intent.expectedMsisdn) return 'sender_undeclared'
+  if (!sameMsisdn(payment.senderMsisdn, intent.expectedMsisdn)) return 'sender_mismatch'
+
+  const at = paymentTime(payment).getTime()
+  if (at &lt; intent.payClickedAt.getTime() - WINDOW_GRACE_MS) return 'before_window'
+  if (at &gt; intent.expiresAt.getTime() + WINDOW_GRACE_MS) return 'after_window'
+
+  return null // credited
+}</pre></div>
+
+  <div class="note"><p>
+    <strong>A refusal is never a deletion.</strong> The raw message is stored
+    before anything tries to parse it. A refused payment appears in the dashboard
+    feed with the reason attached, and an admin can apply it by hand or it can be
+    re-parsed once a parser improves.
+  </p></div>
+</section>
+
+<section id="amount">
+  <h2>Why the amount is not a rule</h2>
+  <p>
+    Paying the wrong amount does not stop a match. Less than asked becomes a
+    <code>partial</code>, more becomes an <code>over</code>, and both are
+    recorded against the order. Nobody is refused for paying the wrong amount
+    &mdash; they are refused for being <strong>unidentifiable</strong>.
+  </p>
+  <p>
+    An earlier design did the opposite: it held <code>(account, amount)</code>
+    exclusively, so the reference was optional and the amount identified the
+    order. That breaks immediately in the real world. The third customer to buy a
+    Tk 500 item could not check out at all, because the amount was taken.
+  </p>
+  <div class="note danger"><p>
+    <strong>Matching on amount and phone number is the trap.</strong> It works
+    until two people pay the same price from numbers the system has seen before,
+    and then it silently credits the wrong customer. That is why the reference is
+    mandatory and the amount is not a gate.
+  </p></div>
+</section>
+
+<section id="reference">
+  <h2>Reference codes</h2>
+  <div class="code bare" data-lang="text"><pre>ABCDEFGHJKMNPQRSTUVWXYZ23456789     8 characters     7CX4Z8ZS</pre></div>
+  <p>
+    Thirty-one symbols, not thirty-six. <code>0</code>, <code>1</code>,
+    <code>I</code>, <code>L</code> and <code>O</code> are gone, because a buyer
+    reads the code off a screen and types it into a phone, and those five are
+    where transcription errors come from.
+  </p>
+  <ul>
+    <li><strong>About 852 billion combinations.</strong> Enough that guessing one that is currently live is not a practical attack.</li>
+    <li><strong>Never reissued.</strong> A unique index over every code ever generated makes reuse impossible &mdash; not unlikely, impossible. A code belongs to exactly one order for all time.</li>
+    <li><strong>Case-insensitive, punctuation-insensitive.</strong> Both sides are upper-cased and stripped of non-alphanumerics before comparison, so <code>7cx4-z8zs</code> matches.</li>
+    <li><strong>Never fuzzy.</strong> One character out is a refusal, not a near-miss. A fuzzy match on a payment code is a wrong credit waiting to happen.</li>
+  </ul>
+  <h3>Why there is no punctuation in a code</h3>
+  <p>
+    It would be stripped by the normaliser before comparison, so it could not
+    contribute to identification at all. Whether a provider's reference field
+    even preserves symbols is unverified, and they are harder to type accurately
+    on a phone. Length is free entropy and does none of that damage.
+  </p>
+</section>
+
+<section id="clock">
+  <h2>The time window</h2>
+  <p>
+    The payment must have happened during this checkout. Money that moved before
+    the buyer opened the page cannot be for this order, and money that moved
+    after it expired is for whatever they did next.
+  </p>
+  <div class="code bare" data-lang="text"><pre>[ intent created - 5 min ] .............. [ expires_at + 5 min ]</pre></div>
+
+  <div class="note ok"><p>
+    <strong>Measured against the provider's own timestamp</strong>, parsed out of
+    the message as Bangladesh time &mdash; not when Jomma received it. A phone
+    that was switched off for an hour still matches correctly when it
+    reconnects and flushes its queue.
+  </p></div>
+
+  <p>
+    That distinction is load-bearing and easy to get wrong. <code>04/09/2026
+    19:54</code> has to be read as the fourth of September, not the ninth of
+    April, and as UTC+6 rather than the server's zone. Getting either wrong does
+    not fail loudly: it silently refuses real payments as
+    <code>before_window</code>, which is exactly the sort of bug that reaches
+    production. There is a regression test pinning both.
+  </p>
+  <p>
+    Five minutes of grace at each end absorbs clock skew between the provider,
+    the phone and the server.
+  </p>
+</section>
+
+<section id="arithmetic">
+  <h2>Part and over payments</h2>
+  <p>
+    A buyer can pay in instalments against one reference code. Each capture is
+    applied to the ledger and the intent's total is recomputed, so three payments
+    of Tk 400, Tk 400 and Tk 450 settle a Tk 1,250 order without anybody
+    intervening.
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Received vs asked</th><th>Status</th><th>Event</th><th>Reference code</th></tr></thead>
+    <tbody>
+      <tr><td>Less</td><td><code>partial</code></td><td><code>payment.partial</code></td><td>Stays live for the rest</td></tr>
+      <tr><td>Exact</td><td><code>matched</code></td><td><code>payment.succeeded</code></td><td>Consumed</td></tr>
+      <tr><td>More</td><td><code>over</code></td><td><code>payment.overpaid</code></td><td>Consumed</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    The buyer's page shows every instalment it has counted, with its TrxID. A
+    second request for money with no account of the first reads as a mistake or a
+    scam, so the ledger is shown rather than just the outstanding total.
+  </p>
+</section>
+
+<section id="integrity">
+  <h2>How it stays correct under load</h2>
+  <h3>One write path</h3>
+  <p>
+    <code>lib/services/apply.ts</code> is the only code that credits an intent.
+    Automatic matching, buyer TrxID submissions and admin approval all call it,
+    so the cumulative-sum arithmetic and the row lock exist exactly once. There
+    is no second implementation to drift.
+  </p>
+  <h3>A TrxID is spent once</h3>
+  <p>
+    A unique constraint, not a check-then-write. Twenty simultaneous claims on
+    the same TrxID produce one credit and nineteen refusals, and the losers get a
+    clean <code>409</code> rather than a <code>500</code>.
+  </p>
+  <h3>Concurrent instalments serialise</h3>
+  <p>
+    Applying reads the intent <code>FOR UPDATE</code>, so five payments landing
+    in the same instant each read the total the previous one wrote. Without it,
+    two concurrent applies would both read zero and the order would appear
+    half-paid.
+  </p>
+  <div class="note"><p>
+    These three are exercised by <code>pnpm smoke:stress</code>, which fires
+    genuinely parallel requests and then asks the database whether the books
+    balance: an intent's received total equals the sum of its unreversed
+    applications, a TrxID is spent at most once, and nothing is credited twice.
+  </p></div>
+</section>
+<nav class="pagenav">
+  <a href="webhooks.html"><small>Previous</small><b>Webhooks</b></a>
+  <a class="next" href="self-hosting.html"><small>Next</small><b>Running it</b></a>
+</nav>
+</main>
+</div>
+
+<footer>
+  Jomma &mdash; payment verification for Bangladeshi mobile financial services.
+  <br />It never moves money and never sees a PIN.
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

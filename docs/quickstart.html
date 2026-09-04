@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quick start — Jomma</title>
+<meta name="description" content="Add Jomma to a store in three steps." />
+<meta name="color-scheme" content="light dark" />
+<meta property="og:title" content="Quick start — Jomma" />
+<meta property="og:description" content="Add Jomma to a store in three steps." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23292524'/><text y='71' x='50' text-anchor='middle' font-size='58' font-family='Georgia,serif' fill='white'>J</text></svg>" />
+<link rel="stylesheet" href="assets/docs.css" />
+<script>
+  // Applied before first paint so a reader who chose dark never sees a flash of
+  // light. Inline and tiny for that reason; everything else is in docs.js.
+  try {
+    const t = localStorage.getItem('jomma-theme')
+    if (t) document.documentElement.setAttribute('data-theme', t)
+  } catch {}
+</script>
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="index.html"><span class="mark">J</span> Jomma</a>
+  <nav>
+    <a class="hide-sm" href="quickstart.html">Quick start</a>
+    <a class="hide-sm" href="api.html">API</a>
+    <a class="hide-sm" href="webhooks.html">Webhooks</a>
+    <a class="hide-sm" href="https://github.com/TahsinFaiyaz30/jomma">GitHub</a>
+    <button type="button" class="iconbtn" id="theme-btn" aria-label="Toggle colour theme"><svg class="i" data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.6M12 19.4V22M4.2 4.2l1.9 1.9M17.9 17.9l1.9 1.9M2 12h2.6M19.4 12H22M4.2 19.8l1.9-1.9M17.9 6.1l1.9-1.9"/></svg><svg class="i" data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="i" data-theme-icon="auto" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6v16.8a8.4 8.4 0 0 0 0-16.8z" fill="currentColor" stroke="none"/></svg></button>
+    <button type="button" class="iconbtn" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </nav>
+</header>
+
+<div class="shell">
+<aside id="sidebar">
+    <h4>Start here</h4>
+    <a href="index.html">Overview</a>
+    <a href="quickstart.html" aria-current="page">Quick start</a>
+    <a class="sub" href="#before">Before you start</a>
+    <a class="sub" href="#steps">The three steps</a>
+    <a class="sub" href="#testing-it">Testing the flow</a>
+    <a class="sub" href="#edge">Cases to handle</a>
+    <h4>Reference</h4>
+    <a href="api.html">API reference</a>
+    <a href="webhooks.html">Webhooks</a>
+    <h4>Understanding it</h4>
+    <a href="matching.html">Matching rules</a>
+    <h4>Operating it</h4>
+    <a href="self-hosting.html">Running it</a>
+    <a href="testing.html">Testing & status</a>
+</aside>
+
+<main>
+<section id="top">
+  <p class="eyebrow">Quick start</p>
+  <h1>Add Jomma to your store</h1>
+  <p class="lede">
+    Three steps. Create a payment, send the buyer to a page, handle the webhook.
+    Everything else in these docs is reference.
+  </p>
+</section>
+
+<section id="before">
+  <h2>Before you start</h2>
+  <p>You need three things from a running Jomma instance:</p>
+  <div class="tw"><table>
+    <thead><tr><th>What</th><th>Where from</th></tr></thead>
+    <tbody>
+      <tr><td>Your instance URL</td><td>Wherever you deployed it, e.g. <code>https://pay.yourshop.com</code></td></tr>
+      <tr><td>An API key (<code>jm_live_...</code>)</td><td>Dashboard &gt; Apps &gt; create a key. Shown once.</td></tr>
+      <tr><td>A webhook signing secret</td><td>Dashboard &gt; Apps &gt; add an endpoint.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Do not have an instance yet? <a href="self-hosting.html">Running it</a> gets
+    you one locally in about five minutes.
+  </p>
+  <div class="note warn"><p>
+    <strong>Every money value is in poisha</strong>, the minor unit. Tk 1,250.00
+    is <code>125000</code>. This is so no floating-point value ever touches a
+    payment. Multiply by 100 on the way in and divide on the way out.
+  </p></div>
+</section>
+
+<section id="steps" class="steps">
+  <h2>The three steps</h2>
+
+  <h3>Create a payment at checkout</h3>
+  <p>
+    When the buyer confirms their order, ask Jomma for a reference code. Send
+    your order id as the <code>Idempotency-Key</code> so a retry cannot allocate
+    a second code.
+  </p>
+
+  <div class="code" data-lang="bash"><pre>curl -X POST https://pay.yourshop.com/v1/intents \
+  -H "Authorization: Bearer jm_live_YOUR_KEY" \
+  -H "Idempotency-Key: ORD-2026-001043" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 125000,
+    "client_reference": "ORD-2026-001043",
+    "payer_msisdn": "8801712345678",
+    "provider": "bkash",
+    "ttl_seconds": 900,
+    "return_url": "https://yourshop.com/orders/1043/thanks",
+    "cancel_url": "https://yourshop.com/cart",
+    "metadata": { "store_id": "st_912" }
+  }'</pre></div>
+
+  <div class="code" data-lang="json"><pre>{
+  "id": "int_01M1PEP3ZZEEC99NQ5CM1H6W1Q",
+  "status": "open",
+  "amount": 125000,
+  "received_amount": 0,
+  "ref_code": "7CX4Z8ZS",
+  "receiving_account": {
+    "provider": "bkash",
+    "msisdn": "8801611223344",
+    "display_name": "Your Shop"
+  },
+  "client_reference": "ORD-2026-001043",
+  "shortfall": 125000,
+  "excess": 0,
+  "payments": [],
+  "expires_at": "2026-09-04T14:05:00Z",
+  "created_at": "2026-09-04T13:50:00Z"
+}</pre></div>
+
+  <p>Store <code>id</code> against your order. You will need it in step two, and it is what the webhook refers back to.</p>
+
+  <h3>Send the buyer to the pay page</h3>
+  <div class="code bare" data-lang="text"><pre>https://pay.yourshop.com/pay/int_01M1PEP3ZZEEC99NQ5CM1H6W1Q</pre></div>
+  <p>That page does the rest:</p>
+  <ul>
+    <li>Shows the receiving number, the exact amount, and the reference code, each with a copy button.</li>
+    <li>Asks which number they are paying from, if your server did not say &mdash; without it, nothing auto-matches.</li>
+    <li>Plays an animated walkthrough of the provider's Send Money flow <em>with those values in it</em>, for both the app and <code>*247#</code>.</li>
+    <li>Offers a QR that opens the same page on a phone, for a buyer sitting at a laptop.</li>
+    <li>Turns into a receipt the moment the payment matches, and redirects to your <code>return_url</code>.</li>
+  </ul>
+  <p>
+    You write no polling code. If you would rather render your own screen, see
+    <a href="api.html#custom">building your own checkout</a>.
+  </p>
+
+  <h3>Handle the webhook</h3>
+  <p>
+    This is the one that matters: it is how your store learns the money arrived.
+    Verify the signature before trusting anything in the body.
+  </p>
+
+  <div class="code" data-lang="typescript"><pre>import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export async function POST(req: Request) {
+  // The RAW body. Parsing and re-serialising changes the whitespace and the
+  // signature will not match.
+  const raw = await req.text()
+  const header = req.headers.get('x-jomma-signature') ?? ''
+
+  const t = header.match(/t=(\d+)/)?.[1]
+  const v1 = header.match(/v1=([a-f0-9]+)/)?.[1]
+  if (!t || !v1) return new Response('bad signature', { status: 400 })
+
+  // A valid signature replayed tomorrow is still a replay.
+  if (Math.abs(Date.now() / 1000 - Number(t)) > 300) {
+    return new Response('stale', { status: 400 })
+  }
+
+  const expected = createHmac('sha256', process.env.JOMMA_WEBHOOK_SECRET)
+    .update(t + '.' + raw)
+    .digest('hex')
+
+  const a = Buffer.from(expected)
+  const b = Buffer.from(v1)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    return new Response('bad signature', { status: 400 })
+  }
+
+  const event = JSON.parse(raw)
+
+  // At-least-once delivery: the same event.id can arrive twice.
+  if (await alreadyProcessed(event.id)) return new Response('ok')
+
+  switch (event.type) {
+    case 'payment.succeeded':
+      await fulfilOrder(event.data.client_reference)
+      break
+    case 'payment.partial':
+      await noteShortfall(event.data.client_reference, event.data.shortfall)
+      break
+    case 'payment.expired':
+      await releaseStock(event.data.client_reference)
+      break
+    case 'payment.reversed':
+      await unfulfilOrder(event.data.client_reference)
+      break
+  }
+
+  await markProcessed(event.id)
+  return new Response('ok') // any 2xx stops the retries
+}</pre></div>
+
+  <div class="note ok"><p>
+    That is the whole integration. A store that only handles
+    <code>payment.succeeded</code> and <code>payment.expired</code> is already
+    working correctly &mdash; the rest refine it.
+  </p></div>
+</section>
+
+<section id="testing-it">
+  <h2>Testing the flow</h2>
+  <p>
+    You do not need to move real money to exercise the whole path. The signed
+    ingest endpoint accepts a message as if a phone had captured it:
+  </p>
+
+  <div class="code" data-lang="bash"><pre># 1. Create an intent and note its ref_code and receiving msisdn.
+# 2. Feed in a message carrying that code, signed with your ingest secret.
+
+BODY='{"msisdn":"8801611223344","raw":"You have received Tk 1,250.00 from 01712345678. Ref 7CX4Z8ZS. Fee Tk 0.00. Balance Tk 5,000.00. TrxID TEST12345 at 04/09/2026 19:54","source":"generic_webhook"}'
+TS=$(date +%s)
+SIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$WEBHOOK_SIGNING_SECRET" -hex | sed 's/.* //')
+
+curl -X POST https://pay.yourshop.com/ingest/v1/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Jomma-Signature: t=$TS,v1=$SIG" \
+  -d "$BODY"</pre></div>
+
+  <p>Then poll the intent, or watch your webhook endpoint. Three things must line up or it will not match:</p>
+  <ul>
+    <li>The <code>Ref</code> in the message equals the intent's <code>ref_code</code>.</li>
+    <li>The sender number equals the intent's <code>payer_msisdn</code>.</li>
+    <li>The timestamp in the message falls inside the checkout window.</li>
+  </ul>
+  <p>If it does not match, <a href="matching.html">the matching rules</a> explain exactly which condition failed and why.</p>
+</section>
+
+<section id="edge">
+  <h2>Cases to handle</h2>
+
+  <h3>The buyer pays too little</h3>
+  <p>
+    The intent becomes <code>partial</code> and you get
+    <code>payment.partial</code> with a <code>shortfall</code>. The same
+    reference code stays valid, so they can send the rest and it accumulates.
+    Extend the deadline if they need longer:
+  </p>
+  <div class="code" data-lang="bash"><pre>curl -X POST https://pay.yourshop.com/v1/intents/int_01M1.../extend \
+  -H "Authorization: Bearer jm_live_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"ttl_seconds": 900}'</pre></div>
+
+  <h3>The buyer pays too much</h3>
+  <p>
+    The order <strong>completes</strong> &mdash; you get
+    <code>payment.overpaid</code> with an <code>excess</code>, and the intent is
+    settled. Jomma cannot refund; the buyer can raise a request from the pay
+    page, which reaches you as <code>payment.refund_requested</code>.
+  </p>
+
+  <h3>The buyer forgot the reference</h3>
+  <p>
+    Nothing auto-matches, by design. The pay page offers a manual box after
+    about forty seconds where they enter the TrxID from their confirmation, and
+    Jomma settles it if the sender and account line up. You can do the same
+    server-side with <code>POST /v1/submissions</code>.
+  </p>
+
+  <h3>Nobody pays</h3>
+  <p>
+    At <code>ttl_seconds</code> the intent expires and you get
+    <code>payment.expired</code>. Release the stock. The reference code is
+    consumed and never reissued.
+  </p>
+
+  <h3>Every receiving account is down</h3>
+  <p>
+    <code>POST /v1/intents</code> returns <code>503 no_healthy_account</code>.
+    <strong>Do not show a pay page</strong> &mdash; there is no number for the
+    buyer to send to. Fall back to another payment method, or tell them to try
+    shortly.
+  </p>
+</section>
+<nav class="pagenav">
+  <a href="index.html"><small>Previous</small><b>Overview</b></a>
+  <a class="next" href="api.html"><small>Next</small><b>API reference</b></a>
+</nav>
+</main>
+</div>
+
+<footer>
+  Jomma &mdash; payment verification for Bangladeshi mobile financial services.
+  <br />It never moves money and never sees a PIN.
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

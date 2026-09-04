@@ -9,9 +9,12 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /v1/intents — create a payment request.
  *
- * Allocates a reference code and an exclusive lock on (account, amount), then
- * returns everything the buyer needs to see: the number, the exact amount, and
- * the code.
+ * Allocates a reference code and returns everything the buyer needs to see: the
+ * number, the exact amount, and the code.
+ *
+ * There is no lock on (account, amount). Any number of buyers can owe the same
+ * amount on the same number at once — they are told apart by their reference
+ * codes, not by what they owe.
  */
 export const POST = route(async (request, context) => {
   const app = await authenticateApp(request)

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Webhooks — Jomma</title>
+<meta name="description" content="Events, signing, retries, and what to do with each." />
+<meta name="color-scheme" content="light dark" />
+<meta property="og:title" content="Webhooks — Jomma" />
+<meta property="og:description" content="Events, signing, retries, and what to do with each." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23292524'/><text y='71' x='50' text-anchor='middle' font-size='58' font-family='Georgia,serif' fill='white'>J</text></svg>" />
+<link rel="stylesheet" href="assets/docs.css" />
+<script>
+  // Applied before first paint so a reader who chose dark never sees a flash of
+  // light. Inline and tiny for that reason; everything else is in docs.js.
+  try {
+    const t = localStorage.getItem('jomma-theme')
+    if (t) document.documentElement.setAttribute('data-theme', t)
+  } catch {}
+</script>
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="index.html"><span class="mark">J</span> Jomma</a>
+  <nav>
+    <a class="hide-sm" href="quickstart.html">Quick start</a>
+    <a class="hide-sm" href="api.html">API</a>
+    <a class="hide-sm" href="webhooks.html">Webhooks</a>
+    <a class="hide-sm" href="https://github.com/TahsinFaiyaz30/jomma">GitHub</a>
+    <button type="button" class="iconbtn" id="theme-btn" aria-label="Toggle colour theme"><svg class="i" data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.6M12 19.4V22M4.2 4.2l1.9 1.9M17.9 17.9l1.9 1.9M2 12h2.6M19.4 12H22M4.2 19.8l1.9-1.9M17.9 6.1l1.9-1.9"/></svg><svg class="i" data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="i" data-theme-icon="auto" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6v16.8a8.4 8.4 0 0 0 0-16.8z" fill="currentColor" stroke="none"/></svg></button>
+    <button type="button" class="iconbtn" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </nav>
+</header>
+
+<div class="shell">
+<aside id="sidebar">
+    <h4>Start here</h4>
+    <a href="index.html">Overview</a>
+    <a href="quickstart.html">Quick start</a>
+    <h4>Reference</h4>
+    <a href="api.html">API reference</a>
+    <a href="webhooks.html" aria-current="page">Webhooks</a>
+    <a class="sub" href="#events">The nine events</a>
+    <a class="sub" href="#shape">Event shape</a>
+    <a class="sub" href="#verify">Verifying</a>
+    <a class="sub" href="#retries">Retries</a>
+    <a class="sub" href="#handling">Handling them well</a>
+    <h4>Understanding it</h4>
+    <a href="matching.html">Matching rules</a>
+    <h4>Operating it</h4>
+    <a href="self-hosting.html">Running it</a>
+    <a href="testing.html">Testing & status</a>
+</aside>
+
+<main>
+<section id="top">
+  <p class="eyebrow">Reference</p>
+  <h1>Webhooks</h1>
+  <p class="lede">
+    How your store finds out that money arrived. Register a URL and a secret per
+    app in the dashboard; delivery is at-least-once with retries.
+  </p>
+</section>
+
+<section id="events">
+  <h2>The nine events</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Event</th><th>Fires when</th><th>Extra fields</th></tr></thead>
+    <tbody>
+      <tr><td><code>payment.succeeded</code></td><td>Full amount matched. <strong>The main one.</strong></td><td>&mdash;</td></tr>
+      <tr><td><code>payment.partial</code></td><td>Money arrived, short of the total.</td><td><code>shortfall</code></td></tr>
+      <tr><td><code>payment.overpaid</code></td><td>More than the total arrived. The order is complete.</td><td><code>excess</code></td></tr>
+      <tr><td><code>payment.expired</code></td><td>TTL elapsed with no payment.</td><td>&mdash;</td></tr>
+      <tr><td><code>payment.cancelled</code></td><td>You cancelled, or an admin voided it.</td><td>&mdash;</td></tr>
+      <tr><td><code>payment.reversed</code></td><td>An applied match was undone by an admin.</td><td>&mdash;</td></tr>
+      <tr><td><code>payment.refund_requested</code></td><td>A buyer asked for money back from the pay page.</td><td><code>reason</code>, <code>note</code></td></tr>
+      <tr><td><code>account.degraded</code></td><td>A receiving number went unhealthy.</td><td><code>reason</code></td></tr>
+      <tr><td><code>account.recovered</code></td><td>It came back.</td><td>&mdash;</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note danger"><p>
+    <strong><code>payment.reversed</code> deserves real handling.</strong> It
+    means Jomma previously said money arrived and now says it did not &mdash; a
+    match an admin undid. If your store cannot un-fulfil an order, you will ship
+    goods for a payment that was withdrawn. It is rare and it is serious.
+  </p></div>
+
+  <div class="note warn"><p>
+    <strong><code>payment.refund_requested</code> is a message, not an
+    instruction.</strong> Jomma watches your accounts and has no authority over
+    them; it cannot move money back. The event records that a buyer asked. You
+    refund from your own system.
+  </p></div>
+
+  <div class="note"><p>
+    <strong><code>account.degraded</code> is worth acting on.</strong> It usually
+    means a phone stopped reporting. Checkout already routes around the account,
+    but it is your early warning that payments may be arriving unseen.
+  </p></div>
+</section>
+
+<section id="shape">
+  <h2>Event shape</h2>
+  <div class="code" data-lang="json"><pre>{
+  "id": "evt_01J8X...",
+  "type": "payment.succeeded",
+  "created_at": "2026-09-04T13:55:14Z",
+  "data": {
+    "intent_id": "int_01M1PEP3ZZEEC99NQ5CM1H6W1Q",
+    "client_reference": "ORD-2026-001043",
+    "amount": 125000,
+    "received_amount": 125000,
+    "trx_id": "DI4760E7CN",
+    "sender_msisdn": "8801712345678",
+    "match_confidence": "exact",
+    "matched_by": "automatic",
+    "metadata": { "store_id": "st_912" }
+  }
+}</pre></div>
+  <p>
+    <code>client_reference</code> is your own order id, so you rarely need to
+    keep a mapping. <code>metadata</code> is whatever you passed at creation,
+    returned untouched.
+  </p>
+  <div class="code bare" data-lang="http"><pre>X-Jomma-Signature: t=1756909512,v1=&lt;hex hmac-sha256&gt;
+X-Jomma-Event-Id:  evt_01J8X...</pre></div>
+</section>
+
+<section id="verify">
+  <h2>Verifying the signature</h2>
+  <p>
+    The signed payload is the timestamp, a dot, and the <strong>raw request
+    body</strong>. Three things go wrong most often:
+  </p>
+  <ol>
+    <li><strong>Signing a re-serialised body.</strong> Parsing JSON and stringifying it again changes whitespace and key order. Sign the bytes you received.</li>
+    <li><strong>Not checking the timestamp.</strong> A signature stays valid forever unless you bound it. Five minutes is the recommended window.</li>
+    <li><strong>Comparing with <code>===</code>.</strong> Use a constant-time comparison, or you leak the signature a byte at a time.</li>
+  </ol>
+
+  <div class="code" data-lang="typescript"><pre>import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export function verify(raw: string, header: string, secret: string): boolean {
+  const t = header.match(/t=(\d+)/)?.[1]
+  const v1 = header.match(/v1=([a-f0-9]+)/)?.[1]
+  if (!t || !v1) return false
+
+  if (Math.abs(Date.now() / 1000 - Number(t)) > 300) return false
+
+  const expected = createHmac('sha256', secret).update(t + '.' + raw).digest('hex')
+  const a = Buffer.from(expected)
+  const b = Buffer.from(v1)
+  return a.length === b.length && timingSafeEqual(a, b)
+}</pre></div>
+
+  <p>Or let the SDK do it:</p>
+  <div class="code" data-lang="typescript"><pre>import { constructEvent } from '@jomma/sdk'
+
+const event = constructEvent(raw, signatureHeader, secret)</pre></div>
+</section>
+
+<section id="retries">
+  <h2>Retries</h2>
+  <p>
+    Delivery is <strong>at-least-once</strong>. Return any <code>2xx</code> to
+    stop the retries; anything else, or a timeout, schedules the next attempt.
+  </p>
+  <div class="code bare" data-lang="text"><pre>10s -> 1m -> 5m -> 30m -> 2h -> 6h -> 24h</pre></div>
+  <p>
+    After the last attempt the event is marked <code>failed</code> and waits in
+    the dashboard under <b>Apps &gt; Deliveries</b>, where you can replay it by
+    hand once your endpoint is healthy.
+  </p>
+  <div class="note"><p>
+    <strong>Make your handler idempotent.</strong> The same <code>event.id</code>
+    can arrive more than once &mdash; a retry after your <code>200</code> was
+    lost in transit looks identical to a first delivery. Record processed ids, or
+    make fulfilment safe to repeat.
+  </p></div>
+</section>
+
+<section id="handling">
+  <h2>Handling them well</h2>
+  <h3>Answer fast, work later</h3>
+  <p>
+    Verify, enqueue, return <code>200</code>. Doing the fulfilment inline means a
+    slow database turns into a retry storm, and your handler is racing a 10
+    second clock.
+  </p>
+  <h3>Do not trust the body before the signature</h3>
+  <p>
+    The endpoint is public. Anyone can POST it a <code>payment.succeeded</code>
+    for any order id they can guess. The signature is the only thing separating a
+    real event from a free order.
+  </p>
+  <h3>Treat the intent as the source of truth</h3>
+  <p>
+    If an event ever looks wrong, <code>GET /v1/intents/:id</code> is
+    authoritative. The event is a notification about state, not the state itself.
+  </p>
+</section>
+<nav class="pagenav">
+  <a href="api.html"><small>Previous</small><b>API reference</b></a>
+  <a class="next" href="matching.html"><small>Next</small><b>Matching rules</b></a>
+</nav>
+</main>
+</div>
+
+<footer>
+  Jomma &mdash; payment verification for Bangladeshi mobile financial services.
+  <br />It never moves money and never sees a PIN.
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

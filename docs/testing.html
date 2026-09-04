@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Testing & status — Jomma</title>
+<meta name="description" content="The suites, and what is not finished." />
+<meta name="color-scheme" content="light dark" />
+<meta property="og:title" content="Testing & status — Jomma" />
+<meta property="og:description" content="The suites, and what is not finished." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23292524'/><text y='71' x='50' text-anchor='middle' font-size='58' font-family='Georgia,serif' fill='white'>J</text></svg>" />
+<link rel="stylesheet" href="assets/docs.css" />
+<script>
+  // Applied before first paint so a reader who chose dark never sees a flash of
+  // light. Inline and tiny for that reason; everything else is in docs.js.
+  try {
+    const t = localStorage.getItem('jomma-theme')
+    if (t) document.documentElement.setAttribute('data-theme', t)
+  } catch {}
+</script>
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="index.html"><span class="mark">J</span> Jomma</a>
+  <nav>
+    <a class="hide-sm" href="quickstart.html">Quick start</a>
+    <a class="hide-sm" href="api.html">API</a>
+    <a class="hide-sm" href="webhooks.html">Webhooks</a>
+    <a class="hide-sm" href="https://github.com/TahsinFaiyaz30/jomma">GitHub</a>
+    <button type="button" class="iconbtn" id="theme-btn" aria-label="Toggle colour theme"><svg class="i" data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.6M12 19.4V22M4.2 4.2l1.9 1.9M17.9 17.9l1.9 1.9M2 12h2.6M19.4 12H22M4.2 19.8l1.9-1.9M17.9 6.1l1.9-1.9"/></svg><svg class="i" data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="i" data-theme-icon="auto" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6v16.8a8.4 8.4 0 0 0 0-16.8z" fill="currentColor" stroke="none"/></svg></button>
+    <button type="button" class="iconbtn" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </nav>
+</header>
+
+<div class="shell">
+<aside id="sidebar">
+    <h4>Start here</h4>
+    <a href="index.html">Overview</a>
+    <a href="quickstart.html">Quick start</a>
+    <h4>Reference</h4>
+    <a href="api.html">API reference</a>
+    <a href="webhooks.html">Webhooks</a>
+    <h4>Understanding it</h4>
+    <a href="matching.html">Matching rules</a>
+    <h4>Operating it</h4>
+    <a href="self-hosting.html">Running it</a>
+    <a href="testing.html" aria-current="page">Testing & status</a>
+    <a class="sub" href="#suites">The suites</a>
+    <a class="sub" href="#gotchas">Three things that will confuse you</a>
+    <a class="sub" href="#verified">What is verified</a>
+    <a class="sub" href="#gaps">Known gaps</a>
+    <a class="sub" href="#operational">One operational risk</a>
+</aside>
+
+<main>
+<section id="top">
+  <p class="eyebrow">Operating it</p>
+  <h1>Testing &amp; status</h1>
+  <p class="lede">
+    Roughly 300 assertions, most of them over the real HTTP surface rather than
+    against mocks. Plus an honest account of what is not finished.
+  </p>
+</section>
+
+<section id="suites">
+  <h2>The suites</h2>
+  <p>These need nothing running but a database:</p>
+  <div class="code" data-lang="bash"><pre>pnpm lint              # Biome, across the whole workspace
+pnpm typecheck         # all five packages
+pnpm test              # 109 unit tests
+pnpm test:integration  # needs a live database
+pnpm build             # production build</pre></div>
+
+  <p>These drive a running server with the credentials the seed printed:</p>
+  <div class="code" data-lang="bash"><pre>pnpm smoke &lt;api_key&gt; &lt;device_token&gt; &lt;device_id&gt; [&lt;token_2&gt; &lt;id_2&gt;]
+pnpm smoke:checkout &lt;api_key&gt;
+pnpm smoke:ingest &lt;api_key&gt;
+pnpm smoke:audit &lt;api_key&gt;
+pnpm smoke:stress &lt;api_key&gt;</pre></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Suite</th><th>Checks</th><th>What it covers</th></tr></thead>
+    <tbody>
+      <tr><td><code>test</code></td><td>109</td><td>The matcher, every parser, CSV import, webhook signatures, the QR service, id encoding.</td></tr>
+      <tr><td><code>test:integration</code></td><td>9</td><td>Statement import, device commands, submission account scoping &mdash; against real Postgres.</td></tr>
+      <tr><td><code>smoke</code></td><td>54</td><td>Intent lifecycle, idempotent replay, auth, validation, device capture, automatic matching, every submission outcome, underpayment, two-account failover, balance drift.</td></tr>
+      <tr><td><code>smoke:checkout</code></td><td>51</td><td>The buyer's flow end to end: method choice, declaring a payer, split payments, refunds, overpayment, the QR route decoded and verified.</td></tr>
+      <tr><td><code>smoke:ingest</code></td><td>14</td><td>The signed webhook ingest path, including replay and signature rejection.</td></tr>
+      <tr><td><code>smoke:audit</code></td><td>46</td><td>Adversarial: cross-tenant access, enumeration, SQL-shaped input, header injection, burst throttling, response headers.</td></tr>
+      <tr><td><code>smoke:stress</code></td><td>16</td><td>Genuine concurrency &mdash; simultaneous instalments, twenty claims on one TrxID, one TrxID across two orders, duplicate deliveries, parallel idempotent creates.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="gotchas">
+  <h2>Three things that will confuse you</h2>
+  <div class="note warn"><p>
+    <strong>Run the suites a minute apart.</strong> They share a per-IP rate
+    limit, so back-to-back runs from one machine throttle each other. That is the
+    limiter working, not a failure.
+  </p></div>
+  <div class="note warn"><p>
+    <strong>Run <code>smoke:audit</code> against <code>next start</code>, not
+    <code>next dev</code>.</strong> The dev server answers dynamic pages with a
+    different <code>Cache-Control</code> than production does, so one check fails
+    spuriously and sends you looking for a leak that is not there.
+  </p></div>
+  <div class="note warn"><p>
+    <strong><code>pnpm smoke</code> deliberately degrades an account</strong> to
+    exercise drift detection, and leaves it that way. Re-run
+    <code>pnpm db:seed</code> to re-anchor it, or later suites will fail with
+    <code>no_healthy_account</code>.
+  </p></div>
+</section>
+
+<section id="verified">
+  <h2>What is verified</h2>
+  <p>
+    <strong>bKash works end to end</strong>, against real transfers rather than
+    invented ones. Three live captures sit in the parser fixtures:
+  </p>
+  <ul>
+    <li>A received payment <strong>with</strong> a reference &mdash; the case automatic matching depends on.</li>
+    <li>The same <strong>without</strong> one, which must not auto-match, and does not.</li>
+    <li>A <code>*247#</code> confirmation, proving the reference survives USSD as well as the app.</li>
+  </ul>
+  <p>
+    The third doubles as the guard against the worst failure available: it is an
+    <em>outgoing</em> message. If the watched phone ever sends money, it receives
+    one of those, and it carries a TrxID, a reference, an amount and a balance
+    &mdash; everything the matcher reads. The parser refuses it, and there is a
+    fixture pinning that it must keep refusing it.
+  </p>
+  <div class="note ok"><p>
+    The live captures also pinned the timestamp handling: <code>04/09/2026
+    19:54</code> is read as the fourth of September at UTC+6. That is what the
+    payment window measures against, and reading it wrongly refuses real payments
+    silently rather than failing loudly.
+  </p></div>
+</section>
+
+<section id="gaps">
+  <h2>Known gaps</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Nagad is not implemented</h3>
+      <p>The message format is unknown, so the parser is a deliberate stub that fails loudly rather than guessing. Nagad captures store their raw text and wait for a human; checkout lists Nagad as unavailable. One real message closes this.</p>
+    </div>
+    <div class="card">
+      <h3>Android is emulator-only</h3>
+      <p>No emulator has a SIM, a wallet app, or a camera for the provisioning QR, so real capture and reboot survival are unproven on hardware.</p>
+    </div>
+    <div class="card">
+      <h3>Rate limiting is per-instance</h3>
+      <p>It is in-process. Fine on one instance; behind several the effective limit multiplies. The per-intent submission limit is database-backed either way.</p>
+    </div>
+    <div class="card">
+      <h3>The Messages bridge is unproven</h3>
+      <p>Off by default, best-effort, and never held a real pairing. It relays through the phone, so it is <em>not</em> redundancy for the phone being off.</p>
+    </div>
+  </div>
+</section>
+
+<section id="operational">
+  <h2>One operational risk that is not code</h2>
+  <div class="note danger"><p>
+    <strong>Providers distinguish personal accounts from merchant accounts.</strong>
+    bKash separates a personal account from a merchant or Personal Retail
+    Account, and sustained business traffic on a personal number risks a freeze.
+    A frozen number takes the whole service down, not one payment. If volume is
+    going to be real, get the right kind of account.
+  </p></div>
+</section>
+<nav class="pagenav">
+  <a href="self-hosting.html"><small>Previous</small><b>Running it</b></a>
+</nav>
+</main>
+</div>
+
+<footer>
+  Jomma &mdash; payment verification for Bangladeshi mobile financial services.
+  <br />It never moves money and never sees a PIN.
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

@@ -64,6 +64,17 @@ export class Jomma {
     this.webhooks = new WebhooksResource()
   }
 
+  /**
+   * Where to send the buyer for the hosted checkout.
+   *
+   * Here so an integrator does not hand-build it against the wrong host, which
+   * fails as a 404 on a page the buyer was told to trust. Pair it with
+   * `returnUrl` on `intents.create`.
+   */
+  payUrl(intentId: string): string {
+    return `${this.baseUrl}/pay/${encodeURIComponent(intentId)}`
+  }
+
   /** @internal */
   async request<T>(options: RequestOptions): Promise<T> {
     let lastError: unknown
@@ -132,8 +143,8 @@ class IntentsResource {
    * Creates a payment request.
    *
    * Pass `idempotencyKey` — ideally your own order id. Without one a retried
-   * request allocates a second reference code and a second amount lock, which
-   * is exactly the collision the lock exists to prevent.
+   * request allocates a second reference code, so the buyer ends up with two
+   * live codes for one order and only one of them settles it.
    */
   async create(params: CreateIntentParams): Promise<Intent> {
     const idempotencyKey = params.idempotencyKey ?? randomUUID()
@@ -151,6 +162,8 @@ class IntentsResource {
         provider: params.provider ?? 'any',
         ttl_seconds: params.ttlSeconds,
         metadata: params.metadata,
+        return_url: params.returnUrl ?? undefined,
+        cancel_url: params.cancelUrl ?? undefined,
       },
     })
   }

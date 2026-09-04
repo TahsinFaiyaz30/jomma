@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>API reference — Jomma</title>
+<meta name="description" content="Every endpoint, field, status and error." />
+<meta name="color-scheme" content="light dark" />
+<meta property="og:title" content="API reference — Jomma" />
+<meta property="og:description" content="Every endpoint, field, status and error." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23292524'/><text y='71' x='50' text-anchor='middle' font-size='58' font-family='Georgia,serif' fill='white'>J</text></svg>" />
+<link rel="stylesheet" href="assets/docs.css" />
+<script>
+  // Applied before first paint so a reader who chose dark never sees a flash of
+  // light. Inline and tiny for that reason; everything else is in docs.js.
+  try {
+    const t = localStorage.getItem('jomma-theme')
+    if (t) document.documentElement.setAttribute('data-theme', t)
+  } catch {}
+</script>
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="index.html"><span class="mark">J</span> Jomma</a>
+  <nav>
+    <a class="hide-sm" href="quickstart.html">Quick start</a>
+    <a class="hide-sm" href="api.html">API</a>
+    <a class="hide-sm" href="webhooks.html">Webhooks</a>
+    <a class="hide-sm" href="https://github.com/TahsinFaiyaz30/jomma">GitHub</a>
+    <button type="button" class="iconbtn" id="theme-btn" aria-label="Toggle colour theme"><svg class="i" data-theme-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.6M12 19.4V22M4.2 4.2l1.9 1.9M17.9 17.9l1.9 1.9M2 12h2.6M19.4 12H22M4.2 19.8l1.9-1.9M17.9 6.1l1.9-1.9"/></svg><svg class="i" data-theme-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/></svg><svg class="i" data-theme-icon="auto" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 3.6v16.8a8.4 8.4 0 0 0 0-16.8z" fill="currentColor" stroke="none"/></svg></button>
+    <button type="button" class="iconbtn" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </nav>
+</header>
+
+<div class="shell">
+<aside id="sidebar">
+    <h4>Start here</h4>
+    <a href="index.html">Overview</a>
+    <a href="quickstart.html">Quick start</a>
+    <h4>Reference</h4>
+    <a href="api.html" aria-current="page">API reference</a>
+    <a class="sub" href="#auth">Authentication</a>
+    <a class="sub" href="#intents">Intents</a>
+    <a class="sub" href="#statuses">Statuses</a>
+    <a class="sub" href="#submissions">Submissions</a>
+    <a class="sub" href="#accounts">Accounts</a>
+    <a class="sub" href="#paypage">Pay-page API</a>
+    <a class="sub" href="#custom">Your own checkout</a>
+    <a class="sub" href="#sdk">SDK</a>
+    <a class="sub" href="#errors">Errors</a>
+    <a class="sub" href="#limits">Rate limits</a>
+    <a href="webhooks.html">Webhooks</a>
+    <h4>Understanding it</h4>
+    <a href="matching.html">Matching rules</a>
+    <h4>Operating it</h4>
+    <a href="self-hosting.html">Running it</a>
+    <a href="testing.html">Testing & status</a>
+</aside>
+
+<main>
+<section id="top">
+  <p class="eyebrow">Reference</p>
+  <h1>API</h1>
+  <p class="lede">
+    Three surfaces: the <strong>client API</strong> your store calls, the
+    <strong>device API</strong> the phone app calls, and the public
+    <strong>pay-page API</strong> the buyer's browser calls. All bodies are JSON,
+    all money is integer poisha, all timestamps are ISO 8601 UTC.
+  </p>
+</section>
+
+<section id="auth">
+  <h2>Authentication</h2>
+  <div class="code bare" data-lang="http"><pre>Authorization: Bearer jm_live_xxxxxxxxxxxxxxxxxxxx</pre></div>
+  <p>
+    Keys are Argon2-hashed at rest; the plaintext is shown once, at creation. The
+    prefix (<code>jm_live_</code> / <code>jm_test_</code>) is stored in clear for
+    lookup and display. Revoking a key is immediate.
+  </p>
+  <p>
+    The pay-page endpoints under <code>/api/pay/</code> take <strong>no
+    key</strong>: the buyer is an anonymous visitor holding a link. They are
+    rate-limited by IP and return only what a buyer needs. Putting an API key in
+    a buyer's browser would be a far worse trade.
+  </p>
+</section>
+
+<section id="intents">
+  <h2>Intents</h2>
+
+  <h3><span class="badge post">POST</span> <code>/v1/intents</code></h3>
+  <p>Creates a payment request and allocates a reference code.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>amount</code></td><td>integer</td><td><strong>yes</strong></td><td>Poisha. Tk 1,250.00 is <code>125000</code>. Must be positive.</td></tr>
+      <tr><td><code>client_reference</code></td><td>string</td><td><strong>yes</strong></td><td>Your order id, 1&ndash;255 chars. Echoed on every webhook.</td></tr>
+      <tr><td><code>payer_msisdn</code></td><td>string</td><td><em>effectively yes</em></td><td>The number the buyer will send from. Without it <strong>nothing auto-matches</strong>.</td></tr>
+      <tr><td><code>provider</code></td><td>enum</td><td>no</td><td><code>bkash</code>, <code>nagad</code>, or <code>any</code>. Default <code>any</code>. Naming one stops the buyer changing it.</td></tr>
+      <tr><td><code>ttl_seconds</code></td><td>integer</td><td>no</td><td>60&ndash;3600. Default 300.</td></tr>
+      <tr><td><code>metadata</code></td><td>object</td><td>no</td><td>Opaque. Returned on every webhook for this intent.</td></tr>
+      <tr><td><code>return_url</code></td><td>string</td><td>no</td><td>Where the hosted page sends the buyer on success.</td></tr>
+      <tr><td><code>cancel_url</code></td><td>string</td><td>no</td><td>Where it sends them if they back out.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note danger"><p>
+    <strong><code>payer_msisdn</code> is not really optional.</strong> Automatic
+    matching refuses any payment whose intent has no declared sender, so an
+    intent without it can only ever be settled by a manual TrxID submission. If
+    you do not know the number, use the hosted pay page &mdash; it asks the buyer
+    before showing them anything to pay.
+  </p></div>
+
+  <div class="note"><p>
+    <strong>Send an <code>Idempotency-Key</code> header</strong>, ideally your
+    order id. Replaying it within 24 hours returns the original intent and a
+    <code>200</code> instead of a <code>201</code>. Without it a retried request
+    allocates a second reference code, leaving the buyer with two live codes for
+    one order where only one settles it.
+  </p></div>
+
+  <p>
+    <code>return_url</code> and <code>cancel_url</code> are checked against the
+    hostnames registered for your app under <b>Apps &gt; Hosted checkout</b>.
+    An app with none registered gets <em>no</em> redirect rather than any
+    redirect it asks for: an unchecked return URL on a payment page is an open
+    redirect aimed at someone who was just told to trust that page. Subdomains of
+    a registered host are allowed.
+  </p>
+
+  <h3><span class="badge get">GET</span> <code>/v1/intents/:id</code></h3>
+  <p>The full state of one payment. Poll every 2&ndash;3 seconds; the rate limit assumes it.</p>
+  <div class="code" data-lang="json"><pre>{
+  "id": "int_01M1PEP3ZZEEC99NQ5CM1H6W1Q",
+  "status": "matched",
+  "amount": 125000,
+  "received_amount": 125000,
+  "ref_code": "7CX4Z8ZS",
+  "receiving_account": {
+    "provider": "bkash",
+    "msisdn": "8801611223344",
+    "display_name": "Your Shop"
+  },
+  "client_reference": "ORD-2026-001043",
+  "payments": [
+    {
+      "trx_id": "DI4760E7CN",
+      "sender_msisdn": "8801712345678",
+      "amount": 125000,
+      "occurred_at": "2026-09-04T13:54:00Z",
+      "applied_at": "2026-09-04T13:54:06Z",
+      "match_confidence": "exact",
+      "matched_by": "automatic"
+    }
+  ],
+  "shortfall": 0,
+  "excess": 0,
+  "metadata": { "store_id": "st_912" },
+  "expires_at": "2026-09-04T14:05:00Z",
+  "created_at": "2026-09-04T13:50:00Z"
+}</pre></div>
+  <p>
+    <code>payments</code> is a list because a buyer can pay in instalments
+    against one code. It is the ledger for that order, oldest first, and its
+    amounts always sum to <code>received_amount</code>.
+  </p>
+
+  <h3><span class="badge post">POST</span> <code>/v1/intents/:id/cancel</code></h3>
+  <p>Expires the reference code immediately. Safe to call on an already-cancelled intent.</p>
+
+  <h3><span class="badge post">POST</span> <code>/v1/intents/:id/extend</code></h3>
+  <p><code>{ "ttl_seconds": 900 }</code> &mdash; useful when a buyer underpays and you want to hold the order while they top up. A matched or cancelled intent cannot be extended.</p>
+</section>
+
+<section id="statuses">
+  <h2>Intent statuses</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Status</th><th>Meaning</th><th>Your move</th></tr></thead>
+    <tbody>
+      <tr><td><code>open</code></td><td>Waiting for money.</td><td>Show the pay page.</td></tr>
+      <tr><td><code>partial</code></td><td>Some arrived, short of the total.</td><td>Hold the order. The same code accepts the rest.</td></tr>
+      <tr><td><code>matched</code></td><td>Paid in full.</td><td>Fulfil.</td></tr>
+      <tr><td><code>over</code></td><td>More arrived than asked.</td><td>Fulfil, and settle the excess yourself.</td></tr>
+      <tr><td><code>expired</code></td><td>TTL elapsed with nothing.</td><td>Release stock.</td></tr>
+      <tr><td><code>cancelled</code></td><td>You cancelled, or an admin voided it.</td><td>Nothing.</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    <code>over</code> is a <em>completed</em> state, not a problem to resolve. The
+    reference code is consumed and the order is done; the excess is a separate
+    conversation.
+  </p>
+</section>
+
+<section id="submissions">
+  <h2>Submissions</h2>
+  <h3><span class="badge post">POST</span> <code>/v1/submissions</code></h3>
+  <p>
+    For a payment that did not auto-match, usually because the buyer skipped the
+    reference field. The buyer supplies the TrxID from their own confirmation and
+    Jomma looks for it among the payments it has already captured.
+  </p>
+  <div class="code" data-lang="json"><pre>{
+  "intent_id": "int_01M1PEP3ZZEEC99NQ5CM1H6W1Q",
+  "trx_id": "DI4760E7CN",
+  "claimed_amount": 125000
+}</pre></div>
+  <p>The lookup is scoped to that intent's receiving account, and the sender still has to match the declared payer. Possible resolutions:</p>
+  <div class="tw"><table>
+    <thead><tr><th>Resolution</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>applied</code></td><td>Found, checks passed, credited.</td></tr>
+      <tr><td><code>partial</code></td><td>Credited, still short. Response carries <code>shortfall</code>.</td></tr>
+      <tr><td><code>over</code></td><td>Credited, more than asked. Response carries <code>excess</code>.</td></tr>
+      <tr><td><code>not_found</code></td><td>No payment with that TrxID on this account. Usually too early.</td></tr>
+      <tr><td><code>sender_mismatch</code></td><td>Found, but from a different number. Escalated to a human, never auto-applied.</td></tr>
+      <tr><td><code>already_applied</code></td><td>That TrxID is already spent on this order.</td></tr>
+      <tr><td><code>duplicate_submission</code></td><td>Spent on a <em>different</em> order. Returns <code>409</code>.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><p>
+    The public version, <code>POST /api/pay/:id/submit</code>, deliberately takes
+    no sender number: a buyer supplying both the claim and the evidence for it is
+    self-certifying. The number comes from the intent.
+  </p></div>
+</section>
+
+<section id="accounts">
+  <h2>Accounts</h2>
+  <h3><span class="badge get">GET</span> <code>/v1/accounts</code></h3>
+  <p>
+    Which receiving numbers exist and whether they are healthy. Worth calling
+    before you show a payment option at all &mdash; an account is
+    <code>degraded</code> when its phone has stopped reporting, or when its
+    balance stopped adding up.
+  </p>
+</section>
+
+<section id="paypage">
+  <h2>Pay-page API</h2>
+  <p>
+    Public and unauthenticated, used by the hosted checkout. Listed because you
+    may want to build your own page against the same endpoints.
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Endpoint</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge get">GET</span> <code>/api/pay/:id/status</code></td><td>What the page polls. Buyer-safe subset: no order id, no account id, no other payments.</td></tr>
+      <tr><td><span class="badge post">POST</span> <code>/api/pay/:id/payer</code></td><td>The buyer naming their number. Write-once, and only while open.</td></tr>
+      <tr><td><span class="badge post">POST</span> <code>/api/pay/:id/method</code></td><td>The buyer choosing a provider. Refused once money has arrived.</td></tr>
+      <tr><td><span class="badge post">POST</span> <code>/api/pay/:id/submit</code></td><td>Manual TrxID verification.</td></tr>
+      <tr><td><span class="badge post">POST</span> <code>/api/pay/:id/refund</code></td><td>Records a refund request. Jomma moves no money.</td></tr>
+      <tr><td><span class="badge get">GET</span> <code>/api/pay/:id/qr</code></td><td>A PNG QR of the pay page, for carrying it to a phone.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><p>
+    The intent id is a uuidv7 rendered as 26 base32 characters, so it is not
+    guessable. That is what makes these safe to leave unauthenticated.
+  </p></div>
+</section>
+
+<section id="custom">
+  <h2>Building your own checkout</h2>
+  <p>
+    Nothing about the hosted page is required. <code>POST /v1/intents</code>
+    returns everything you need; render it however you like and poll
+    <code>GET /v1/intents/:id</code> with your API key.
+  </p>
+  <p>Tell the buyer to:</p>
+  <ol>
+    <li>Open their wallet app and choose <strong>Send Money</strong> (or dial <code>*247#</code> and choose <code>1</code>)</li>
+    <li>Send to <strong><code>receiving_account.msisdn</code></strong></li>
+    <li>Enter exactly <strong><code>amount</code></strong></li>
+    <li>Put <strong><code>ref_code</code></strong> in the <strong>Reference</strong> field</li>
+    <li>Confirm with their PIN</li>
+  </ol>
+  <div class="note danger"><p>
+    If you build your own page you <strong>must</strong> collect the buyer's
+    number and pass it as <code>payer_msisdn</code>, or nothing will auto-match
+    and every payment will need a manual TrxID.
+  </p></div>
+</section>
+
+<section id="sdk">
+  <h2>SDK</h2>
+  <div class="code" data-lang="bash"><pre>pnpm add @jomma/sdk</pre></div>
+  <div class="code" data-lang="typescript"><pre>import { Jomma } from '@jomma/sdk'
+
+const jomma = new Jomma({
+  apiKey: process.env.JOMMA_KEY,
+  baseUrl: 'https://pay.yourshop.com',
+})
+
+const intent = await jomma.intents.create({
+  amount: 125000,
+  clientReference: order.id,
+  payerMsisdn: order.buyerPhone,
+  provider: 'bkash',
+  returnUrl: 'https://yourshop.com/orders/' + order.id + '/thanks',
+  idempotencyKey: order.id, // do not omit this
+})
+
+redirect(jomma.payUrl(intent.id))</pre></div>
+
+  <p>Webhook verification, with the timing-safe comparison and staleness check already done:</p>
+  <div class="code" data-lang="typescript"><pre>import { constructEvent } from '@jomma/sdk'
+
+const event = constructEvent(
+  rawBody,
+  req.headers.get('x-jomma-signature'),
+  process.env.JOMMA_WEBHOOK_SECRET,
+) // throws SignatureVerificationError on a bad or stale signature</pre></div>
+
+  <p>
+    The SDK is types, signing and retries. No business logic &mdash; anything
+    that decides what a payment <em>means</em> lives on the server, where there
+    is exactly one copy of it.
+  </p>
+</section>
+
+<section id="errors">
+  <h2>Errors</h2>
+  <div class="code" data-lang="json"><pre>{
+  "error": {
+    "code": "no_healthy_account",
+    "message": "No receiving account is currently accepting payments.",
+    "request_id": "req_01J8X..."
+  }
+}</pre></div>
+  <div class="tw"><table>
+    <thead><tr><th>Code</th><th>HTTP</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td><code>unauthorized</code></td><td>401</td><td>Bad or revoked key.</td></tr>
+      <tr><td><code>not_found</code></td><td>404</td><td>Unknown intent. Also returned for another app's intent, deliberately &mdash; a 403 would confirm it exists.</td></tr>
+      <tr><td><code>validation_failed</code></td><td>422</td><td>Body rejected. <code>details</code> says which field.</td></tr>
+      <tr><td><code>duplicate_submission</code></td><td>409</td><td>That TrxID is already spent on another order.</td></tr>
+      <tr><td><code>rate_limited</code></td><td>429</td><td>Back off. <code>Retry-After</code> says how long.</td></tr>
+      <tr><td><code>no_healthy_account</code></td><td>503</td><td>Every receiving number is down. Do not show a pay page.</td></tr>
+    </tbody>
+  </table></div>
+  <p>Every response carries <code>request_id</code>. Log it &mdash; it is searchable in the dashboard.</p>
+</section>
+
+<section id="limits">
+  <h2>Rate limits</h2>
+  <p><code>X-RateLimit-Limit</code>, <code>X-RateLimit-Remaining</code> and <code>X-RateLimit-Reset</code> come back on every response, errors included.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Endpoint</th><th>Limit</th></tr></thead>
+    <tbody>
+      <tr><td><code>POST /v1/intents</code></td><td>60 / min per key</td></tr>
+      <tr><td><code>GET /v1/intents/:id</code></td><td>600 / min per key</td></tr>
+      <tr><td><code>POST /v1/submissions</code></td><td>20 / min per key, 5 / hour per intent</td></tr>
+      <tr><td><code>POST /device/v1/capture</code></td><td>120 / min per device</td></tr>
+      <tr><td><code>POST /ingest/v1/webhook</code></td><td>120 / min per IP</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note warn"><p>
+    Limiting is in-process, so it is <strong>per instance</strong>. Fine on one
+    instance; behind several, the effective limit multiplies. The per-intent
+    submission limit is database-backed and holds either way.
+  </p></div>
+</section>
+<nav class="pagenav">
+  <a href="quickstart.html"><small>Previous</small><b>Quick start</b></a>
+  <a class="next" href="webhooks.html"><small>Next</small><b>Webhooks</b></a>
+</nav>
+</main>
+</div>
+
+<footer>
+  Jomma &mdash; payment verification for Bangladeshi mobile financial services.
+  <br />It never moves money and never sees a PIN.
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>
