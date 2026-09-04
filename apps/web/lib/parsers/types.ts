@@ -22,6 +22,16 @@ export interface MessageParser {
   /** Cheap pre-check so an unrelated notification is not run through every regex. */
   claims(raw: string, packageName?: string | null): boolean
   parse(raw: string): ParsedMessage
+  /**
+   * Whether this parser can actually read a real message yet.
+   *
+   * `false` means every capture for the provider lands in the manual queue as a
+   * parse failure. That is a safe outcome — the raw text is stored and nothing
+   * is lost — but it is emphatically not a payment method to offer a buyer at
+   * checkout, so the flag is read where methods are listed rather than being a
+   * comment somebody has to remember. See AGENTS.md open decision #2.
+   */
+  automatic: boolean
 }
 
 export function failed(error: string): ParsedMessage {

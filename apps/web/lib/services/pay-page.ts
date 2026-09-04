@@ -1,9 +1,17 @@
 import 'server-only'
 
 import { fromPublicId } from '@jomma/shared'
-import { eq } from 'drizzle-orm'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { apps, paymentIntents, paymentRefs, receivingAccounts } from '@/lib/db/schema'
+import {
+  apps,
+  incomingPayments,
+  orderPayments,
+  paymentIntents,
+  paymentRefs,
+  receivingAccounts,
+} from '@/lib/db/schema'
+import { type CheckoutMethod, listCheckoutMethods } from './checkout'
 import { safeRedirect } from './redirects'
 
 /**
@@ -33,8 +41,26 @@ export interface PayView {
   receivedAmountCents: number
   shortfallCents: number
 
-  /** The 4-character code that goes in bKash's Reference field. */
+  /** The 4-character code that goes in the provider's Reference field. */
   refCode: string | null
+
+  /**
+   * Payments already applied, oldest first.
+   *
+   * Split payments are ordinary here: several TrxIDs can land against one
+   * intent and the outstanding amount is the difference. The buyer needs to see
+   * what has been counted, or a second request for money looks like a mistake.
+   */
+  payments: Array<{
+    trxId: string | null
+    amountCents: number
+    appliedAt: string
+  }>
+
+  /** How this can be paid, and which one it is routed to now. */
+  methods: CheckoutMethod[]
+  /** False once anything has arrived — the account is pinned from then on. */
+  canSwitchMethod: boolean
 
   expiresAt: string
   /** Null unless the app registered the host. Never echoed back unchecked. */
@@ -97,6 +123,18 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
 
   if (!row) return null
 
+  const applied = await db
+    .select({
+      trxId: incomingPayments.trxId,
+      amountCents: orderPayments.appliedCents,
+      appliedAt: orderPayments.appliedAt,
+    })
+    .from(orderPayments)
+    .innerJoin(incomingPayments, eq(incomingPayments.id, orderPayments.incomingPaymentId))
+    .where(and(eq(orderPayments.intentId, row.id), isNull(orderPayments.reversedAt)))
+    .orderBy(asc(orderPayments.appliedAt))
+
+  const methods = await listCheckoutMethods(row.id)
   const hosts = row.allowedRedirectHosts ?? []
 
   return {
@@ -109,6 +147,15 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
     receivedAmountCents: row.receivedAmountCents,
     shortfallCents: Math.max(0, row.amountCents - row.receivedAmountCents),
     refCode: row.refCode,
+    payments: applied.map((payment) => ({
+      trxId: payment.trxId,
+      amountCents: payment.amountCents,
+      appliedAt: payment.appliedAt.toISOString(),
+    })),
+    methods,
+    // A single applied payment pins the receiving account, because the matcher
+    // gates on it — see switchCheckoutMethod.
+    canSwitchMethod: applied.length === 0 && row.status === 'open',
     expiresAt: row.expiresAt.toISOString(),
     returnUrl: safeRedirect(row.returnUrl, hosts),
     cancelUrl: safeRedirect(row.cancelUrl, hosts),

@@ -64,6 +64,13 @@
       "when": 1788516171858,
       "tag": "0008_even_sunset_bain",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788518876015,
+      "tag": "0009_vengeful_gauntlet",
+      "breakpoints": true
     }
   ]
 }

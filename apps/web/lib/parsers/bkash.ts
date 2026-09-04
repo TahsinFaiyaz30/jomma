@@ -115,6 +115,7 @@ export function parseBkash(raw: string): ParsedMessage {
 export const bkashParser: MessageParser = {
   provider: 'bkash',
   packages: PACKAGES,
+  automatic: true,
   claims(raw, packageName) {
     if (packageName && PACKAGES.includes(packageName as (typeof PACKAGES)[number])) return true
     return /bkash|TrxID\s*[:\s]*BK/i.test(raw)

@@ -162,6 +162,7 @@ export const AUDIT_ACTIONS = [
   'intent.cancelled',
   'intent.extended',
   'intent.expired',
+  'intent.rerouted',
   'payment.captured',
   'payment.parse_failed',
   'payment.matched',

@@ -63,8 +63,30 @@ export async function resolveSubmission(options: {
   })
   if (!intent) throw ApiError.notFound()
 
+  /*
+   * Scoped to this intent's receiving account, not just the TrxID.
+   *
+   * The automatic matcher gates on the receiving account — it only ever loads
+   * candidates for the account the payment landed on. This path has to gate the
+   * same way, from the other direction, or the two disagree: a TrxID for money
+   * that arrived on a different account, or on a different provider entirely,
+   * would be credited to this intent purely because the number was quoted.
+   *
+   * The money is the merchant's either way, so this is not theft — but it would
+   * satisfy an amount lock held on one account with money that arrived on
+   * another, and it would let a buyer pay by a method they did not select. Both
+   * corrupt per-account reconciliation and balance continuity.
+   *
+   * Out of scope means genuinely not found *for this intent*, which is an
+   * existing resolution that escalates to a human after three attempts. A real
+   * payment sitting on the wrong account is then applied by an admin from the
+   * queue, with the account mismatch visible.
+   */
   const payment = await db.query.incomingPayments.findFirst({
-    where: eq(incomingPayments.trxId, options.trxId),
+    where: and(
+      eq(incomingPayments.trxId, options.trxId),
+      eq(incomingPayments.receivingAccountId, intent.receivingAccountId),
+    ),
   })
 
   const outcome = payment

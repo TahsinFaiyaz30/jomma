@@ -33,6 +33,9 @@ export function parseNagad(_raw: string): ParsedMessage {
 
 export const nagadParser: MessageParser = {
   provider: 'nagad',
+  // The format is still unverified, so nothing here can be trusted to read a
+  // real message. Checkout must not offer Nagad until this is true.
+  automatic: false,
   packages: PACKAGES,
   claims(raw, packageName) {
     if (packageName && PACKAGES.includes(packageName as (typeof PACKAGES)[number])) return true
