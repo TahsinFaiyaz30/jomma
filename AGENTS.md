@@ -297,10 +297,16 @@ be red.
 
 ## Open decisions
 
-1. **Deployment target.** ✅ Decided: `docker-compose.yml` runs Postgres alone for
-   local development; `web` and `worker` run on the host. No production deploy
-   config is written yet — the VPS/managed-platform choice is still open, so
-   confirm before writing one.
+1. **Deployment target.** ✅ Decided: a managed host, no VPS. Render for the web
+   service, Neon for Postgres, a cron service in place of a persistent worker.
+   `render.yaml` and `docs/deploy.md` cover it. `docker-compose.yml` still runs
+   Postgres alone for local development.
+
+   The consequence worth knowing: every scheduled job now lives in
+   `apps/web/lib/jobs` behind `POST /api/internal/sweep?group=…`, so a cron ping
+   and `apps/worker` run *the same code*. The worker is a scheduler, not a second
+   implementation, which is what makes hosting without a background process a
+   configuration choice rather than a fork.
 2. **Nagad message format.** ⛔ Still unknown. `lib/parsers/nagad.ts` is a
    deliberate stub that returns `parse_status: 'failed'`, which stores the raw
    text and raises a `parse_failure` alert rather than guessing at a format.

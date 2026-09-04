@@ -1,8 +1,8 @@
 # Local development only.
 #
-# The deployment target is still an open decision (AGENTS.md, "Open decisions" #1),
-# so this file deliberately runs Postgres alone. `web` and `worker` run on the host
-# via `pnpm dev` / `pnpm dev:worker`. No production compose profile is written yet.
+# Postgres alone; `web` and `worker` run on the host via `pnpm dev` /
+# `pnpm dev:worker`. There is no production compose profile because production is
+# a managed host — see docs/deploy.md and render.yaml.
 
 services:
   postgres:

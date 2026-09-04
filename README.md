@@ -90,7 +90,9 @@ apps/
     lib/parsers/         Per-provider message parsers + fixtures
     lib/services/        Money logic — one implementation of each decision
     lib/db/schema/       Drizzle schema
-  worker/      pg-boss — webhook delivery, expiry sweeps, health alerts
+    lib/jobs/            Scheduled work. Run by the worker or by a cron ping.
+  worker/      pg-boss scheduler. Triggers lib/jobs over the internal endpoint.
+  bridge/      Optional Messages scraper, off by default. Best-effort.
   android/     Kotlin notifier. Builds and runs; unproven on real hardware.
 packages/
   shared/      Types, env loading, id codec, webhook contract
@@ -148,8 +150,12 @@ Two of these are blocked on you, not on code.
   a bKash app, a SIM, or a camera to scan a provisioning QR, so real capture,
   reboot survival and provisioning are still unproven on hardware.
   See [apps/android/README.md](apps/android/README.md).
-- **No deploy config.** The compose file runs Postgres for development only;
-  the deployment target is still open (AGENTS.md #1).
-- Rate limiting is in-process, so it is per-instance. Fine for one VPS; the
+- **Never deployed.** `render.yaml` and [docs/deploy.md](docs/deploy.md) target
+  Render plus a managed Postgres, and the config is written and typechecked, but
+  nothing has actually been pushed to a host yet.
+- **No buyer-facing checkout page.** Jomma returns everything one needs —
+  reference code, receiving number, amount, expiry — and the client app renders
+  it. There is no hosted page a buyer lands on.
+- Rate limiting is in-process, so it is per-instance. Fine for one instance; the
   per-intent submission limit is database-backed and survives restarts either way.
-- No Messages bridge. The feature flag exists and is off.
+- The Messages bridge is written but has never held a real pairing.

@@ -10,8 +10,8 @@ import {
 } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
 import { and, eq, isNull, lte, or, sql } from 'drizzle-orm'
-import { db, schema } from '../db'
-import { logger } from '../logger'
+import { db, schema } from '@/lib/db/client'
+import { logger } from '@/lib/logger'
 
 const { webhookDeliveries, webhookEndpoints } = schema
 

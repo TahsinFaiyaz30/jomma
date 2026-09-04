@@ -1,0 +1,101 @@
+# Render blueprint.
+#
+# Two services and a cron entry. The cron is what replaces the worker: every job
+# is implemented in the web app under lib/jobs, so a cron POST to
+# /api/internal/sweep runs the same code a background worker would.
+#
+# Read docs/deploy.md before pushing this. In particular: a free web service
+# sleeps after 15 minutes of inactivity, and a sleeping web service cannot
+# receive a payment capture. That is a real limitation of the free tier, not a
+# configuration mistake.
+
+services:
+  # ── Web: API + dashboard ───────────────────────────────────────────────────
+  - type: web
+    name: jomma-web
+    runtime: node
+    region: singapore # Closest Render region to Bangladesh.
+    plan: starter # `free` works, but it sleeps. See docs/deploy.md.
+    branch: main
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @jomma/web build
+    startCommand: pnpm --filter @jomma/web start
+    healthCheckPath: /login
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: '3000'
+
+      # Point at whichever Postgres you picked. Neon and Supabase both want
+      # sslmode=require in the URL.
+      - key: DATABASE_URL
+        sync: false
+      # Managed Postgres free tiers cap connections hard — Neon's pooler and
+      # Supabase's free project both sit well under Postgres defaults.
+      - key: DATABASE_POOL_MAX
+        value: '5'
+
+      # Generated once by Render, then shared with the cron job below. This is
+      # also the credential for /api/internal/sweep.
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: WEBHOOK_SIGNING_SECRET
+        generateValue: true
+
+      # Must be the service's own public URL. The worker/cron uses it to reach
+      # the sweep endpoint, and Better Auth uses it for the origin check.
+      - key: APP_URL
+        fromService:
+          name: jomma-web
+          type: web
+          property: host
+
+      - key: LOG_LEVEL
+        value: info
+      - key: FEATURE_MESSAGES_BRIDGE
+        value: 'false'
+
+  # ── Scheduler ──────────────────────────────────────────────────────────────
+  #
+  # Render's cron floor is one minute, so this calls `group=all` every minute
+  # rather than running the four cadences separately. Slightly more work than a
+  # persistent worker does, and identical in behaviour.
+  #
+  # Cron jobs are not on the free tier. If you are staying free, use an external
+  # pinger instead — docs/deploy.md has the details.
+  - type: cronjob
+    name: jomma-jobs
+    runtime: node
+    region: singapore
+    plan: starter
+    branch: main
+    schedule: '* * * * *'
+    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    startCommand: node scripts/run-jobs.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      - key: APP_URL
+        fromService:
+          name: jomma-web
+          type: web
+          property: host
+      - key: AUTH_SECRET
+        fromService:
+          name: jomma-web
+          type: web
+          envVarKey: AUTH_SECRET
+
+# Render's own free Postgres expires after 30 days, which is not a database you
+# put payments in. Use Neon or Supabase and set DATABASE_URL by hand. If you do
+# want Render Postgres on a paid plan, uncomment this and wire DATABASE_URL to
+# it with `fromDatabase`.
+#
+# databases:
+#   - name: jomma-postgres
+#     plan: basic-256mb
+#     region: singapore
+#     postgresMajorVersion: '18'

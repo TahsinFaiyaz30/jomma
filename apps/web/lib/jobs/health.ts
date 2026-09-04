@@ -1,16 +1,22 @@
 import { env } from '@jomma/shared/env'
 import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
-import { db, schema } from '../db'
-import { logger } from '../logger'
+import { db, schema } from '@/lib/db/client'
+import { logger } from '@/lib/logger'
 
 const { amountLocks, idempotencyKeys, incomingPayments, notifierEvents, receivingAccounts } = schema
 
 /**
  * Health sweeps.
  *
- * These are pure bookkeeping over the worker's own view of the tables — no money
- * decisions. Anything that applies a payment goes through the web app's
- * `applyPayment`, because there must be exactly one implementation of that.
+ * Pure bookkeeping over the tables — no money decisions. Anything that applies a
+ * payment goes through `applyPayment`, because there must be exactly one
+ * implementation of that.
+ *
+ * These live in the web app rather than the worker so that *what* runs is
+ * independent of *what schedules it*. A long-running worker and a plain cron
+ * ping at `/api/internal/sweep` produce identical behaviour, which is what makes
+ * hosting without a persistent background process a configuration choice rather
+ * than a different system.
  */
 
 /**
