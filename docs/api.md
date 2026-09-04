@@ -358,6 +358,75 @@ noise.
 
 ---
 
+## Hosted checkout
+
+The way to connect a storefront Jomma knows nothing about. Create an intent with
+a `return_url`, redirect the buyer, and wait for the webhook.
+
+```jsonc
+// POST /v1/intents
+{
+  "amount": 75604,
+  "client_reference": "ORD-1043",
+  "provider": "bkash",            // bkash | nagad | any — the buyer picked this
+  "return_url": "https://shop.example.com/orders/1043/thanks",
+  "cancel_url": "https://shop.example.com/cart"
+}
+```
+
+Then send the buyer to:
+
+```
+https://your-jomma.example.com/pay/int_01M1NXQWXZFRB8TZM5XF3VZ9XV
+```
+
+That page shows the receiving number, the amount and the reference code, plays an
+animated walkthrough of the provider's Send Money flow with those values in it,
+and updates itself the moment the payment is matched. It asks the buyer which
+number they are paying from, which feeds the scorer's sender signal.
+
+**`return_url` and `cancel_url` are checked against the app's registered
+hostnames** (Apps → Hosted checkout in the dashboard). An app with none
+registered gets no redirect at all rather than any redirect it asks for — an
+unchecked return URL on a payment page is an open redirect aimed at somebody who
+has just been told to trust the page. Subdomains of a registered host are
+included.
+
+### `GET /api/pay/:id/status`
+
+Public, unauthenticated, polled by that page. Returns only what a buyer needs:
+
+```jsonc
+{
+  "id": "int_01M1NXQWXZFRB8TZM5XF3VZ9XV",
+  "status": "matched",            // open | partial | matched | expired | cancelled
+  "amount": 75604,
+  "received_amount": 75604,
+  "shortfall": 0,
+  "expires_at": "2026-09-04T10:14:32.030Z",
+  "return_url": "https://shop.example.com/orders/1043/thanks"
+}
+```
+
+No order id, no account id, no other payments. The intent id is a uuidv7 in 26
+base32 characters, so it is not guessable, and the endpoint is rate limited by IP.
+
+### `POST /api/pay/:id/payer`
+
+`{ "msisdn": "01712345678" }` — the buyer naming the number they will send from.
+Write-once and only while the intent is open, because the caller holds a link
+rather than a credential. Setting it at intent creation from your server is
+authoritative and skips this entirely.
+
+### Building your own screen instead
+
+Nothing above is required. `POST /v1/intents` returns `ref_code`,
+`receiving_account.msisdn`, `amount` and `expires_at`; render them however you
+like and poll `GET /v1/intents/:id` with your API key. The hosted page exists so
+that a platform with no room for custom checkout code still has a path.
+
+---
+
 ## Ingest API
 
 For capture sources that are not devices and have no provisioning story.

@@ -47,6 +47,18 @@ export const paymentIntents = pgTable(
     payerMsisdn: text('payer_msisdn'),
     providerPreference: providerPreferenceEnum('provider_preference').notNull().default('any'),
 
+    /**
+     * Where the hosted pay page sends the buyer afterwards.
+     *
+     * This is what lets Jomma sit in front of a storefront it knows nothing
+     * about: the store redirects to `/pay/:id` and names where to come back to.
+     * Both are validated as absolute http(s) URLs on the way in — an unchecked
+     * redirect target on a payment page is an open redirect, and a phishing page
+     * that has already been handed the buyer is about as bad as those get.
+     */
+    returnUrl: text('return_url'),
+    cancelUrl: text('cancel_url'),
+
     status: intentStatusEnum('status').notNull().default('open'),
     metadata: jsonb('metadata').notNull().default({}).$type<Record<string, unknown>>(),
 

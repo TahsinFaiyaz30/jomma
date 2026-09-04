@@ -36,6 +36,26 @@ export const metadataSchema = z
     message: 'Metadata must serialise to 4KB or less.',
   })
 
+/**
+ * A redirect target for the hosted pay page.
+ *
+ * Absolute http(s) only. A relative URL, a `javascript:` URL or a protocol
+ *-relative `//evil.example` are all rejected here; the host is checked against
+ * the app's allowlist later, once we know which app is asking.
+ */
+const redirectUrlSchema = z
+  .string()
+  .trim()
+  .max(2048)
+  .refine((value) => {
+    try {
+      const url = new URL(value)
+      return url.protocol === 'https:' || url.protocol === 'http:'
+    } catch {
+      return false
+    }
+  }, 'Must be an absolute http(s) URL')
+
 export const createIntentSchema = z.object({
   amount: poishaSchema,
   client_reference: z.string().trim().min(1).max(255),
@@ -43,6 +63,10 @@ export const createIntentSchema = z.object({
   provider: z.enum(PROVIDER_PREFERENCES).default('any'),
   ttl_seconds: z.number().int().min(60).max(3600).optional(),
   metadata: metadataSchema.optional(),
+
+  /** Where the hosted pay page sends the buyer on success / on cancel. */
+  return_url: redirectUrlSchema.optional().nullable(),
+  cancel_url: redirectUrlSchema.optional().nullable(),
 })
 export type CreateIntentInput = z.infer<typeof createIntentSchema>
 

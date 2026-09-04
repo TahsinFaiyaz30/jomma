@@ -16,6 +16,8 @@ export interface AppView {
   name: string
   slug: string
   status: string
+  /** Hostnames the hosted pay page may return a buyer to. */
+  allowedRedirectHosts: string[]
   keys: Array<{
     id: string
     name: string
@@ -92,6 +94,7 @@ export async function listApps(): Promise<AppView[]> {
         name: app.name,
         slug: app.slug,
         status: app.status,
+        allowedRedirectHosts: app.allowedRedirectHosts ?? [],
         keys: keys.map((key) => ({
           id: key.id,
           name: key.name,
@@ -251,4 +254,49 @@ export async function replayAllFailed(options: {
     .returning({ id: webhookDeliveries.id })
 
   return rows.length
+}
+
+/**
+ * Which hostnames the hosted pay page may send a buyer back to.
+ *
+ * Stored as bare hostnames rather than URLs, and matched apex-plus-subdomains,
+ * so a store registers `shop.example.com` once instead of every path it might
+ * return to. An empty list means no redirect at all — see lib/services/redirects.
+ */
+export async function setAllowedRedirectHosts(options: {
+  appId: string
+  hosts: string[]
+  actorId: string
+}): Promise<string[]> {
+  const cleaned = Array.from(
+    new Set(
+      options.hosts
+        .map((host) => host.trim().toLowerCase())
+        // Accept a pasted URL and keep only its host, because that is what
+        // people will paste.
+        .map((host) => {
+          if (!host) return ''
+          try {
+            return new URL(host.includes('://') ? host : `https://${host}`).hostname
+          } catch {
+            return ''
+          }
+        })
+        .filter((host) => host.length > 0 && host.includes('.')),
+    ),
+  ).slice(0, 20)
+
+  await db.transaction(async (tx) => {
+    await tx.update(apps).set({ allowedRedirectHosts: cleaned }).where(eq(apps.id, options.appId))
+
+    await audit(tx, {
+      action: 'app.updated',
+      actorId: options.actorId,
+      actorType: 'admin',
+      appId: options.appId,
+      payload: { allowed_redirect_hosts: cleaned },
+    })
+  })
+
+  return cleaned
 }

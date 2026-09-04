@@ -18,6 +18,19 @@ export const apps = pgTable(
     name: text('name').notNull(),
     slug: text('slug').notNull(),
     status: appStatusEnum('status').notNull().default('active'),
+
+    /**
+     * Hostnames this app may send a buyer back to from the hosted pay page.
+     *
+     * An unchecked `return_url` is an open redirect on a page the buyer has
+     * already been told to trust with a payment, which is the worst place to
+     * have one. Empty means the app cannot use hosted redirect at all — the pay
+     * page still works, it just has nowhere to send them afterwards. Fail
+     * closed: a store that has not registered its domain does not get a
+     * redirect, rather than getting any redirect it asks for.
+     */
+    allowedRedirectHosts: jsonb('allowed_redirect_hosts').notNull().default([]).$type<string[]>(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

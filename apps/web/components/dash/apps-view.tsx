@@ -8,6 +8,7 @@ import {
   replayAllFailedAction,
   replayDeliveryAction,
   revokeKeyAction,
+  setRedirectHostsAction,
   toggleEndpointAction,
 } from '@/app/(dash)/apps/actions'
 import { StatusDot } from '@/components/status'
@@ -131,6 +132,11 @@ function AppCard({ app }: { app: AppView }) {
           </Button>
         </div>
       </div>
+
+      <Separator />
+
+      {/* ── Hosted checkout ────────────────────────────────────────────── */}
+      <RedirectHosts app={app} />
 
       <Separator />
 
@@ -293,5 +299,52 @@ function AppCard({ app }: { app: AppView }) {
         </div>
       ) : null}
     </section>
+  )
+}
+
+/**
+ * Where the hosted pay page may return a buyer.
+ *
+ * Empty means no redirect, which is the safe default and the state every app
+ * starts in — an unchecked return URL on a payment page is an open redirect
+ * pointed at somebody who has just been told to trust the page.
+ */
+function RedirectHosts({ app }: { app: AppView }) {
+  const [value, setValue] = useState(app.allowedRedirectHosts.join(', '))
+  const [pending, start] = useTransition()
+
+  return (
+    <div className="space-y-2 px-4 py-3">
+      <div className="text-small font-medium">Hosted checkout</div>
+      <p className="max-w-2xl text-micro text-muted-foreground">
+        Send buyers to <span className="figure">/pay/&lt;intent_id&gt;</span> and pass a{' '}
+        <span className="figure">return_url</span> when creating the intent. Only these hostnames
+        are ever followed; subdomains of each are included. Leave empty and no redirect is offered
+        at all.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder="shop.example.com, checkout.example.com"
+          className="h-7 max-w-md text-small"
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          onClick={() =>
+            start(async () => {
+              const result = await setRedirectHostsAction(app.id, value)
+              if (result.ok) toast.success(result.message)
+              else toast.error(result.message)
+            })
+          }
+        >
+          {pending ? <Spinner /> : null}
+          Save
+        </Button>
+      </div>
+    </div>
   )
 }

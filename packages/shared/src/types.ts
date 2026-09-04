@@ -181,6 +181,7 @@ export const AUDIT_ACTIONS = [
   'apikey.revoked',
   'endpoint.created',
   'webhook.replayed',
+  'app.updated',
   'statement.imported',
 ] as const
 export type AuditAction = (typeof AUDIT_ACTIONS)[number]

@@ -8,6 +8,7 @@ import {
   replayAllFailed,
   replayDelivery,
   revokeApiKey,
+  setAllowedRedirectHosts,
   setEndpointStatus,
 } from '@/lib/services/app-admin'
 
@@ -112,5 +113,35 @@ export async function replayAllFailedAction(appId: string): Promise<AppActionRes
     }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Could not replay.' }
+  }
+}
+
+/**
+ * Register the hostnames the hosted pay page may return a buyer to.
+ *
+ * Empty is a valid answer and means the app does not use hosted redirect at
+ * all — the pay page still works, it just has nowhere to send them afterwards.
+ */
+export async function setRedirectHostsAction(appId: string, raw: string): Promise<AppActionResult> {
+  const admin = await requireAdmin()
+
+  try {
+    const hosts = await setAllowedRedirectHosts({
+      appId,
+      hosts: raw.split(/[\s,]+/),
+      actorId: admin.id,
+    })
+
+    revalidatePath('/apps')
+
+    return {
+      ok: true,
+      message:
+        hosts.length === 0
+          ? 'Cleared. This app cannot redirect buyers anywhere.'
+          : `Buyers can be returned to ${hosts.join(', ')}.`,
+    }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not save.' }
   }
 }

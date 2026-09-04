@@ -110,6 +110,8 @@ export async function createIntent(options: {
             clientReference: options.input.client_reference,
             payerMsisdn: options.input.payer_msisdn ?? null,
             providerPreference: options.input.provider,
+            returnUrl: options.input.return_url ?? null,
+            cancelUrl: options.input.cancel_url ?? null,
             metadata: options.input.metadata ?? {},
             ttlSeconds,
             expiresAt,

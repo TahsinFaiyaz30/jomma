@@ -50,6 +50,20 @@
       "when": 1788465006697,
       "tag": "0006_audit_admin_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788515530638,
+      "tag": "0007_kind_colonel_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788516171858,
+      "tag": "0008_even_sunset_bain",
+      "breakpoints": true
     }
   ]
 }
