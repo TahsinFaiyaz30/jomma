@@ -199,6 +199,18 @@ pnpm dev:worker   # the scheduler</pre></div>
   </p>
   <div class="code bare" data-lang="http"><pre>POST /api/internal/sweep?group=all</pre></div>
 
+  <div class="note danger"><p>
+    <strong>Set <code>APP_URL</code> by hand, with the scheme.</strong> It is the
+    one variable the blueprint cannot fill in, because Render's
+    <code>fromService</code> returns a bare hostname and everything reading this
+    needs an absolute URL. Put
+    <code>https://your-service.onrender.com</code> on <em>both</em> the web
+    service and the cron job once the first deploy has named them. Without it
+    Better Auth rejects every sign-in and the cron cannot build a fetchable sweep
+    URL, so no webhook is ever delivered &mdash; which is why the app now returns
+    a 500 naming the variable rather than looking healthy.
+  </p></div>
+
   <p>Run the migrations and create the first admin from your own machine, once:</p>
   <div class="code" data-lang="bash"><pre>DATABASE_URL='postgres://...?sslmode=require' pnpm db:migrate
 

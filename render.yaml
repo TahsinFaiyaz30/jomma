@@ -45,13 +45,19 @@ services:
       - key: WEBHOOK_SIGNING_SECRET
         generateValue: true
 
-      # Must be the service's own public URL. The worker/cron uses it to reach
-      # the sweep endpoint, and Better Auth uses it for the origin check.
+      # The service's own public URL, WITH the scheme.
+      #
+      # Deliberately not `fromService: property: host`, which yields a bare
+      # hostname like `jomma-web.onrender.com`. Everything that reads this needs
+      # an absolute URL: Better Auth's origin check rejects a schemeless
+      # baseURL, and the cron builds `${APP_URL}/api/internal/sweep`, which
+      # without a scheme is not a fetchable URL — so no jobs would run and no
+      # webhook would ever be delivered.
+      #
+      # Set it in the Render dashboard after the first deploy names the service:
+      #   https://jomma-web.onrender.com
       - key: APP_URL
-        fromService:
-          name: jomma-web
-          type: web
-          property: host
+        sync: false
 
       - key: LOG_LEVEL
         value: info
@@ -78,11 +84,10 @@ services:
     envVars:
       - key: NODE_VERSION
         value: '22'
+      # Same value as the web service's APP_URL, and for the same reason —
+      # this job builds `${APP_URL}/api/internal/sweep`.
       - key: APP_URL
-        fromService:
-          name: jomma-web
-          type: web
-          property: host
+        sync: false
       - key: AUTH_SECRET
         fromService:
           name: jomma-web

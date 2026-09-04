@@ -113,9 +113,24 @@ If you would rather click through it by hand:
 
 Environment variables are in [`.env.production.example`](../.env.production.example).
 
-**`APP_URL` must be the service's real public URL.** Three things break if it is
-wrong: sign-in fails the origin check, the scheduler cannot reach the sweep
-endpoint, and device provisioning QRs point somewhere that does not resolve.
+**`APP_URL` must be the service's real public URL, including `https://`.** Set
+it in the Render dashboard once the first deploy has named the service:
+
+```
+APP_URL=https://jomma-web.onrender.com
+```
+
+It is the one variable the blueprint cannot fill in for you. Render's
+`fromService: property: host` returns a bare hostname with no scheme, and
+everything reading this needs an absolute URL — Better Auth rejects a schemeless
+`baseURL`, and the cron builds `${APP_URL}/api/internal/sweep`, which without a
+scheme is not fetchable, so no jobs run and no webhook is ever delivered.
+
+Since it is easy to forget and fails quietly, the app now refuses to serve in
+production without it: the first request returns a 500 naming `APP_URL` rather
+than a working-looking instance that cannot sign anyone in.
+
+Set the same value on the cron service.
 
 ---
 
