@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { reverseMatchAction } from '@/app/(dash)/intents/actions'
 import { StatusDot } from '@/components/status'
@@ -42,9 +43,16 @@ export function IntentsView({
   const { amount, clock, elapsed } = useI18n()
   const [status, setStatus] = useState<string>('all')
   const [accountId, setAccountId] = useState<string>('all')
-  const [search, setSearch] = useState('')
+  // `?q=` is how the command palette lands on one intent. Read from the URL
+  // rather than passed in, so it also works on a soft navigation.
+  const urlQuery = useSearchParams().get('q') ?? ''
+  const [search, setSearch] = useState(urlQuery)
   const [detail, setDetail] = useState<IntentDetail | null>(null)
   const [loadingDetail, startDetail] = useTransition()
+
+  useEffect(() => {
+    setSearch(urlQuery)
+  }, [urlQuery])
 
   // Filtering happens client-side over the already-loaded page. The server query
   // supports the same filters for when this outgrows one page.

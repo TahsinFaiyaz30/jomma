@@ -5,6 +5,7 @@ import {
   Layers01Icon,
   ListViewIcon,
   RefreshIcon,
+  SearchIcon,
   Settings02Icon,
   SourceCodeIcon,
   Wallet01Icon,
@@ -12,6 +13,7 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { Kbd } from '@/components/ui/kbd'
 import {
   Sidebar,
   SidebarContent,
@@ -29,6 +31,7 @@ import type { MessageKey } from '@/lib/i18n/messages'
 import { useI18n } from '@/lib/i18n/provider'
 import type { SidebarCounts } from '@/lib/services/dashboard'
 import { type AccountFooterItem, AccountHealthFooter } from './account-health'
+import { openCommandPalette } from './command-palette'
 import { UserMenu } from './user-menu'
 
 /**
@@ -100,6 +103,19 @@ export function AppSidebar({
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
+              {/* The shortcut is printed next to it so it is discoverable
+                  rather than folklore. */}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip={`${t('action.commandPalette')} · ⌘K`}
+                  onClick={openCommandPalette}
+                >
+                  <HugeiconsIcon icon={SearchIcon} strokeWidth={2} className="size-4" />
+                  <span>{t('action.search')}</span>
+                  <Kbd className="ml-auto group-data-[collapsible=icon]:hidden">⌘K</Kbd>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+
               {NAV.map((item) => {
                 const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
                 const badgeValue = item.badge ? counts[item.badge] : 0

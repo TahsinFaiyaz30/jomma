@@ -1,6 +1,7 @@
 packages:
   - apps/web
   - apps/worker
+  - apps/bridge
   - packages/*
 
 # pnpm 10 blocks lifecycle scripts by default. Only these need to run.

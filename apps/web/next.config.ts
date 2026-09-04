@@ -35,6 +35,7 @@ const nextConfig: NextConfig = {
     return [
       { source: '/v1/:path*', destination: '/api/v1/:path*' },
       { source: '/device/v1/:path*', destination: '/api/device/v1/:path*' },
+      { source: '/ingest/v1/:path*', destination: '/api/ingest/v1/:path*' },
     ]
   },
 

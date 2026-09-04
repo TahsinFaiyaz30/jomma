@@ -4,6 +4,7 @@ import { Search01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StatusDot } from '@/components/status'
 import { Input } from '@/components/ui/input'
@@ -35,10 +36,18 @@ export function FeedTable({ initialRows, initialCursor }: FeedTableProps) {
   const { t, amount, clock, number } = useI18n()
   const reduceMotion = useReducedMotion()
 
+  /*
+   * The search box is driven by `?q=`, which is how the command palette lands
+   * on one payment. Reading it from the URL rather than taking it as a prop is
+   * what makes that work: arriving from the palette while already on the feed
+   * is a soft navigation, and a `useState` initialiser would not run again.
+   */
+  const urlQuery = useSearchParams().get('q') ?? ''
+
   const [rows, setRows] = useState<FeedRow[]>(initialRows)
   const [cursor, setCursor] = useState<string | null>(initialCursor)
   const [live, setLive] = useState(true)
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(urlQuery)
   const [activeIndex, setActiveIndex] = useState(0)
   const [openRow, setOpenRow] = useState<FeedRow | null>(null)
   const [arrivals, setArrivals] = useState<Set<string>>(new Set())
@@ -46,6 +55,12 @@ export function FeedTable({ initialRows, initialCursor }: FeedTableProps) {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // Only when the parameter itself changes, so typing in the box is not
+  // clobbered on every render.
+  useEffect(() => {
+    setQuery(urlQuery)
+  }, [urlQuery])
 
   /* ── Live updates ───────────────────────────────────────────────────────── */
 

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { ManualEntry } from '@/components/dash/manual-entry'
 import { PageHeader } from '@/components/dash/page-header'
 import { StatementImport } from '@/components/dash/statement-import'
 import { StatusDot } from '@/components/status'
@@ -17,10 +18,12 @@ export const dynamic = 'force-dynamic'
 /**
  * Reconciliation.
  *
- * Statement import is not built yet, but the integrity checks are — and the
- * important one is live: intents marked paid with no payment row behind them.
- * docs/matching.md says that list must always be empty, so it is surfaced here
- * whether or not the rest of the page exists.
+ * The integrity check that matters is live: intents marked paid with no
+ * payment row behind them. docs/matching.md says that list must always be
+ * empty, so it is surfaced first and loudly.
+ *
+ * Manual entry sits here too, because this is the page you open when something
+ * has gone wrong and money needs accounting for by hand.
  */
 export default async function ReconcilePage() {
   const [paidWithoutPayment, overdue, parseFailures, queue, accounts] = await Promise.all([
@@ -70,6 +73,17 @@ export default async function ReconcilePage() {
             tone={overdue === 0 ? 'matched' : 'ambiguous'}
             good="The expiry sweep is keeping up."
             bad="The worker's expiry sweep is not running, or is behind."
+          />
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-title font-medium">Enter a message by hand</h2>
+          <p className="max-w-2xl text-small text-muted-foreground">
+            Works when nothing else does — phone dead, notifier broken, provider changed its format.
+            Same parser, same deduplication, same matcher as a live capture.
+          </p>
+          <ManualEntry
+            accounts={accounts.map((a) => ({ id: a.id, label: a.label, msisdn: a.msisdn }))}
           />
         </section>
 

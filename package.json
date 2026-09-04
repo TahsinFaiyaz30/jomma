@@ -26,6 +26,8 @@
     "db:studio": "pnpm --filter @jomma/web db:studio",
     "db:reset": "docker compose down -v && docker compose up -d postgres && sleep 4 && pnpm db:migrate && pnpm db:seed",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:ingest": "node scripts/smoke-ingest.mjs",
+    "dev:bridge": "pnpm --filter @jomma/bridge start",
     "test:integration": "pnpm --filter @jomma/web test:integration"
   },
   "devDependencies": {

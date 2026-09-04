@@ -344,6 +344,18 @@ not own orders. `idempotency_keys` is required by `Idempotency-Key` on
 `POST /v1/intents` and needs its own expiry, which a column on `payment_intents`
 could not provide. `order_payments` keeps its name and points at an intent.
 
+**The Messages bridge lives in `apps/bridge`, and it heartbeats conditionally.**
+The spec asks for a bridge that "reports its own health on the same heartbeat
+mechanism as the Android app". It does that literally: it provisions as a device
+(`platform: 'bridge'`) and POSTs to `/device/v1/heartbeat`, so one worker job
+detects a dead phone and a dead bridge. The load-bearing part is the negative —
+it sends **no** heartbeat while its session is unhealthy, so an expired pairing
+or a changed DOM produces the same gap alert as a process that is not running.
+It also raises `bridge_session_lost` on the way into a fault, because that is
+the only signal that can say *why*, but the gap is the backstop. Captures go to
+`/ingest/v1/webhook`, not the device capture endpoint: the bridge is not a
+capture device and does not get a capture device's authority.
+
 **Balance drift is graded by direction.** There is no outgoing-transaction table,
 so a legitimate refund or payout would register as drift and fire a critical
 alert every time — which is exactly how alarm fatigue starts. A balance *lower*

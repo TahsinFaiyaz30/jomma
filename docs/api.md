@@ -352,6 +352,61 @@ that is immediate.**
 Kinds: `permission_lost`, `service_restarted`, `boot`, `parse_hint`,
 `bridge_session_lost`. Each maps to a dashboard alert.
 
+Severity is assigned server-side, not accepted from the device. A compromised
+client must not be able to downgrade its own "I lost notification access" to
+noise.
+
+---
+
+## Ingest API
+
+For capture sources that are not devices and have no provisioning story.
+
+### `POST /ingest/v1/webhook`
+
+Authenticated by HMAC alone — the same construction as Jomma's *outbound*
+webhooks, over `${timestamp}.${rawBody}` with `WEBHOOK_SIGNING_SECRET`:
+
+```
+X-Jomma-Signature: t=1756909512,v1=<hex hmac-sha256>
+```
+
+Five-minute tolerance, constant-time comparison, and every rejection is logged
+with its IP.
+
+```jsonc
+{
+  "msisdn": "+8801712345678",     // which receiving number it landed on
+  "raw": "You have received Tk 1,200.00 from 01712345678. Ref A7K2. TrxID 9F2K1LM8QR. ...",
+  "source": "generic_webhook"     // or "bridge"
+}
+```
+
+```jsonc
+{
+  "status": "accepted",           // accepted | duplicate | unparsed
+  "trx_id": "9F2K1LM8QR",
+  "matched": true,
+  "request_id": "req_01J8X..."
+}
+```
+
+`raw` is stored verbatim before anything tries to read it, parsed with the same
+parser as a device capture, deduplicated on the same `trx_id`, and scored by the
+same matcher. A source that pre-parses would be a second parser to keep in sync
+with the real one, so none is accepted.
+
+The signing secret is the entire authority here, which is why it is a different
+secret from anything a client app ever sees.
+
+### Manual entry
+
+No endpoint — it is a server action on the Reconcile page, because it needs an
+admin session and the audit trail records who typed it. Same pipeline
+otherwise. It is the path that still works when the phone is dead, the notifier
+is broken, the provider has changed its format, and the statement has not
+arrived.
+
 ---
 
 ## Webhooks
@@ -450,6 +505,7 @@ return it.
 | `POST /v1/submissions` | 20 / min per key, 5 / hour per intent |
 | `POST /device/v1/capture` | 120 / min per device |
 | `POST /device/v1/heartbeat` | 20 / min per device |
+| `POST /ingest/v1/webhook` | 120 / min per IP (no device identity to key on) |
 
 Return `X-RateLimit-Remaining` and `X-RateLimit-Reset` on every response.
 

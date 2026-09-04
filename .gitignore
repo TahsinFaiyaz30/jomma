@@ -55,6 +55,12 @@ apps/web/drizzle/meta/_journal.json.bak
 apps/web/lib/parsers/fixtures/raw/
 *.raw-capture.txt
 
+# ── Messages bridge ───────────────────────────────────────────────────
+# Holds a live Messages pairing and the bridge's device token. Treat the
+# whole directory as a credential — see apps/bridge/README.md.
+.bridge/
+apps/bridge/.bridge/
+
 # ── Android ───────────────────────────────────────────────────────────
 apps/android/build/
 apps/android/*/build/

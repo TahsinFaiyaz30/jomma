@@ -1,4 +1,5 @@
 import { AppSidebar } from '@/components/dash/app-sidebar'
+import { CommandPalette } from '@/components/dash/command-palette'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { requireAdmin } from '@/lib/auth/session'
 import { getAccountFooter, getSidebarCounts } from '@/lib/services/dashboard'
@@ -38,6 +39,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         }))}
       />
       <SidebarInset className="min-w-0">{children}</SidebarInset>
+      <CommandPalette />
     </SidebarProvider>
   )
 }
