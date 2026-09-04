@@ -15,6 +15,8 @@ import {
   providerEnum,
   providerPreferenceEnum,
   refStatusEnum,
+  refundReasonEnum,
+  refundRequestStatusEnum,
   submissionResolutionEnum,
   submissionStatusEnum,
   transactionTypeEnum,
@@ -368,5 +370,55 @@ export const paymentSubmissionsRelations = relations(paymentSubmissions, ({ one 
   incomingPayment: one(incomingPayments, {
     fields: [paymentSubmissions.incomingPaymentId],
     references: [incomingPayments.id],
+  }),
+}))
+
+/**
+ * A buyer asking the store to give money back, or to cancel the order.
+ *
+ * Jomma does not move money out — it has no payout path and should not have
+ * one. What it can do is record the ask, tie it to the payment it is about, and
+ * tell the store over the same signed webhook it hears everything else on. The
+ * refund itself happens in the store's own system, where the order lives.
+ *
+ * Kept as its own table rather than a flag on the intent because a buyer can
+ * ask more than once, and because the record has to survive the intent being
+ * completed — which it always is by the time an overpayment is noticed.
+ */
+export const refundRequests = pgTable(
+  'refund_requests',
+  {
+    id: primaryId(),
+    intentId: fkId('intent_id')
+      .notNull()
+      .references(() => paymentIntents.id, { onDelete: 'cascade' }),
+    reason: refundReasonEnum('reason').notNull(),
+    status: refundRequestStatusEnum('status').notNull().default('open'),
+
+    /** What the buyer believes they are owed. Advisory — the store decides. */
+    amountCents: poisha('amount_cents'),
+    /** Free text from the buyer, capped at the API boundary. */
+    note: text('note'),
+    /** How to reach them, if they gave it. */
+    contactMsisdn: text('contact_msisdn'),
+
+    resolvedAt: timestampTz('resolved_at'),
+    resolvedBy: fkId('resolved_by'),
+    resolutionNote: text('resolution_note'),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index('ix_refund_requests_intent').on(table.intentId),
+    // The dashboard's open list, worst first.
+    index('ix_refund_requests_open').on(table.status, table.createdAt),
+  ],
+)
+
+export const refundRequestsRelations = relations(refundRequests, ({ one }) => ({
+  intent: one(paymentIntents, {
+    fields: [refundRequests.intentId],
+    references: [paymentIntents.id],
   }),
 }))

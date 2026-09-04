@@ -1,5 +1,5 @@
 import { levenshtein, minutesBetween, normalizeRef, sameMsisdn } from './normalize'
-import { amountFit, DEFAULT_WINDOW_MINUTES, holdsActiveLock, score } from './score'
+import { admits, DEFAULT_WINDOW_MINUTES, holdsActiveLock, type Refusal, score } from './score'
 import type { CandidateIntent, MatchOptions, ObservedPayment } from './types'
 
 /**
@@ -32,7 +32,14 @@ export interface CandidateDiagnosis {
   score: number
   /** True when the amount or the account ruled it out. */
   gated: boolean
-  gateReason: 'amount' | 'account' | 'unparsed' | null
+  /**
+   * Which requirement stopped it, naming the actual one.
+   *
+   * An admin working the queue needs to know whether the reference was a
+   * character out or the money came from a number nobody declared — those want
+   * different decisions, and "amount" for both was useless.
+   */
+  gateReason: Refusal | null
 }
 
 export function diagnoseCandidates(
@@ -51,22 +58,12 @@ export function diagnoseCandidates(
     const minutesApart = minutesBetween(intent.payClickedAt, payment.receivedAt)
 
     /*
-     * Gated means "the automatic path would not touch this", so it has to be
-     * read off the same rule the scorer uses rather than a second copy of it.
-     * A short or over payment carrying an exact reference is *not* gated — the
-     * amount is arithmetic once the code identifies the intent.
+     * Read off the same function the scorer uses, never a second copy of it.
+     * A queue that disagrees with the matcher about why something was refused
+     * is worse than one that says nothing.
      */
-    const fit = amountFit(payment, intent)
+    const refusal = admits(payment, intent)
     const referenceExact = referenceDistance === 0
-    const gated = fit === 'none' || (fit !== 'settles' && !referenceExact)
-
-    const gateReason: CandidateDiagnosis['gateReason'] = !gated
-      ? null
-      : payment.amountCents === null
-        ? 'unparsed'
-        : payment.receivingAccountId !== intent.receivingAccountId
-          ? 'account'
-          : 'amount'
 
     return {
       intent,
@@ -83,8 +80,8 @@ export function diagnoseCandidates(
       minutesApart,
       withinWindow: minutesApart <= windowMinutes,
       score: score(payment, intent, options).score,
-      gated,
-      gateReason,
+      gated: refusal !== null,
+      gateReason: refusal,
     }
   })
 

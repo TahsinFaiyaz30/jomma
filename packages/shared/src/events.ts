@@ -1,4 +1,4 @@
-import type { MatchConfidence, MatchedBy, Provider } from './types'
+import type { MatchConfidence, MatchedBy, Provider, RefundReason } from './types'
 
 /** Outbound webhook contract. docs/api.md is the source of truth for this file. */
 
@@ -9,6 +9,7 @@ export const WEBHOOK_EVENT_TYPES = [
   'payment.expired',
   'payment.cancelled',
   'payment.reversed',
+  'payment.refund_requested',
   'account.degraded',
   'account.recovered',
 ] as const
@@ -28,6 +29,18 @@ export interface PaymentEventData {
   shortfall?: number
   /** Present on payment.overpaid. */
   excess?: number
+  /**
+   * Present on payment.refund_requested.
+   *
+   * Jomma records the ask and forwards it; it never moves money out. The store
+   * refunds from its own system, where the order is.
+   */
+  refund_request?: {
+    id: string
+    reason: RefundReason
+    amount: number
+    note: string | null
+  }
   /** Present on payment.reversed — why an approved match was undone. */
   reason?: string
 }

@@ -7,6 +7,7 @@ import type { CheckoutMethod } from '@/lib/services/checkout'
 import type { PayView } from '@/lib/services/pay-page'
 import { hasGuide, ProviderGuide } from './guides'
 import { MethodPicker } from './method-picker'
+import { RefundRequest } from './refund-request'
 import { TrxVerify } from './trx-verify'
 
 /**
@@ -144,6 +145,16 @@ function Receipt({ view }: { view: PayView }) {
         ) : (
           <p className="text-micro text-muted-foreground">You can close this page.</p>
         )}
+
+        {/* Folded away, and only after the good news. An over-payment completes
+            the order on its own, so without this the buyer is out of pocket with
+            nothing to press. */}
+        <RefundRequest
+          intentId={view.id}
+          merchant={view.merchantName}
+          excessCents={view.excessCents}
+          taka={taka}
+        />
       </div>
     </Shell>
   )

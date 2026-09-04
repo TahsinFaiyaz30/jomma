@@ -119,6 +119,11 @@ the reverse, or fake orders drain inventory.
 
 ## The matcher
 
+> **Superseded.** The pseudocode below is the original design and no longer
+> describes the code. It made the **amount** the gate; the implementation makes
+> the **reference and the sender** the gates and treats the amount as
+> arithmetic. See "What actually ships" below, and `lib/matching/score.ts`.
+
 Amount is a gate, not a signal. Below the gate, nothing auto-approves.
 
 ```ts
@@ -265,7 +270,7 @@ to store credit or queue a refund, and say which clearly.
 | Failure | Fix |
 |---|---|
 | Skips the reference field | Sender number + amount lock still carry the match. Manual TrxID behind that. |
-| Typos the reference | Levenshtein distance 1 fuzzy match against open codes only. |
+| Typos the reference | Not auto-matched. Distance is shown in the queue; the buyer proves it with a TrxID. |
 | Types spaces or symbols in reference | Normalize hard: uppercase, strip everything non-alphanumeric, then compare. |
 | Pays from an undeclared number | Reference + lock carry it. Flag `sender_mismatch` for pattern tracking. |
 | Pays the wrong amount | Underpaid/overpaid flows above. |
@@ -410,3 +415,58 @@ and SMS text. Do this for both bKash and Nagad. Confirm:
 
 Write the parser against real captured strings, never an assumed format. Keep the
 samples as test fixtures.
+
+
+---
+
+## What actually ships
+
+Three requirements, all of which must hold before anything touches money without
+a human. `admits()` in `lib/matching/score.ts` is the single place they live, and
+the queue's diagnosis reads the same function so it can never disagree with the
+matcher about why something was refused.
+
+1. **The receiving account.** Money on the Nagad number cannot settle a bKash
+   intent.
+2. **The reference, exactly.** It is the identifier issued per intent and unique
+   among open ones. Fuzzy is explicitly not enough — a one-character typo is one
+   buyer's money landing on another buyer's order, and the person whose money
+   moved has no way to see it.
+3. **The sender.** The buyer declares which number they will pay from and the
+   message says which number paid. Disagree, or never declared, and the payer is
+   not identified.
+
+The **amount is not a requirement**. With the reference and sender established
+the payer is known, and how much arrived is arithmetic: short leaves a balance
+and the order stays `partial`, over completes it and records an excess. This is
+what lets a buyer pay in instalments and have every one verify itself.
+
+### Why the change
+
+The original rule made a part payment unmatchable however perfect the reference,
+which is backwards — the code exists precisely so identity does not depend on the
+amount. It also meant the amount was doing identification work, and an amount is
+not an identity: two buyers ordering the same item at the same price are
+indistinguishable under it.
+
+### What this costs
+
+A payment with **no reference** no longer auto-matches at all. Sender plus lock
+used to clear the threshold and it no longer does. bKash's reference field is
+optional and buyers skip it, so this is a real population — they go to the queue
+and are recovered by the buyer submitting a TrxID, which is evidence only the
+payer has. That trade was made deliberately: matching on an amount alone cannot
+distinguish two buyers who owe the same sum.
+
+The weights still exist. They rank candidates and explain a decision in the
+queue; they no longer decide anything on their own. Scores that clear a
+threshold are the wrong tool for "must" — 60 + 50 clears 100, and no arrangement
+of numbers expresses "the sender has to be the person who said they were paying".
+
+### Manual submission holds the same line
+
+`resolveSubmission` gates on the same account and the same sender. A TrxID for
+money that landed on a different account resolves as not-found for this intent,
+and a payment from a number the intent never declared is escalated to a human
+rather than credited — the money is real, so refusing it would strand it, but
+nobody is credited until a person has looked.

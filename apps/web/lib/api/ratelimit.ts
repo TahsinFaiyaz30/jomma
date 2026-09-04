@@ -27,6 +27,22 @@ export const RATE_LIMITS = {
   'device:capture': { limit: 120, windowSeconds: 60 },
   'device:heartbeat': { limit: 20, windowSeconds: 60 },
   'device:events': { limit: 60, windowSeconds: 60 },
+
+  /*
+   * The hosted pay page, keyed by IP.
+   *
+   * Separate buckets because they are separate actions: sharing one meant a
+   * buyer who checked a couple of TrxIDs could not then ask about a refund,
+   * which is precisely the sequence somebody who overpaid performs.
+   *
+   * Generous on purpose. The controls that actually stop abuse are per-intent
+   * and live deeper — five submissions per intent per hour, and one open refund
+   * request per intent per reason. These only stop a script from walking many
+   * intents from one address, so they are set where no real buyer reaches them.
+   */
+  'pay:submit': { limit: 60, windowSeconds: 60 },
+  'pay:refund': { limit: 30, windowSeconds: 60 },
+  'pay:write': { limit: 60, windowSeconds: 60 },
 } as const satisfies Record<string, RateLimitRule>
 
 export type RateLimitKey = keyof typeof RATE_LIMITS

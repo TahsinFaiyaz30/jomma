@@ -95,7 +95,14 @@ async function createIntent(amount, reference) {
       'content-type': 'application/json',
       'idempotency-key': randomBytes(8).toString('hex'),
     },
-    body: JSON.stringify({ amount, client_reference: reference, ttl_seconds: 600 }),
+    body: JSON.stringify({
+      amount,
+      client_reference: reference,
+      ttl_seconds: 600,
+      // Required for an automatic match: the sender has to be a number the
+      // intent declared. Matches the sender in bkashMessage below.
+      payer_msisdn: '01712345678',
+    }),
   })
   return response.json()
 }

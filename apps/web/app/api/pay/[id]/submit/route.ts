@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { ApiError } from '@/lib/api/errors'
 import { enforceRateLimit, parseBody, route } from '@/lib/api/handler'
 import { intentIdFromPayUrl } from '@/lib/api/pay-url'
-import { msisdnSchema, trxIdSchema } from '@/lib/api/schemas'
+import { trxIdSchema } from '@/lib/api/schemas'
 import { db } from '@/lib/db/client'
 import { paymentIntents } from '@/lib/db/schema'
 import { resolveSubmission } from '@/lib/services/submissions'
@@ -12,10 +12,17 @@ import { resolveSubmission } from '@/lib/services/submissions'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const bodySchema = z.object({
-  trx_id: trxIdSchema,
-  sender_msisdn: msisdnSchema.optional().nullable(),
-})
+/*
+ * Deliberately only the TrxID.
+ *
+ * `resolveSubmission` falls back to a submitted sender when the intent has no
+ * declared payer — which is fine for a store submitting on a buyer's behalf,
+ * and self-certifying nonsense coming from the buyer. They would be supplying
+ * both the claim and the evidence for it. The hosted page requires the payer
+ * number before it shows instructions, so the intent always has an
+ * authoritative one by the time anybody gets here.
+ */
+const bodySchema = z.object({ trx_id: trxIdSchema })
 
 /**
  * POST /api/pay/:id/submit — the buyer typing in their TrxID.
@@ -47,8 +54,8 @@ export const POST = route(async (request, context) => {
 
   // Two buckets. The per-IP one stops a script walking the TrxID space; the
   // per-intent one stops a single link being hammered from many addresses.
-  enforceRateLimit(context, 'submissions:create', context.ip ?? 'unknown')
-  enforceRateLimit(context, 'submissions:create', `intent:${uuid}`)
+  enforceRateLimit(context, 'pay:submit', context.ip ?? 'unknown')
+  enforceRateLimit(context, 'pay:submit', `intent:${uuid}`)
 
   const body = await parseBody(request, bodySchema)
 
@@ -64,7 +71,7 @@ export const POST = route(async (request, context) => {
     // app identity on this request to check against — the intent supplies it.
     appId: intent.appId,
     trxId: body.trx_id,
-    senderMsisdn: body.sender_msisdn ?? null,
+    senderMsisdn: null,
     // Never trusted from a buyer: the amount is read off the captured message,
     // not off what somebody typed.
     claimedAmountCents: null,

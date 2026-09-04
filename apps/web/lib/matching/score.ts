@@ -11,10 +11,11 @@ import type {
 /**
  * Signal weights. From docs/matching.md — do not tune these without reading it.
  *
- * The shape matters more than the numbers: an exact reference alone clears the
- * approve threshold, and nothing else does on its own. Sender plus lock (110)
- * also clears it, which is deliberate — it is how a buyer who skipped the
- * reference field still gets matched automatically.
+ * These now only *rank* candidates and explain a decision in the queue. What is
+ * allowed to match automatically is decided by `admits` below, which is a set of
+ * hard requirements rather than a total. Scores that clear a threshold are the
+ * wrong tool for "must": 60 + 50 clears 100, and no arrangement of weights can
+ * express "the sender has to be the person who said they were paying".
  */
 export const WEIGHTS = {
   referenceExact: 100,
@@ -40,6 +41,60 @@ export const DEFAULT_WINDOW_MINUTES = 10
  */
 export type AmountFit = 'settles' | 'short' | 'over' | 'none'
 
+/**
+ * Why a candidate cannot be matched automatically. `null` means it can.
+ *
+ * Every one of these sends the payment to the queue with its raw text intact.
+ * None of them loses money — they decline to *guess*, which is the only thing
+ * that could credit one person's payment to another person's order.
+ */
+export type Refusal =
+  | 'account'
+  | 'unparsed'
+  | 'amount'
+  | 'reference_missing'
+  | 'reference_inexact'
+  | 'sender_undeclared'
+  | 'sender_mismatch'
+
+/**
+ * The hard requirements for touching money without a human.
+ *
+ * Three things must all hold, and no amount of corroboration substitutes for
+ * any of them:
+ *
+ * 1. **The account.** Money on the Nagad number cannot settle a bKash intent.
+ * 2. **The reference, exactly.** It is the identifier we issue per intent, and
+ *    it is unique among open ones. Fuzzy is explicitly not enough: a one
+ *    character typo is one buyer's money landing on another buyer's order, and
+ *    the person whose money moved has no way to see it. A near miss is not
+ *    "nearly right", it is unidentified — it goes to the queue and the buyer
+ *    proves it with a TrxID instead.
+ * 3. **The sender.** The buyer says which number they will pay from, and the
+ *    message says which number paid. If those disagree, or if nobody ever said,
+ *    then whoever sent this has not been identified and the payment is not
+ *    theirs to credit on evidence this thin.
+ *
+ * The amount is deliberately *not* one of them. With the reference and the
+ * sender both established the payer is identified, and how much they sent is
+ * arithmetic: short leaves a balance, over leaves an excess.
+ */
+export function admits(payment: ObservedPayment, intent: CandidateIntent): Refusal | null {
+  if (payment.amountCents === null) return 'unparsed'
+  if (payment.amountCents <= 0) return 'amount'
+  if (payment.receivingAccountId !== intent.receivingAccountId) return 'account'
+
+  const reference = normalizeRef(payment.referenceRaw)
+  const code = normalizeRef(intent.refCode)
+  if (!reference || !code) return 'reference_missing'
+  if (reference !== code) return 'reference_inexact'
+
+  if (!intent.expectedMsisdn) return 'sender_undeclared'
+  if (!sameMsisdn(payment.senderMsisdn, intent.expectedMsisdn)) return 'sender_mismatch'
+
+  return null
+}
+
 export function amountFit(payment: ObservedPayment, intent: CandidateIntent): AmountFit {
   if (payment.amountCents === null) return 'none'
   if (payment.amountCents <= 0) return 'none'
@@ -50,7 +105,7 @@ export function amountFit(payment: ObservedPayment, intent: CandidateIntent): Am
 
 /** Kept for callers that only need the yes/no. */
 export function passesGate(payment: ObservedPayment, intent: CandidateIntent): boolean {
-  return amountFit(payment, intent) !== 'none'
+  return admits(payment, intent) === null
 }
 
 export function holdsActiveLock(payment: ObservedPayment, intent: CandidateIntent): boolean {
@@ -82,15 +137,9 @@ export function score(
     withinWindow: false,
   }
 
-  const fit = amountFit(payment, intent)
-  const gated = {
-    intent,
-    score: Number.NEGATIVE_INFINITY,
-    signals,
-    confidence: null,
+  if (admits(payment, intent) !== null) {
+    return { intent, score: Number.NEGATIVE_INFINITY, signals, confidence: null }
   }
-
-  if (fit === 'none') return gated
 
   let total = 0
   const reference = normalizeRef(payment.referenceRaw)
@@ -105,31 +154,6 @@ export function score(
     signals.referenceFuzzy = true
     total += WEIGHTS.referenceFuzzy
   }
-
-  /*
-   * An amount that does not settle the balance needs the reference to be
-   * exactly right.
-   *
-   * With an exact reference, identity is already established and the amount is
-   * just arithmetic — short becomes a part payment, over becomes a completed
-   * order plus an excess the merchant is told about. That is the whole point of
-   * issuing a code per intent.
-   *
-   * Without one, the amount *is* the identifier: it is held exclusively by a
-   * single open intent on this account, which is what lets a payment with no
-   * reference at all still match on sender plus lock. bKash's reference field is
-   * optional and buyers skip it, so that path has to keep working — but it only
-   * works because the amount is exact, so an inexact amount with no code is not
-   * a match, it is a question for a human.
-   *
-   * Fuzzy is not enough either. A single-character typo plus an arbitrary amount
-   * would let one buyer's money land on another buyer's order, and the person
-   * whose money moved would have no way to see it.
-   *
-   * Nothing here rejects a payment. Below this bar it goes to the queue, where a
-   * human sees every candidate at once and decides.
-   */
-  if (fit !== 'settles' && !signals.referenceExact) return gated
 
   if (sameMsisdn(payment.senderMsisdn, intent.expectedMsisdn)) {
     signals.senderMatch = true

@@ -11,10 +11,25 @@ describe('diagnoseCandidates', () => {
     ])
 
     expect(first?.gated).toBe(true)
-    expect(first?.gateReason).toBe('amount')
+    // Names the requirement that actually failed. An admin deciding what to do
+    // needs "the code was a character out", not "amount".
+    expect(first?.gateReason).toBe('reference_inexact')
     expect(first?.amountDeltaCents).toBe(-20_000)
     expect(first?.referenceExact).toBe(false)
     expect(first?.score).toBe(Number.NEGATIVE_INFINITY)
+  })
+
+  it('names an undeclared sender separately from a wrong one', () => {
+    const undeclared = diagnoseCandidates(payment(), [intent({ expectedMsisdn: null })])
+    expect(undeclared[0]?.gateReason).toBe('sender_undeclared')
+
+    const wrong = diagnoseCandidates(payment({ senderMsisdn: '8801999999999' }), [intent()])
+    expect(wrong[0]?.gateReason).toBe('sender_mismatch')
+  })
+
+  it('names a missing reference separately from an inexact one', () => {
+    const missing = diagnoseCandidates(payment({ referenceRaw: null }), [intent()])
+    expect(missing[0]?.gateReason).toBe('reference_missing')
   })
 
   it('does not call a part payment gated when the reference is exact', () => {

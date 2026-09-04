@@ -137,7 +137,10 @@ The manual path. Buyer enters a TrxID because automatic matching didn't fire.
 }
 ```
 
-Resolves synchronously against observed payments. Nine outcomes:
+Resolves synchronously against observed payments, scoped to **this intent's
+receiving account** — a TrxID for money that landed elsewhere is not found here.
+The sender must match the declared payer; a mismatch escalates rather than
+crediting. Nine outcomes:
 
 ```jsonc
 // 200 — resolution tells the client exactly what to render
@@ -149,8 +152,8 @@ Resolves synchronously against observed payments. Nine outcomes:
 
 | `resolution` | Meaning | `intent_status` |
 |---|---|---|
-| `exact` | Found, amount and everything matches. Approved. | `matched` |
-| `sender_mismatch` | Found, amount exact, paid from a different number. Approved, flagged. | `matched` |
+| `exact` | Found, sender matches, settles the balance. Approved. | `matched` |
+| `sender_mismatch` | Found, but paid from a number the intent never declared. **Escalated, not approved** — nobody is credited until a person looks. | unchanged |
 | `underpaid` | Found, less than the intent amount. | `partial` |
 | `overpaid` | Found, more than the intent amount. | `over` |
 | `not_found_recent` | No such TrxID, intent is under 10 min old. Keep polling. | `open` |
@@ -410,6 +413,34 @@ Public, unauthenticated, polled by that page. Returns only what a buyer needs:
 
 No order id, no account id, no other payments. The intent id is a uuidv7 in 26
 base32 characters, so it is not guessable, and the endpoint is rate limited by IP.
+
+### `POST /api/pay/:id/submit`
+
+`{ "trx_id": "9F2K1LM8QR" }` — the buyer proving a payment the automatic path
+has not picked up, usually because they skipped the reference field. Runs the
+same `resolveSubmission` as the authenticated client API, so all nine
+resolutions and the amount arithmetic are identical. Scoped to this intent's
+receiving account, and the sender must match the declared payer.
+
+Deliberately takes no `sender_msisdn`: a buyer supplying both the claim and the
+evidence for it is self-certifying. The number comes from the intent.
+
+### `POST /api/pay/:id/method`
+
+`{ "provider": "bkash" }` — the buyer choosing how to pay. A *re-route*, not a
+preference: the receiving account was allocated at creation because the lock and
+the reference code hang off it. Refused when the store named a provider, when
+anything has already been received, or when the target has no routable account.
+
+### `POST /api/pay/:id/refund`
+
+`{ "reason": "overpaid" | "cancel_order" | "other", "note": "..." }`
+
+An over-payment completes the order automatically, so without this the excess is
+a debt nobody chases. **Jomma moves no money** — it watches the merchant's
+accounts and has no authority over them. This records the ask and fires
+`payment.refund_requested` on the app's webhook; the store refunds from its own
+system. One open request per intent per reason.
 
 ### `POST /api/pay/:id/payer`
 

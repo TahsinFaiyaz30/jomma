@@ -99,22 +99,21 @@ describe('the amount gate', () => {
 })
 
 describe('reference matching', () => {
-  it('auto-approves an exact reference with a single candidate', () => {
-    const result = resolveMatch(payment({ senderMsisdn: null }), [
+  it('auto-approves an exact reference from the declared sender', () => {
+    const result = resolveMatch(payment(), [
       intent({ refCode: 'K7M2', payClickedAt: minutesAfter(T0, -60) }),
     ])
 
     expect(result.kind).toBe('matched')
     if (result.kind === 'matched') {
       expect(result.candidate.intent.id).toBe('int-1')
-      expect(result.candidate.score).toBe(WEIGHTS.referenceExact)
       expect(result.candidate.confidence).toBe('exact')
       expect(result.runnerUp).toBeNull()
     }
   })
 
   it('normalises a reference the buyer typed with spaces and symbols', () => {
-    const result = resolveMatch(payment({ referenceRaw: ' k7-m2 ', senderMsisdn: null }), [
+    const result = resolveMatch(payment({ referenceRaw: ' k7-m2 ' }), [
       intent({ refCode: 'K7M2', payClickedAt: minutesAfter(T0, -60) }),
     ])
 
@@ -122,178 +121,161 @@ describe('reference matching', () => {
     if (result.kind === 'matched') expect(result.candidate.confidence).toBe('exact')
   })
 
-  it('accepts a reference off by one character against a single candidate', () => {
-    // 80 (fuzzy) + 20 (window) = 100, exactly the threshold.
-    const result = resolveMatch(payment({ referenceRaw: 'K7M3', senderMsisdn: null }), [
-      intent({ refCode: 'K7M2' }),
-    ])
+  /*
+   * Fuzzy matching used to auto-approve at distance 1. It does not any more,
+   * and this is the rule it was traded for.
+   *
+   * A four-character code one edit away from another open code is not "nearly
+   * right", it is unidentified. Approving it moves one buyer's money onto
+   * another buyer's order, and the person whose money moved has no way to see
+   * that it happened. The buyer proves it with a TrxID instead, which is
+   * evidence only they could have.
+   *
+   * The distance is still computed and still shown in the queue — it is how an
+   * admin sees a typo for what it is. It just no longer decides anything.
+   */
+  it('refuses a reference off by one character', () => {
+    const result = resolveMatch(payment({ referenceRaw: 'K7M3' }), [intent({ refCode: 'K7M2' })])
 
-    expect(result.kind).toBe('matched')
-    if (result.kind === 'matched') {
-      expect(result.candidate.score).toBe(WEIGHTS.referenceFuzzy + WEIGHTS.withinWindow)
-      expect(result.candidate.confidence).toBe('fuzzy')
-    }
+    expect(result.kind).toBe('unmatched')
+    if (result.kind === 'unmatched') expect(result.reason).toBe('amount_gate')
   })
 
-  it('escalates when a mistyped reference is within one edit of two open codes', () => {
-    // "K7M3" is distance 1 from both "K7M2" and "K7M9". Guessing here would
-    // credit the wrong buyer.
-    const result = resolveMatch(payment({ referenceRaw: 'K7M3', senderMsisdn: null }), [
+  it('refuses a mistyped reference that is close to two open codes', () => {
+    const result = resolveMatch(payment({ referenceRaw: 'K7M3' }), [
       intent({ id: 'int-a', refCode: 'K7M2' }),
       intent({ id: 'int-b', refCode: 'K7M9' }),
     ])
 
-    expect(result.kind).toBe('ambiguous')
-    if (result.kind === 'ambiguous') {
-      expect(result.reason).toBe('multiple_above_threshold')
-      expect(result.candidates).toHaveLength(2)
-      expect(result.candidates[0]?.score).toBe(result.candidates[1]?.score)
-    }
+    expect(result.kind).toBe('unmatched')
   })
 
-  it('does not fuzzy-match at distance two', () => {
-    const result = resolveMatch(payment({ referenceRaw: 'K8M3', senderMsisdn: null }), [
-      intent({ refCode: 'K7M2' }),
+  it('refuses a payment with no reference at all', () => {
+    // The buyer skipped the field. Recoverable by TrxID, never automatically.
+    const result = resolveMatch(payment({ referenceRaw: null }), [
+      intent({ refCode: 'K7M2', lock: lock() }),
     ])
 
-    expect(result.kind).toBe('ambiguous')
-    if (result.kind === 'ambiguous') expect(result.reason).toBe('below_threshold')
+    expect(result.kind).toBe('unmatched')
+  })
+})
+
+describe('the sender requirement', () => {
+  it('refuses money from a number the buyer did not declare', () => {
+    const result = resolveMatch(payment({ senderMsisdn: '8801999999999' }), [
+      intent({ refCode: 'K7M2', expectedMsisdn: '8801712345678' }),
+    ])
+
+    expect(result.kind).toBe('unmatched')
+  })
+
+  it('refuses when nobody ever said who would pay', () => {
+    // An exact reference is not enough on its own: without a declared payer the
+    // sender cannot be checked, so whoever sent this is unidentified.
+    const result = resolveMatch(payment(), [intent({ refCode: 'K7M2', expectedMsisdn: null })])
+
+    expect(result.kind).toBe('unmatched')
+  })
+
+  it('accepts the same number written in a different format', () => {
+    const result = resolveMatch(payment({ senderMsisdn: '01712345678' }), [
+      intent({ refCode: 'K7M2', expectedMsisdn: '+8801712345678' }),
+    ])
+
+    expect(result.kind).toBe('matched')
   })
 })
 
 describe('sender and lock signals', () => {
-  it('matches on sender plus lock when the buyer skipped the reference field', () => {
-    // 60 (sender) + 50 (lock) + 20 (window) = 130.
+  /*
+   * Sender-plus-lock used to be enough on its own — it was how a buyer who
+   * skipped the reference field still got matched. It is not any more.
+   *
+   * The trade is deliberate. That path identified a payer by the amount they
+   * sent, and an amount is not an identity: two buyers ordering the same item
+   * at the same price are indistinguishable under it. Without a reference the
+   * payment now waits for a TrxID, which is evidence only the payer has.
+   */
+  it('refuses sender plus lock when the buyer skipped the reference field', () => {
     const result = resolveMatch(payment({ referenceRaw: null }), [
-      intent({
-        refCode: 'K7M2',
-        expectedMsisdn: '8801712345678',
-        lock: lock(),
-      }),
+      intent({ refCode: 'K7M2', expectedMsisdn: '8801712345678', lock: lock() }),
     ])
 
-    expect(result.kind).toBe('matched')
-    if (result.kind === 'matched') {
-      expect(result.candidate.score).toBe(
-        WEIGHTS.senderMatch + WEIGHTS.activeLock + WEIGHTS.withinWindow,
-      )
-      expect(result.candidate.confidence).toBe('sender')
-      expect(result.candidate.signals.referenceExact).toBe(false)
-    }
+    expect(result.kind).toBe('unmatched')
   })
 
-  it('escalates a no-reference payment when the sender is undeclared', () => {
-    // 50 (lock) + 20 (window) = 70. Not enough on its own.
+  it('refuses a no-reference payment when the sender is undeclared too', () => {
     const result = resolveMatch(payment({ referenceRaw: null, senderMsisdn: '8801999999999' }), [
       intent({ expectedMsisdn: null, lock: lock() }),
     ])
 
-    expect(result.kind).toBe('ambiguous')
-    if (result.kind === 'ambiguous') expect(result.reason).toBe('below_threshold')
+    expect(result.kind).toBe('unmatched')
   })
 
+  /*
+   * The signals below still compute. They no longer decide anything on their
+   * own, but they rank candidates and they are what an admin reads in the queue
+   * to understand why something landed there.
+   */
   it('ignores a lock that had already expired when the money arrived', () => {
     const expired = lock({ expiresAt: minutesAfter(T0, -1) })
-    const scored = score(payment({ referenceRaw: null }), intent({ lock: expired }))
+    const scored = score(payment(), intent({ lock: expired }))
     expect(scored.signals.activeLock).toBe(false)
   })
 
   it('ignores a lock that has already been consumed', () => {
     const consumed = lock({ status: 'consumed' })
-    const scored = score(payment({ referenceRaw: null }), intent({ lock: consumed }))
+    const scored = score(payment(), intent({ lock: consumed }))
     expect(scored.signals.activeLock).toBe(false)
   })
 
   it('drops the recency signal outside the ten-minute window', () => {
-    const scored = score(
-      payment({ referenceRaw: null, senderMsisdn: null }),
-      intent({ payClickedAt: minutesAfter(T0, -11), lock: lock() }),
-    )
+    const scored = score(payment(), intent({ payClickedAt: minutesAfter(T0, -11), lock: lock() }))
     expect(scored.signals.withinWindow).toBe(false)
-    expect(scored.score).toBe(WEIGHTS.activeLock)
+    expect(scored.score).toBe(WEIGHTS.referenceExact + WEIGHTS.senderMatch + WEIGHTS.activeLock)
   })
 
   it('still counts recency for a payment that arrived before the intent committed', () => {
     // The orphan case: money lands, the order commits seconds later, the 30s
     // retry loop re-runs the matcher.
-    const scored = score(
-      payment({ referenceRaw: null }),
-      intent({ payClickedAt: minutesAfter(T0, 3) }),
-    )
+    const scored = score(payment(), intent({ payClickedAt: minutesAfter(T0, 3) }))
     expect(scored.signals.withinWindow).toBe(true)
   })
 })
 
 describe('the ambiguity rule', () => {
-  it('escalates two intents at the same amount in the same window', () => {
-    // Only one can hold the lock — the partial unique index guarantees that.
-    // A: 50 + 20 = 70. B: 20. Neither clears the threshold.
-    const result = resolveMatch(payment({ referenceRaw: null, senderMsisdn: null }), [
-      intent({ id: 'int-a', refCode: 'K7M2', lock: lock() }),
-      intent({ id: 'int-b', refCode: 'P2W9', lock: null }),
+  /*
+   * Reference codes are unique among open intents, so two candidates clearing
+   * every requirement should be impossible. This is defence in depth: if it
+   * ever does happen, refuse rather than rank.
+   */
+  it('escalates rather than choosing between two admissible candidates', () => {
+    const result = resolveMatch(payment(), [
+      intent({ id: 'int-a', refCode: 'K7M2', expectedMsisdn: '8801712345678', lock: lock() }),
+      intent({ id: 'int-b', refCode: 'K7M2', expectedMsisdn: '8801712345678' }),
     ])
 
     expect(result.kind).toBe('ambiguous')
     if (result.kind === 'ambiguous') {
-      expect(result.reason).toBe('below_threshold')
       expect(result.candidates).toHaveLength(2)
     }
   })
 
-  it('escalates when the top candidate beats the second by less than 60', () => {
-    // A: 80 (fuzzy) + 50 (lock) + 20 (window) = 150.
-    // B: 80 (fuzzy) + 20 (window)            = 100.
-    // Both clear 100; the margin is 50, under the required 60.
-    const result = resolveMatch(payment({ referenceRaw: 'K7M3', senderMsisdn: null }), [
-      intent({ id: 'int-a', refCode: 'K7M2', lock: lock() }),
-      intent({ id: 'int-b', refCode: 'K7M9' }),
-    ])
-
-    expect(result.kind).toBe('ambiguous')
-    if (result.kind === 'ambiguous') {
-      expect(result.reason).toBe('multiple_above_threshold')
-      expect(result.candidates[0]!.score - result.candidates[1]!.score).toBe(50)
-    }
-  })
-
-  it('approves when the top candidate beats the second by 60 or more', () => {
-    // A: 100 (exact) + 60 (sender) + 20 (window) = 180.
-    // B: 80 (fuzzy) + 20 (window)                = 100. Margin 80.
-    const result = resolveMatch(payment({ referenceRaw: 'K7M2' }), [
-      intent({ id: 'int-a', refCode: 'K7M2', expectedMsisdn: '8801712345678' }),
-      intent({ id: 'int-b', refCode: 'K7M3' }),
-    ])
-
-    expect(result.kind).toBe('matched')
-    if (result.kind === 'matched') {
-      expect(result.candidate.intent.id).toBe('int-a')
-      expect(result.margin).toBe(80)
-    }
-  })
-
-  it('approves when only one candidate clears the threshold, whatever the margin', () => {
-    // A: 100 (exact) + 20 = 120. B: 20 alone. The runner-up is below the bar, so
-    // the margin rule does not apply.
-    const result = resolveMatch(payment({ referenceRaw: 'K7M2', senderMsisdn: null }), [
+  it('approves when only one candidate is admissible at all', () => {
+    const result = resolveMatch(payment(), [
       intent({ id: 'int-a', refCode: 'K7M2' }),
-      intent({ id: 'int-b', refCode: 'ZZZZ' }),
+      // Right code, wrong payer — refused, so it is not a rival.
+      intent({ id: 'int-b', refCode: 'K7M2', expectedMsisdn: '8801999999999' }),
     ])
 
     expect(result.kind).toBe('matched')
-    if (result.kind === 'matched') {
-      expect(result.candidate.intent.id).toBe('int-a')
-      expect(result.margin).toBe(100)
-    }
+    if (result.kind === 'matched') expect(result.candidate.intent.id).toBe('int-a')
   })
 
-  it('honours a raised threshold and margin from options', () => {
+  it('honours a raised threshold from options', () => {
     const candidates = [intent({ refCode: 'K7M2', payClickedAt: minutesAfter(T0, -60) })]
-    expect(resolveMatch(payment({ senderMsisdn: null }), candidates).kind).toBe('matched')
-    expect(
-      resolveMatch(payment({ senderMsisdn: null }), candidates, {
-        approveThreshold: 150,
-      }).kind,
-    ).toBe('ambiguous')
+    expect(resolveMatch(payment(), candidates).kind).toBe('matched')
+    expect(resolveMatch(payment(), candidates, { approveThreshold: 500 }).kind).toBe('ambiguous')
   })
 })
 
@@ -323,7 +305,9 @@ describe('payments nothing claims', () => {
     if (result.kind === 'ambiguous') {
       expect(result.reason).toBe('wrong_transaction_type')
       // The score is still recorded so the reviewer sees it was otherwise perfect.
-      expect(result.candidates[0]!.score).toBe(230)
+      expect(result.candidates[0]!.score).toBe(
+        WEIGHTS.referenceExact + WEIGHTS.senderMatch + WEIGHTS.activeLock + WEIGHTS.withinWindow,
+      )
     }
   })
 

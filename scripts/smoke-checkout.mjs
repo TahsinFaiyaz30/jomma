@@ -95,6 +95,9 @@ async function createIntent(amountCents, extra = {}) {
       amount: amountCents,
       client_reference: `CHECKOUT-${Date.now()}-${randomBytes(2).toString('hex')}`,
       ttl_seconds: 900,
+      // Required for an automatic match: the sender has to be someone the
+      // intent named. The hosted page collects it before showing instructions.
+      payer_msisdn: '01712345678',
       ...extra,
     }),
   })
@@ -142,13 +145,37 @@ async function main() {
 
   section('Declaring the payer')
 
-  const first = await pay(anyIntent.id, '/payer', { msisdn: '01712345678' })
-  const firstBody = await first.json()
-  check('accepted', first.status === 200 && firstBody.stored === true, JSON.stringify(firstBody))
+  // An intent the store did not name a payer for — the hosted page collects it.
+  const unnamed = await fetch(`${BASE}/v1/intents`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+      'idempotency-key': randomBytes(8).toString('hex'),
+    },
+    body: JSON.stringify({
+      amount: 50_000 + Math.floor(Math.random() * 20_000),
+      client_reference: `PAYER-${Date.now()}`,
+      ttl_seconds: 900,
+    }),
+  }).then((r) => r.json())
 
-  const second = await pay(anyIntent.id, '/payer', { msisdn: '01999999999' })
+  const first = await pay(unnamed.id, '/payer', { msisdn: '01712345678' })
+  const firstBody = await first.json()
+  check(
+    "the buyer's number is stored",
+    first.status === 200 && firstBody.stored === true,
+    JSON.stringify(firstBody),
+  )
+
+  const second = await pay(unnamed.id, '/payer', { msisdn: '01999999999' })
   const secondBody = await second.json()
   check('write-once: a second number does not overwrite', secondBody.stored === false)
+
+  // And when the store already named one, the page has nothing to ask.
+  const preset = await pay(anyIntent.id, '/payer', { msisdn: '01888888888' })
+  const presetBody = await preset.json()
+  check("the store's number is not overwritten either", presetBody.stored === false)
 
   /* ── TrxID verification ───────────────────────────────────────────────── */
 
@@ -297,6 +324,66 @@ async function main() {
   check('the TrxID rescues it as underpaid', rescued.resolution === 'underpaid', rescued.resolution)
   check('and it says how much is left', rescued.shortfall > 0, String(rescued.shortfall))
 
+  /* ── The three requirements ───────────────────────────────────────────── */
+
+  section('What will not auto-match')
+
+  // A near-miss reference. Must not be guessed at.
+  const typoIntent = await createIntent(50_000 + Math.floor(Math.random() * 20_000))
+  const typoRef = `${typoIntent.ref_code.slice(0, 3)}${typoIntent.ref_code[3] === 'Z' ? 'Y' : 'Z'}`
+  await capture(
+    typoIntent.receiving_account.msisdn,
+    bkashMessage({ taka: typoIntent.amount / 100, ref: typoRef, trx: trxId() }),
+  )
+  const typoStatus = await (await pay(typoIntent.id, '/status')).json()
+  check('a reference one character out is refused', typoStatus.status === 'open', typoStatus.status)
+  check('and nothing is credited', typoStatus.received_amount === 0)
+
+  // Right reference, wrong sender.
+  const wrongSender = await createIntent(50_000 + Math.floor(Math.random() * 20_000))
+  await capture(
+    wrongSender.receiving_account.msisdn,
+    bkashMessage({
+      taka: wrongSender.amount / 100,
+      ref: wrongSender.ref_code,
+      trx: trxId(),
+      sender: '01999999999',
+    }),
+  )
+  const wrongSenderStatus = await (await pay(wrongSender.id, '/status')).json()
+  check(
+    'money from an undeclared number is refused',
+    wrongSenderStatus.status === 'open',
+    wrongSenderStatus.status,
+  )
+  check('and nothing is credited', wrongSenderStatus.received_amount === 0)
+
+  // Nobody said who would pay.
+  const noPayer = await fetch(`${BASE}/v1/intents`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+      'idempotency-key': randomBytes(8).toString('hex'),
+    },
+    body: JSON.stringify({
+      amount: 50_000 + Math.floor(Math.random() * 20_000),
+      client_reference: `NOPAYER-${Date.now()}`,
+      ttl_seconds: 900,
+    }),
+  }).then((r) => r.json())
+
+  await capture(
+    noPayer.receiving_account.msisdn,
+    bkashMessage({ taka: noPayer.amount / 100, ref: noPayer.ref_code, trx: trxId() }),
+  )
+  const noPayerStatus = await (await pay(noPayer.id, '/status')).json()
+  check(
+    'a perfect payment against an intent with no declared payer is refused',
+    noPayerStatus.status === 'open',
+    noPayerStatus.status,
+  )
+
   /* ── Overpayment ──────────────────────────────────────────────────────── */
 
   section('Overpayment')
@@ -317,6 +404,33 @@ async function main() {
   )
   const overStatus = await (await pay(overIntent.id, '/status')).json()
   check('and the intent is matched', overStatus.status === 'matched', overStatus.status)
+
+  /* ── Refund request ───────────────────────────────────────────────────── */
+
+  section('Asking for the extra back')
+
+  const refund = await pay(overIntent.id, '/refund', {
+    reason: 'overpaid',
+    note: 'Sent too much by mistake',
+  })
+  const refundBody = await refund.json()
+  check(
+    'the ask is recorded',
+    refund.status === 200 && Boolean(refundBody.id),
+    JSON.stringify(refundBody),
+  )
+  check('and it is open', refundBody.status === 'open', refundBody.status)
+
+  const again = await (await pay(overIntent.id, '/refund', { reason: 'overpaid' })).json()
+  check('pressing it twice does not raise a second claim', again.duplicate === true)
+
+  const unpaid = await createIntent(40_000 + Math.floor(Math.random() * 10_000))
+  const unpaidRefund = await pay(unpaid.id, '/refund', { reason: 'cancel_order' })
+  check(
+    'nothing to refund on an unpaid intent',
+    unpaidRefund.status === 409,
+    `got ${unpaidRefund.status}`,
+  )
 
   /* ── Locked method ────────────────────────────────────────────────────── */
 

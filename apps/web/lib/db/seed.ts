@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { WEBHOOK_EVENT_TYPES } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
 import { and, eq } from 'drizzle-orm'
 import { generateApiKey, generateDeviceToken } from '../auth/tokens'
@@ -187,20 +188,20 @@ async function main() {
       url: 'http://localhost:4000/webhooks/jomma',
       description: 'Local development receiver',
       secret: webhookSecret,
-      enabledEvents: [
-        'payment.succeeded',
-        'payment.partial',
-        'payment.overpaid',
-        'payment.expired',
-        'payment.cancelled',
-        'payment.reversed',
-        'account.degraded',
-        'account.recovered',
-      ],
+      // Every type, from the source list. Spelling them out here meant the seed
+      // silently fell behind each time a new event was added, and the endpoint
+      // stopped receiving something nobody noticed was missing.
+      enabledEvents: [...WEBHOOK_EVENT_TYPES],
     })
     .onConflictDoUpdate({
       target: [webhookEndpoints.appId, webhookEndpoints.url],
-      set: { secret: webhookSecret, status: 'active' },
+      // Re-seeding also re-subscribes, so an endpoint created before a new
+      // event type existed picks it up.
+      set: {
+        secret: webhookSecret,
+        status: 'active',
+        enabledEvents: [...WEBHOOK_EVENT_TYPES],
+      },
     })
 
   console.log(`

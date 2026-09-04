@@ -230,15 +230,35 @@ async function resolveFound(
   const outstanding = intent.amountCents - intent.receivedAmountCents
   const senderMatches = sameMsisdn(payment.senderMsisdn, intent.payerMsisdn ?? options.senderMsisdn)
 
-  // 4, 5, 6, 7 all record the money. Underpayment is held, not lost.
+  /*
+   * The sender is a requirement, checked before anything else.
+   *
+   * It used to be a tiebreak that only ran when the amount matched exactly —
+   * so a short or over payment from a number nobody declared was applied
+   * without the sender ever being looked at. That is the same hole the
+   * automatic path had, from the other direction.
+   *
+   * A mismatch is not a rejection. The money is real and it is on the right
+   * account, so refusing it would strand it; somebody paying from a spouse's
+   * account is an ordinary thing to do. It goes to a human, who can see both
+   * numbers and decide, and until they do it is not credited to anyone.
+   */
+  if (!senderMatches) {
+    return {
+      resolution: 'sender_mismatch',
+      status: 'pending',
+      escalated: true,
+      response: { resolution: 'sender_mismatch', intent_status: intent.status },
+    }
+  }
+
+  // 4, 5, 6 all record the money. Underpayment is held, not lost.
   const resolution: SubmissionResolution =
     payment.amountCents < outstanding
       ? 'underpaid'
       : payment.amountCents > outstanding
         ? 'overpaid'
-        : senderMatches
-          ? 'exact'
-          : 'sender_mismatch'
+        : 'exact'
 
   let applied: Awaited<ReturnType<typeof applyPayment>>
   try {
@@ -284,14 +304,7 @@ async function resolveFound(
     response.excess = applied.excessCents
   }
 
-  return {
-    resolution,
-    status: 'approved',
-    // Paid from an undeclared number. Approved, but flagged so the pattern is
-    // visible if it repeats.
-    flagged: resolution === 'sender_mismatch',
-    response,
-  }
+  return { resolution, status: 'approved', response }
 }
 
 /* ── Bookkeeping ──────────────────────────────────────────────────────────── */

@@ -86,6 +86,13 @@ export const ADAPTERS: Record<IngestAdapterId, IngestAdapter> = {
   messages_bridge: { id: 'messages_bridge', reliability: 'best_effort' },
 }
 
+/** What a buyer asked the store to do about money they should not have paid. */
+export const REFUND_REASONS = ['overpaid', 'cancel_order', 'other'] as const
+export type RefundReason = (typeof REFUND_REASONS)[number]
+
+export const REFUND_REQUEST_STATUSES = ['open', 'acknowledged', 'resolved', 'declined'] as const
+export type RefundRequestStatus = (typeof REFUND_REQUEST_STATUSES)[number]
+
 export const SUBMISSION_STATUSES = ['pending', 'approved', 'rejected', 'superseded'] as const
 export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number]
 
@@ -163,6 +170,7 @@ export const AUDIT_ACTIONS = [
   'intent.extended',
   'intent.expired',
   'intent.rerouted',
+  'intent.refund_requested',
   'payment.captured',
   'payment.parse_failed',
   'payment.matched',

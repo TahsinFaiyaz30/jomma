@@ -28,7 +28,7 @@ export const POST = route(async (request, context) => {
   const uuid = fromPublicId('intent', publicId)
   if (!uuid) throw ApiError.notFound('No such payment.')
 
-  enforceRateLimit(context, 'intents:mutate', context.ip ?? 'unknown')
+  enforceRateLimit(context, 'pay:write', context.ip ?? 'unknown')
 
   const body = await parseBody(request, bodySchema)
   const { changed } = await switchCheckoutMethod({

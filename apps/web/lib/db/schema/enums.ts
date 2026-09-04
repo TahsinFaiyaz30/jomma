@@ -18,6 +18,8 @@ import {
   PROVIDER_PREFERENCES,
   PROVIDERS,
   REF_STATUSES,
+  REFUND_REASONS,
+  REFUND_REQUEST_STATUSES,
   SUBMISSION_RESOLUTIONS,
   SUBMISSION_STATUSES,
   TRANSACTION_TYPES,
@@ -44,6 +46,8 @@ export const captureSourceEnum = pgEnum('capture_source', CAPTURE_SOURCES)
 export const ingestAdapterEnum = pgEnum('ingest_adapter', INGEST_ADAPTERS)
 export const adapterReliabilityEnum = pgEnum('adapter_reliability', ADAPTER_RELIABILITY)
 export const submissionStatusEnum = pgEnum('submission_status', SUBMISSION_STATUSES)
+export const refundReasonEnum = pgEnum('refund_reason', REFUND_REASONS)
+export const refundRequestStatusEnum = pgEnum('refund_request_status', REFUND_REQUEST_STATUSES)
 export const submissionResolutionEnum = pgEnum('submission_resolution', SUBMISSION_RESOLUTIONS)
 export const matchConfidenceEnum = pgEnum('match_confidence', MATCH_CONFIDENCES)
 export const matchedByEnum = pgEnum('matched_by', MATCHED_BY)

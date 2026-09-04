@@ -33,7 +33,7 @@ const bodySchema = z.object({ msisdn: msisdnSchema })
  * this path out of the picture entirely.
  */
 export const POST = route(async (request, context) => {
-  enforceRateLimit(context, 'submissions:create', context.ip ?? 'unknown')
+  enforceRateLimit(context, 'pay:write', context.ip ?? 'unknown')
 
   const segments = new URL(request.url).pathname.split('/').filter(Boolean)
   const publicId = segments[segments.indexOf('pay') + 1] ?? ''

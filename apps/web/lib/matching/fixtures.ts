@@ -1,7 +1,13 @@
 import type { CandidateIntent, CandidateLock, ObservedPayment } from './types'
 
-/** Builders for the matcher suite. Kept out of the test files so the synthetic
-    collision cases read as scenarios rather than object literals. */
+/**
+ * Builders for the matcher suite. Kept out of the test files so the synthetic
+ * collision cases read as scenarios rather than object literals.
+ *
+ * The defaults describe a payment that *should* match: right account, exact
+ * reference, and a sender the intent declared. Tests then break one thing at a
+ * time, which is the only way to be sure which requirement a refusal came from.
+ */
 
 export const ACCOUNT_A = 'acct-a'
 export const ACCOUNT_B = 'acct-b'
@@ -44,7 +50,9 @@ export function intent(overrides: Partial<CandidateIntent> = {}): CandidateInten
     amountCents,
     outstandingCents: overrides.outstandingCents ?? amountCents,
     refCode: 'K7M2',
-    expectedMsisdn: null,
+    // Declared by default. The buyer naming their number is required for an
+    // automatic match, so an intent without one is the exception, not the norm.
+    expectedMsisdn: '8801712345678',
     payClickedAt: minutesAfter(T0, -2),
     expiresAt: minutesAfter(T0, 3),
     status: 'open',
