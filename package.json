@@ -35,6 +35,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.4",
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0",
     "typescript": "^5.9.3"
   }
 }

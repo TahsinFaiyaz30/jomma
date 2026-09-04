@@ -10,6 +10,13 @@ import {
   SendMoneyPage,
   type SendPhase,
 } from './bkash-screens'
+import {
+  DialerScreen,
+  MenuBody,
+  RunningScreen,
+  UssdDialogScreen,
+  ussdAmount,
+} from './bkash-ussd-screens'
 
 /**
  * The animated walkthrough.
@@ -42,9 +49,12 @@ export interface GuideData {
 
 type PageId = 'home' | 'send' | 'amount' | 'confirm'
 
+/** The `*247#` route's pages. Separate union — it shares no screens with the app. */
+type UssdPageId = 'dial' | 'menu' | 'receiver' | 'ussd-amount' | 'reference' | 'pin' | 'run'
+
 interface Step {
   id: string
-  page: PageId
+  page: PageId | UssdPageId
   label: string
   caption: React.ReactNode
   /** How long this step holds before advancing, ms. */
@@ -55,8 +65,12 @@ interface Step {
    * Declared per step rather than measured off the DOM: the pointer has to glide
    * between two screens that are mid-transition, so it cannot ask either of them
    * where anything is. Percentages also survive the frame being resized.
+   *
+   * `hide` is for a screen with nothing to press — the USSD flow has one, while
+   * the network answers, and a pointer hovering over a spinner would be
+   * inviting a tap that does nothing.
    */
-  tap: { x: number; y: number; press?: boolean }
+  tap: { x: number; y: number; press?: boolean; hide?: boolean }
   phase?: SendPhase
   focus?: AmountFocus
 }
@@ -175,6 +189,112 @@ function buildSteps(data: GuideData): Step[] {
 }
 
 /**
+ * The `*247#` route.
+ *
+ * Same eight beats as the app, and a completely different surface: the phone's
+ * dialler, then a stack of operator dialogs. Worth having as its own tab rather
+ * than a footnote — a buyer on a phone without the app installed, or on a bad
+ * connection, has no other way through, and the reference field exists on this
+ * path too, which is the only reason automatic matching still works here.
+ *
+ * Every prompt is quoted from a real `*247#` session. The dialogs advertise
+ * Priyo Numbers mid-flow, which reads like an error if you have not seen it —
+ * it is bKash's own copy and it is left in for that reason.
+ */
+function buildUssdSteps(data: GuideData): Step[] {
+  return [
+    {
+      id: 'dial',
+      page: 'dial',
+      label: 'Dial *247#',
+      caption: (
+        <>
+          Open your phone's dialler, type <Value>*247#</Value> and press call.
+        </>
+      ),
+      hold: 4000,
+      tap: { x: 50, y: 94.8 },
+    },
+    {
+      id: 'menu',
+      page: 'menu',
+      label: 'Send Money',
+      caption: (
+        <>
+          The bKash menu answers. Type <Value>1</Value> for Send Money and tap <strong>SEND</strong>
+          .
+        </>
+      ),
+      hold: 4400,
+      tap: { x: 83.3, y: 71.3 },
+    },
+    {
+      id: 'receiver',
+      page: 'receiver',
+      label: 'Receiver number',
+      caption: (
+        <>
+          Type <Value>{data.msisdn}</Value> as the receiver's account number.
+        </>
+      ),
+      hold: 4400,
+      tap: { x: 83.3, y: 56.3 },
+    },
+    {
+      id: 'ussd-amount',
+      page: 'ussd-amount',
+      label: 'Amount',
+      caption: (
+        <>
+          Enter exactly <Value>{data.amount}</Value>. A different amount will not match this order.
+        </>
+      ),
+      hold: 4400,
+      tap: { x: 83.3, y: 62.2 },
+    },
+    {
+      id: 'ussd-reference',
+      page: 'reference',
+      label: 'Reference',
+      caption: (
+        <>
+          Type <Value>{data.refCode}</Value> as the reference. This is what tells us the payment is
+          yours.
+        </>
+      ),
+      hold: 4800,
+      tap: { x: 83.3, y: 59.3 },
+    },
+    {
+      id: 'ussd-pin',
+      page: 'pin',
+      label: 'Menu PIN',
+      caption: (
+        <>
+          Check the summary, then enter your own bKash PIN.{' '}
+          <strong>Never type it anywhere but this prompt</strong> — this page will never ask for it.
+        </>
+      ),
+      hold: 4600,
+      tap: { x: 83.3, y: 62.2 },
+    },
+    {
+      id: 'ussd-run',
+      page: 'run',
+      label: 'Sending',
+      caption: (
+        <>
+          That is everything. bKash replies in a few seconds with your reference in it, and this
+          page verifies it by itself.
+        </>
+      ),
+      hold: 5200,
+      tap: { x: 50, y: 50, hide: true },
+    },
+  ]
+}
+
+/**
  * The hand.
  *
  * Lives outside the page transition so it survives a step change and glides to
@@ -257,13 +377,69 @@ function renderPage(step: Step, data: GuideData) {
       )
     case 'confirm':
       return <ConfirmPage msisdn={data.msisdn} amount={data.amount} refCode={data.refCode} />
+
+    case 'dial':
+      return <DialerScreen code="*247#" />
+    case 'menu':
+      return <UssdDialogScreen body={<MenuBody />} input="1" />
+    case 'receiver':
+      return <UssdDialogScreen body="Enter Receiver bKash Account No:" input={data.msisdn} />
+    case 'ussd-amount':
+      return (
+        <UssdDialogScreen
+          body={
+            <>
+              FREE Send Money to 5 Priyo Numbers.
+              <br />
+              Dial *247# and select number 9 to find priyo Numbers.
+              <br />
+              Enter Amount:
+            </>
+          }
+          input={ussdAmount(data.amount)}
+        />
+      )
+    case 'reference':
+      return (
+        <UssdDialogScreen
+          body={
+            <>
+              FREE Send Money to 5 Priyo numbers up to 25,000 Tk. every month.
+              <br />
+              Enter Reference:
+            </>
+          }
+          input={data.refCode}
+        />
+      )
+    case 'pin':
+      return (
+        <UssdDialogScreen
+          body={
+            <>
+              Send Money.
+              <br />
+              To: <span className="figure">{data.msisdn}</span>
+              <br />
+              Amount: Tk <span className="figure">{ussdAmount(data.amount)}</span>
+              <br />
+              Reference: <span className="figure">{data.refCode}</span>
+              <br />
+              Enter Menu PIN to confirm:
+            </>
+          }
+          input="••••"
+        />
+      )
+    case 'run':
+      return <RunningScreen />
+
     default:
       return null
   }
 }
 
-export function BkashGuide({ data }: { data: GuideData }) {
-  const steps = buildSteps(data)
+function GuidePlayer({ data, steps }: { data: GuideData; steps: Step[] }) {
   const reduceMotion = useReducedMotion()
 
   const [index, setIndex] = useState(0)
@@ -318,7 +494,7 @@ export function BkashGuide({ data }: { data: GuideData }) {
             </motion.div>
           </AnimatePresence>
 
-          <TapPointer target={step.tap} reduceMotion={reduceMotion} />
+          {step.tap.hide ? null : <TapPointer target={step.tap} reduceMotion={reduceMotion} />}
         </div>
 
         <div className="absolute inset-x-0 bottom-0 h-1 bg-neutral-200">
@@ -392,6 +568,62 @@ export function BkashGuide({ data }: { data: GuideData }) {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Both routes to the same payment, as tabs.
+ *
+ * The app is the default because it is what most buyers have and the flow is
+ * gentler. `*247#` is not a fallback for the app being broken — it is the only
+ * way through on a phone without it installed, and it is the same money and the
+ * same reference at the other end.
+ *
+ * Switching remounts the player rather than swapping its steps, so the new tab
+ * starts from its own first screen instead of resuming at whatever index the
+ * other one had reached.
+ */
+type Route = 'app' | 'ussd'
+
+const ROUTES: Array<{ id: Route; label: string }> = [
+  { id: 'app', label: 'In the app' },
+  { id: 'ussd', label: 'Dial *247#' },
+]
+
+export function BkashGuide({ data }: { data: GuideData }) {
+  const [route, setRoute] = useState<Route>('app')
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div
+        role="tablist"
+        aria-label="How to pay"
+        className="inline-flex rounded-xl border border-border p-0.5"
+      >
+        {ROUTES.map((candidate) => (
+          <button
+            key={candidate.id}
+            type="button"
+            role="tab"
+            aria-selected={route === candidate.id}
+            onClick={() => setRoute(candidate.id)}
+            className={`rounded-lg px-3 py-1.5 text-micro transition-colors ${
+              route === candidate.id
+                ? 'bg-foreground text-background'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {candidate.label}
+          </button>
+        ))}
+      </div>
+
+      <GuidePlayer
+        key={route}
+        data={data}
+        steps={route === 'app' ? buildSteps(data) : buildUssdSteps(data)}
+      />
     </div>
   )
 }

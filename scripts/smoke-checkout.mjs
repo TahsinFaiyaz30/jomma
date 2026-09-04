@@ -16,6 +16,8 @@
 
 import { createHmac, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import jsQR from 'jsqr'
+import { PNG } from 'pngjs'
 
 const BASE = process.env.JOMMA_URL ?? 'http://localhost:3000'
 const [apiKey] = process.argv.slice(2)
@@ -434,6 +436,46 @@ async function main() {
     'nothing to refund on an unpaid intent',
     unpaidRefund.status === 409,
     `got ${unpaidRefund.status}`,
+  )
+
+  /* ── The scan-to-phone QR ─────────────────────────────────────────────── */
+
+  section('Scan to phone')
+
+  // Decoded rather than eyeballed. A QR that renders but encodes the wrong
+  // thing looks perfect on the page and fails silently in someone's hand,
+  // which is the one bug a screenshot cannot catch.
+  const qrIntent = await createIntent(20_000 + Math.floor(Math.random() * 10_000))
+  const qrResponse = await fetch(`${BASE}/api/pay/${qrIntent.id}/qr`)
+
+  check('the QR route answers', qrResponse.status === 200, `got ${qrResponse.status}`)
+  check(
+    'as a PNG',
+    qrResponse.headers.get('content-type') === 'image/png',
+    qrResponse.headers.get('content-type') ?? 'no content-type',
+  )
+  check(
+    'and is not cached anywhere',
+    (qrResponse.headers.get('cache-control') ?? '').includes('no-store'),
+    qrResponse.headers.get('cache-control') ?? 'no cache-control',
+  )
+
+  const png = PNG.sync.read(Buffer.from(await qrResponse.arrayBuffer()))
+  const decoded = jsQR(new Uint8ClampedArray(png.data), png.width, png.height)
+
+  check('the image scans', Boolean(decoded), 'jsQR found no code')
+  check(
+    'and points at this payment',
+    decoded?.data === `${BASE}/pay/${qrIntent.id}`,
+    `got ${decoded?.data}`,
+  )
+
+  const qrMissing = await fetch(`${BASE}/api/pay/int_00000000000000000000000000/qr`)
+  check('an unknown intent has no QR', qrMissing.status === 404, `got ${qrMissing.status}`)
+  check(
+    'and the 404 is not served as an image',
+    (qrMissing.headers.get('content-type') ?? '').includes('json'),
+    qrMissing.headers.get('content-type') ?? 'no content-type',
   )
 
   /* ── Locked method ────────────────────────────────────────────────────── */

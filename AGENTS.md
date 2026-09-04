@@ -313,10 +313,25 @@ be red.
    Capture a real Nagad send-money and cash-in, save them under
    `lib/parsers/fixtures/`, and write the regexes against those strings.
 3. **Whether bKash send-money reference appears in the recipient's message on all
-   channels** (app vs `*247#`). ⛔ Still unverified. The bKash parser is written
-   against the single illustrative sample in `docs/api.md` and its other fixtures
-   are synthetic. Must be verified with a real ৳10 transfer before the matcher is
-   trusted in production.
+   channels** (app vs `*247#`). ✅ Resolved 2026-09-04 with real ৳10 transfers.
+   Three live captures are in `lib/parsers/fixtures/bkash.ts` as `source: 'live'`
+   and the parser reads all three correctly:
+   - A received send-money **with** a reference, which is the case the matcher
+     depends on — `Ref 12341234` arrives intact in the recipient's message.
+   - The same **without** one, which must not auto-match and does not.
+   - A `*247#` session's own confirmation, which carries `Ref` too. So the
+     reference survives the USSD path — the thing this decision was actually
+     about. That capture doubles as the guard against the worst failure
+     available: it is an *outgoing* message, and the parser refuses it rather
+     than crediting money that left the account.
+
+   The live pair also pinned `DD/MM/YYYY HH:MM` read as Bangladesh time, which
+   the payment window measures against and which fails silently when wrong.
+
+   Not captured: the *recipient's* message for a USSD-initiated send
+   specifically. Low risk — the recipient's SMS describes money arriving and is
+   chosen by transaction type, not by how the sender started it — but if one
+   ever turns up, add it as a fixture rather than assuming.
 4. **Bengali localisation.** ✅ Decided: bilingual bn + en from the start. Hind
    Siliguri via `next/font`, `Intl` with `bn-BD` (Bengali numerals, lakh
    grouping) and `en-BD`. Copy lives in `lib/i18n/messages.ts`; the locale is a

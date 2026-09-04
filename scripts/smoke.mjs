@@ -156,8 +156,6 @@ function deviceFor(msisdn) {
   return msisdn === deviceBMsisdn ? deviceB : device
 }
 
-const accountsAtStart = await client('GET', '/v1/accounts')
-
 /* ── 2. Intent lifecycle ──────────────────────────────────────────────────── */
 
 section('Intent lifecycle')

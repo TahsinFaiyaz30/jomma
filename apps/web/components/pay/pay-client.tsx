@@ -113,6 +113,66 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   )
 }
 
+/**
+ * Scan to carry this page to a phone.
+ *
+ * Not a bKash QR, and deliberately not dressed as one. bKash only scans QRs
+ * bKash itself issued, and its Send Money flow has no amount or reference field
+ * to fill from a link anyway — see lib/services/qr.ts for the full account of
+ * what was tried. Promising a scan-and-pay here would fail in the buyer's hand
+ * at the worst possible moment.
+ *
+ * What it does instead is worth having on its own: a buyer at a laptop has
+ * bKash on a phone that has none of this on it, and their alternative is
+ * copying eleven digits and an eight-character code across by eye.
+ *
+ * Desktop only, because on a phone it is a picture of the page you are looking
+ * at. The download is for the case the camera app will not cooperate, or the
+ * buyer wants it in their gallery before switching apps.
+ */
+function ScanToPhone({ intentId }: { intentId: string }) {
+  const src = `/api/pay/${intentId}/qr`
+
+  return (
+    <div className="hidden items-center gap-4 rounded-xl border border-border px-4 py-4 md:flex">
+      {/* Plain <img>: the source is a dynamic route, so there is nothing for the
+          image optimiser to do but add a hop. White plate regardless of theme —
+          an inverted QR does not scan. */}
+      {/* biome-ignore lint/performance/noImgElement: dynamic route, not a static asset */}
+      <img
+        src={src}
+        alt="QR code that opens this payment page"
+        width={112}
+        height={112}
+        /* `hidden` on the parent does not stop a plain <img> being fetched, so
+           without this every buyer on a phone pays for an image they are never
+           shown — on mobile data, mid-checkout. A lazy image inside a
+           display:none subtree never intersects, so it is never requested. */
+        loading="lazy"
+        decoding="async"
+        className="size-28 shrink-0 rounded-lg bg-white"
+      />
+      <div className="min-w-0 space-y-1.5">
+        <p className="text-small">Open on another device</p>
+        {/* The last line is not padding. Somebody looking at a QR on a payment
+            page will try it in bKash, get "invalid QR", and conclude the page
+            is broken. Saying which app to point at it costs six words. */}
+        <p className="text-micro text-muted-foreground">
+          Scan this QR code to open this page on your phone — the number, amount and reference come
+          with it. Use your camera app, not bKash.
+        </p>
+        <a
+          href={src}
+          download={`jomma-${intentId}.png`}
+          className="inline-block rounded-lg border border-border px-3 py-1.5 text-micro transition-colors hover:bg-accent"
+        >
+          Download QR
+        </a>
+      </div>
+    </div>
+  )
+}
+
 /* ── Terminal states ──────────────────────────────────────────────────────── */
 
 function Receipt({ view }: { view: PayView }) {
@@ -394,6 +454,40 @@ export function PayClient({ initial }: { initial: PayView }) {
     return initial.payerKnown ? 'pay' : 'payer'
   })
 
+  /*
+   * Resume where they were, rather than restarting the queue on every reload.
+   *
+   * The step is component state, so a refresh — or coming back to the tab after
+   * switching to bKash, which is the single most likely thing to happen on this
+   * page — sent the buyer back to a method picker they had already answered and
+   * a number they had already given. Asking someone the same two questions
+   * again mid-payment reads as the page having lost their answers.
+   *
+   * Session storage rather than the database, because this is where somebody
+   * got to in a form, not a fact about the payment. It is scoped to the tab and
+   * to this intent, and losing it costs two taps.
+   *
+   * Applied in an effect because the server render cannot see it. That leaves
+   * one frame on the first step before it corrects, which beats the same frame
+   * appearing on every reload for the rest of the payment.
+   */
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(`jomma:pay:${view.id}`) === 'pay') setStep('pay')
+    } catch {
+      // Private browsing, or storage disabled. The queue still works.
+    }
+  }, [view.id])
+
+  useEffect(() => {
+    if (step !== 'pay') return
+    try {
+      sessionStorage.setItem(`jomma:pay:${view.id}`, 'pay')
+    } catch {
+      // As above — remembering is an improvement, not a requirement.
+    }
+  }, [step, view.id])
+
   const countdown = useCountdown(view.expiresAt)
 
   const refresh = useCallback(async () => {
@@ -508,6 +602,8 @@ export function PayClient({ initial }: { initial: PayView }) {
 
   const details = (
     <div className="space-y-6">
+      <ScanToPhone intentId={view.id} />
+
       <div className="flex items-baseline justify-between gap-3">
         <h1 className="amount font-semibold text-display">{taka(view.shortfallCents)}</h1>
         <span className="figure text-small text-muted-foreground">{countdown} left</span>

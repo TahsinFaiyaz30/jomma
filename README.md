@@ -135,13 +135,14 @@ rather than blocking checkout. The smoke suite exercises this.
 
 ## Where it is unfinished
 
-Two of these are blocked on you, not on code.
+One of these is blocked on you, not on code.
 
-- **The bKash parser is written against the illustrative sample in docs/api.md**,
-  not a real capture. Send ৳10 between two of your own numbers, via both the app
-  and `*247#`, capture the exact notification and SMS text, and replace the
-  fixtures. Until then the matcher's strongest signal is unverified.
-  (AGENTS.md open decision #3.)
+- ~~**The bKash parser is written against the illustrative sample in
+  docs/api.md**, not a real capture.~~ Done — three real ৳10 captures are in
+  `lib/parsers/fixtures/bkash.ts` as `source: 'live'`, covering a received
+  payment with a reference, one without, and a `*247#` confirmation. The
+  reference survives both channels, and the timestamp is read as Bangladesh
+  time. (AGENTS.md open decision #3.)
 - **No Nagad parser.** The message format is unknown. Nagad captures store their
   raw text, fail parsing loudly, and wait for a human — never dropped, and
   recoverable by re-parsing once the format is known.

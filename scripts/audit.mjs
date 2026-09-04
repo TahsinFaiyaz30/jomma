@@ -373,11 +373,21 @@ async function validationAndCredentials(mine) {
   const head = await req('GET', `/pay/${mine.id}`)
   check('X-Content-Type-Options is set', head.headers.get('x-content-type-options') === 'nosniff')
   check('X-Frame-Options is set', Boolean(head.headers.get('x-frame-options')))
+  /*
+   * Run this one against a production server.
+   *
+   * `next dev` answers dynamic pages with `no-cache, must-revalidate` and
+   * `next start` answers the same page with `private, no-cache, no-store,
+   * max-age=0, must-revalidate`. Only the second is what ships, so pointing
+   * this suite at :3000 while a dev server is running fails the check and
+   * invites a fix for a problem that does not exist in production. It has cost
+   * an afternoon once already.
+   */
   check(
     'the pay page is not cached by intermediaries',
     (head.headers.get('cache-control') ?? '').includes('no-store') ||
       (head.headers.get('cache-control') ?? '').includes('private'),
-    head.headers.get('cache-control') ?? 'none',
+    `${head.headers.get('cache-control') ?? 'none'} — expected against \`next start\`, not \`next dev\``,
   )
 
   console.log(`\n${passed} passed, ${failed} failed`)

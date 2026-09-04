@@ -1,15 +1,23 @@
 /**
  * bKash fixtures.
  *
- * ⚠ SYNTHETIC. Only the first entry comes from docs/api.md; the rest are
- * plausible variations written to pin the parser's degradation behaviour, not
- * to assert what bKash actually sends.
+ * Two entries are now real, marked `source: 'live'` — genuine Send Money
+ * confirmations off a bKash account, one with a reference typed and one
+ * without. They are the ones that matter: everything else here is a plausible
+ * variation written to pin degradation behaviour, not to assert what bKash
+ * actually sends.
  *
- * Replace these with real captures before trusting the parser in production —
- * send ৳10 between two of your own numbers via both the app and `*247#`, and
- * save the exact notification and SMS text. `.gitignore` already excludes
- * `fixtures/raw/`, so keep unredacted captures there and commit only redacted
- * copies here.
+ * The live pair confirmed three things the synthetic ones could only assume —
+ * that the reference survives the app as free text, that `DD/MM/YYYY HH:MM` is
+ * the real stamp format, and that reading it as Bangladesh time lands on the
+ * right instant. Sender numbers are redacted; `.gitignore` already excludes
+ * `fixtures/raw/`, so keep unredacted captures there.
+ *
+ * The third live entry is a `*247#` confirmation, which settles the channel
+ * question: the reference survives USSD too. It is also the outgoing direction,
+ * and it must fail — see the note on that fixture.
+ *
+ * Still unverified: Nagad, in its entirety.
  */
 
 export interface Fixture {
@@ -25,10 +33,75 @@ export interface Fixture {
     transactionType: 'send_money' | 'cash_in' | 'other'
     parseStatus: 'ok' | 'partial' | 'failed'
   }
-  source: 'docs' | 'synthetic'
+  source: 'docs' | 'synthetic' | 'live'
 }
 
 export const BKASH_FIXTURES: Fixture[] = [
+  {
+    /*
+     * A real ৳10.00 transfer. The reference is eight digits because it was
+     * typed by hand; a Jomma code never looks like this, since the alphabet
+     * drops 0/1/I/L/O to keep codes unambiguous when read aloud.
+     */
+    name: 'LIVE — send money with a reference',
+    source: 'live',
+    raw: 'You have received Tk 10.00 from 01771104100. Ref 12341234. Fee Tk 0.00. Balance Tk 1,440.62. TrxID DI4760E7CN at 04/09/2026 19:54',
+    expect: {
+      trxId: 'DI4760E7CN',
+      amountCents: 1_000,
+      senderMsisdn: '8801771104100',
+      referenceRaw: '12341234',
+      balanceAfterCents: 144_062,
+      transactionType: 'send_money',
+      parseStatus: 'ok',
+    },
+  },
+  {
+    /*
+     * The same account, no reference typed. This is the case that must NOT
+     * auto-match: without a reference there is nothing tying the money to an
+     * order, so it waits for a TrxID the buyer submits themselves.
+     */
+    name: 'LIVE — send money with no reference',
+    source: 'live',
+    raw: 'You have received Tk 11.00 from 01632553696. Fee Tk 0.00. Balance Tk 2,246.76. TrxID DI304PJ6QK at 03/09/2026 16:49',
+    expect: {
+      trxId: 'DI304PJ6QK',
+      amountCents: 1_100,
+      senderMsisdn: '8801632553696',
+      referenceRaw: null,
+      balanceAfterCents: 224_676,
+      transactionType: 'send_money',
+      parseStatus: 'ok',
+    },
+  },
+  {
+    /*
+     * The *sender's* confirmation, captured over `*247#`. Money leaving the
+     * account, not arriving on it.
+     *
+     * The one that must fail. The watched phone can send money too, and this
+     * message carries a TrxID, a reference and an amount — everything the
+     * matcher looks at. Reading it as income would credit an order with money
+     * that went the other way, which is the worst bug this repo could have.
+     *
+     * It fails on the amount: the incoming grammar is "You have received Tk X
+     * from …", and there is no "received … from" here to anchor on. `admits()`
+     * then refuses it as `unparsed` before any other check runs.
+     */
+    name: 'LIVE — an OUTGOING send money must never parse',
+    source: 'live',
+    raw: 'Send Money Tk 10.00 to 01518920430 successful. Ref 12341234. Fee Tk 0.00. Balance Tk 320.00. TrxID DI426228H2 at 04/09/2026 20:31',
+    expect: {
+      trxId: 'DI426228H2',
+      amountCents: null,
+      senderMsisdn: null,
+      referenceRaw: '12341234',
+      balanceAfterCents: null,
+      transactionType: 'other',
+      parseStatus: 'failed',
+    },
+  },
   {
     name: 'send money with reference — the sample in docs/api.md',
     source: 'docs',
