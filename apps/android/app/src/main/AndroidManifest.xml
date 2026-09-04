@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -36,6 +37,30 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            The QR scanner, overridden.
+
+            zxing-android-embedded ships its CaptureActivity with
+            android:screenOrientation="sensorLandscape" hardcoded in the
+            library's own manifest, and manifest merging pulls that straight
+            into the app. The effect is that opening the scanner slams the
+            phone into landscape while the rest of the app is upright — which
+            is not a camera decision, it is the library's decision, and it
+            reads as a bug.
+
+            ScanOptions.setOrientationLocked(false) cannot fix it: that only
+            governs runtime locking, and a manifest attribute wins regardless.
+            The override has to be here.
+
+            `unspecified` matches MainActivity: the system decides, which means
+            the user's own rotation lock is respected. That is what every other
+            app on the phone does.
+        -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="unspecified"
+            tools:replace="android:screenOrientation" />
 
         <!--
             The primary capture path. The user must grant notification access in
