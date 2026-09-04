@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { getAdmin } from '@/lib/auth/session'
+import { logger } from '@/lib/logger'
 import { getFeed } from '@/lib/services/dashboard'
 
 export const runtime = 'nodejs'
@@ -8,16 +10,35 @@ export const dynamic = 'force-dynamic'
  * Feed polling endpoint.
  *
  * Deliberately not part of `/v1` — this is dashboard chrome, not the client API,
- * and it returns things (raw parse status, device source) that no tenant should
- * see. It inherits the dashboard's authentication, which is to say it currently
- * has none; see the guard in app/(dash)/layout.tsx.
+ * and it returns things no tenant should see: raw parse status, capture source,
+ * every sender's number and every TrxID across every account.
+ *
+ * Which is exactly why it authenticates. A route handler does **not** inherit
+ * the guard in `app/(dash)/layout.tsx`: that protects the page, and this is a
+ * separate entry point reachable directly. It was left open on the assumption
+ * that it was covered, and it was not — an unauthenticated GET returned three
+ * hundred payment records with phone numbers and transaction ids in them.
+ *
+ * `getAdmin` rather than `requireAdmin`, because the latter redirects and a
+ * poller wants a 401 it can recognise, not an HTML login page.
  *
  * Polling rather than SSE: a 2-second poll on a single-operator dashboard costs
  * one indexed query, survives a dev-server restart without reconnect logic, and
- * has no proxy-buffering failure mode. Revisit if this ever serves many
- * simultaneous viewers.
+ * has no proxy-buffering failure mode.
  */
 export async function GET(request: Request) {
+  const admin = await getAdmin()
+  if (!admin) {
+    logger.warn(
+      { ip: request.headers.get('x-forwarded-for'), path: '/api/dash/feed' },
+      'unauthenticated dashboard feed request',
+    )
+    return NextResponse.json(
+      { error: { code: 'unauthorized', message: 'Sign in required.' } },
+      { status: 401, headers: { 'cache-control': 'no-store' } },
+    )
+  }
+
   const url = new URL(request.url)
   const sinceParam = url.searchParams.get('since')
   const since = sinceParam ? new Date(sinceParam) : null

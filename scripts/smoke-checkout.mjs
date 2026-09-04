@@ -7,6 +7,10 @@
  * TrxID. Including the case that matters most and is easiest to get wrong,
  * paying in two instalments.
  *
+ *
+ * Note: run the suites a minute apart. They share a per-IP rate limit with each
+ * other and with the audit's burst test, so back-to-back runs from one machine
+ * throttle each other — which is the limiter working, not a failure.
  * Usage: node scripts/smoke-checkout.mjs <api_key>
  */
 

@@ -29,7 +29,9 @@
     "smoke:ingest": "node scripts/smoke-ingest.mjs",
     "dev:bridge": "pnpm --filter @jomma/bridge start",
     "test:integration": "pnpm --filter @jomma/web test:integration",
-    "smoke:checkout": "node scripts/smoke-checkout.mjs"
+    "smoke:checkout": "node scripts/smoke-checkout.mjs",
+    "audit": "node scripts/audit.mjs",
+    "stress": "node scripts/stress.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.4",

@@ -80,6 +80,17 @@ export async function applyPayment(tx: Tx, options: ApplyOptions): Promise<Apply
    * `ux_order_payments_incoming` is a unique index on incoming_payment_id, so a
    * TrxID can only ever be spent once. This catches the concurrent case; the
    * pre-check in resolveSubmission catches the common one with a better message.
+   *
+   * The lookup that used to sit in the catch block — reading back *which* intent
+   * had won, so the error could name it — has been removed, and the reason
+   * matters. Postgres aborts the whole transaction on a failed statement and
+   * refuses everything after it until rollback, so that SELECT could never have
+   * run: it raised `25P02 current transaction is aborted`, the unique violation
+   * was lost behind it, and twenty buyers racing one TrxID got 500s instead of
+   * a clean "already used". Recovering the detail would need a SAVEPOINT around
+   * the insert, and it is not worth one — the caller turns this into the same
+   * 409 either way, and `resolveSubmission`'s pre-check already names the other
+   * intent in the case a human actually sees.
    */
   try {
     await tx.insert(orderPayments).values({
@@ -93,12 +104,7 @@ export async function applyPayment(tx: Tx, options: ApplyOptions): Promise<Apply
       matchScore: options.matchScore ?? null,
     })
   } catch (error) {
-    if (isUniqueViolation(error)) {
-      const existing = await tx.query.orderPayments.findFirst({
-        where: eq(orderPayments.incomingPaymentId, options.incomingPaymentId),
-      })
-      throw new AlreadyAppliedError(existing?.intentId ?? null)
-    }
+    if (isUniqueViolation(error)) throw new AlreadyAppliedError(null)
     throw error
   }
 

@@ -298,7 +298,17 @@ export async function requireIntent(publicId: string, appId: string) {
     where: eq(paymentIntents.id, uuid),
   })
   if (!intent) throw ApiError.notFound()
-  if (intent.appId !== appId) throw ApiError.forbidden()
+
+  /*
+   * 404, not 403, when it belongs to another app.
+   *
+   * A 403 confirms the intent exists. Intent ids are not secret enough to hand
+   * a rival tenant an existence oracle over — one that would let them walk ids
+   * and learn how much business another merchant on this instance is doing, and
+   * roughly when. From outside this app, an intent it does not own is simply
+   * not there.
+   */
+  if (intent.appId !== appId) throw ApiError.notFound()
   return intent
 }
 

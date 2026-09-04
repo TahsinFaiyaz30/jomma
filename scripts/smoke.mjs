@@ -157,7 +157,6 @@ function deviceFor(msisdn) {
 }
 
 const accountsAtStart = await client('GET', '/v1/accounts')
-const accountCount = accountsAtStart.json.accounts?.length ?? 1
 
 /* ── 2. Intent lifecycle ──────────────────────────────────────────────────── */
 
@@ -178,6 +177,7 @@ const created = await client(
 
 check('create returns 201', created.status === 201, `got ${created.status}`)
 check('id is prefixed', created.json.id?.startsWith('int_'), created.json.id)
+const refCode = created.json.ref_code
 check('ref code is 8 chars', created.json.ref_code?.length === 8, created.json.ref_code)
 check(
   'and uses no ambiguous characters',
@@ -188,7 +188,6 @@ check('request_id present', Boolean(created.json.request_id))
 check('rate limit headers present', created.headers.get('x-ratelimit-limit') !== null)
 
 const intentId = created.json.id
-const refCode = created.json.ref_code
 
 const replayed = await client(
   'POST',
@@ -340,10 +339,23 @@ check(
   JSON.stringify(already.json),
 )
 
+/*
+ * Pinned to the same provider as the intent that spent this TrxID.
+ *
+ * Submissions are scoped to the intent's own receiving account, so a second
+ * intent that routed elsewhere would report the TrxID as simply not found —
+ * correct, but it would not exercise the reuse guard. Same account, so the
+ * payment is visible and `already_used` is the answer under test.
+ */
 const fresh = await client(
   'POST',
   '/v1/intents',
-  { amount: amount + 7, client_reference: `ORD-SUB-${nonce}` },
+  {
+    amount: amount + 7,
+    client_reference: `ORD-SUB-${nonce}`,
+    provider: created.json.receiving_account?.provider,
+    payer_msisdn: '01712345678',
+  },
   { 'idempotency-key': `smoke-sub-${nonce}` },
 )
 
@@ -382,16 +394,18 @@ await deviceFor(fresh.json.receiving_account?.msisdn)('POST', '/device/v1/captur
       local_id: 'c_smoke_short',
       source: 'notification',
       package: 'com.bKash.customerapp',
-      raw: `You have received Tk ${(shortAmount / 100).toFixed(2)} from 01799999999. Fee Tk 0.00. TrxID ${shortTrx} at ${bkashStamp()}`,
+      raw: `You have received Tk ${(shortAmount / 100).toFixed(2)} from 01712345678. Fee Tk 0.00. TrxID ${shortTrx} at ${bkashStamp()}`,
       captured_at: new Date().toISOString(),
     },
   ],
 })
 
+// From the number the intent declared. A payment from anywhere else is now
+// escalated to a human rather than credited, which is a different test.
 const underpaid = await client('POST', '/v1/submissions', {
   intent_id: fresh.json.id,
   trx_id: shortTrx,
-  sender_msisdn: '8801799999999',
+  sender_msisdn: '8801712345678',
 })
 check(
   'underpaid resolution',

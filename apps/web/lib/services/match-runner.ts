@@ -2,9 +2,10 @@ import { env } from '@jomma/shared/env'
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { incomingPayments, paymentIntents, paymentRefs } from '@/lib/db/schema'
+import { logger } from '@/lib/logger'
 import type { CandidateIntent, MatchResult, ObservedPayment } from '@/lib/matching'
 import { normalizeRef, resolveMatch } from '@/lib/matching'
-import { applyPayment } from './apply'
+import { AlreadyAppliedError, applyPayment } from './apply'
 import { audit } from './audit'
 
 /**
@@ -162,16 +163,38 @@ export async function runMatcher(incomingPaymentId: string): Promise<MatchRunRes
   }
 
   const winner = result.candidate
-  await db.transaction(async (tx) => {
-    await applyPayment(tx, {
-      intentId: winner.intent.id,
-      incomingPaymentId: payment.id,
-      appliedCents: payment.amountCents as number,
-      confidence: winner.confidence ?? 'lock',
-      matchedBy: 'automatic',
-      matchScore: winner.score,
+
+  try {
+    await db.transaction(async (tx) => {
+      await applyPayment(tx, {
+        intentId: winner.intent.id,
+        incomingPaymentId: payment.id,
+        appliedCents: payment.amountCents as number,
+        confidence: winner.confidence ?? 'manual',
+        matchedBy: 'automatic',
+        matchScore: winner.score,
+      })
     })
-  })
+  } catch (error) {
+    /*
+     * Somebody applied this payment first — the orphan retry racing a fresh
+     * capture, or a buyer's TrxID submission landing at the same moment. The
+     * unique index on `incoming_payment_id` is what stopped it being spent
+     * twice, which is the outcome that matters.
+     *
+     * Not an error worth raising: the money is applied, just not by this pass.
+     * Letting it escape would fail the capture request that triggered the
+     * match, and the device would retry a message the server already has.
+     */
+    if (error instanceof AlreadyAppliedError) {
+      logger.info(
+        { incomingPaymentId: payment.id, intentId: winner.intent.id },
+        'payment was already applied by a concurrent pass',
+      )
+      return { result, applied: false, intentId: null }
+    }
+    throw error
+  }
 
   return { result, applied: true, intentId: winner.intent.id }
 }

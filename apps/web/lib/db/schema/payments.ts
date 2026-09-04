@@ -1,4 +1,4 @@
-import { relations, sql } from 'drizzle-orm'
+import { relations } from 'drizzle-orm'
 import { index, integer, jsonb, pgTable, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core'
 import { createdAt, fkId, poisha, primaryId, timestampTz, updatedAt } from './_shared'
 import { devices, receivingAccounts } from './accounts'

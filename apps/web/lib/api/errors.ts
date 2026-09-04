@@ -23,7 +23,7 @@ export type ErrorCode = keyof typeof ERROR_CODES
 
 const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   unauthorized: 'Bad or revoked key.',
-  forbidden: 'That resource belongs to another app.',
+  forbidden: 'This app is suspended.',
   not_found: 'Unknown intent.',
   validation_failed: 'The request body failed validation.',
   no_capacity: 'The reference code pool is momentarily exhausted. Retry shortly.',
