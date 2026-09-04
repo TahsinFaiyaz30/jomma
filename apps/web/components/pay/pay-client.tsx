@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { PayView } from '@/lib/services/pay-page'
 import { BkashGuide } from './guide'
 
@@ -62,6 +63,7 @@ export function PayClient({ initial }: { initial: PayView }) {
   const [view, setView] = useState(initial)
   const [buyerMsisdn, setBuyerMsisdn] = useState('')
   const [started, setStarted] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
   const countdown = useCountdown(view.expiresAt)
 
   /*
@@ -207,43 +209,81 @@ export function PayClient({ initial }: { initial: PayView }) {
   /* ── The walkthrough ────────────────────────────────────────────────────── */
 
   const buyerDigits = buyerMsisdn.replace(/\D/g, '')
+  const guide = {
+    msisdn: view.receivingMsisdn,
+    amount: taka(view.shortfallCents),
+    refCode: view.refCode ?? '',
+    buyerLabel: buyerDigits.length >= 11 ? buyerDigits : 'You',
+  }
+
+  const details = (
+    <div className="space-y-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h1 className="amount font-semibold text-display">{taka(view.shortfallCents)}</h1>
+        <span className="figure text-small text-muted-foreground">{countdown} left</span>
+      </div>
+
+      {view.status === 'partial' ? (
+        <p className="rounded-lg bg-pending-subtle px-3 py-2 text-pending-subtle-foreground text-small">
+          {taka(view.receivedAmountCents)} received so far. Send the remaining{' '}
+          {taka(view.shortfallCents)} using the same reference.
+        </p>
+      ) : null}
+
+      <div className="space-y-2">
+        <CopyRow label="Send to" value={view.receivingMsisdn} />
+        <CopyRow label="Amount" value={(view.shortfallCents / 100).toFixed(2)} />
+        {view.refCode ? <CopyRow label="Reference" value={view.refCode} /> : null}
+      </div>
+
+      {/* Narrow screens do not get the guide inline — a 577px phone mock under
+          the details means scrolling past the numbers to reach it and back up to
+          copy them. It opens over the top instead. */}
+      <button
+        type="button"
+        onClick={() => setGuideOpen(true)}
+        className="w-full rounded-md border border-border py-2.5 text-small md:hidden"
+      >
+        Show me how to pay
+      </button>
+
+      <p className="flex items-center justify-center gap-2 text-center text-micro text-muted-foreground">
+        <span className="inline-block size-1.5 animate-pulse rounded-full bg-pending" />
+        Waiting for your payment. This page updates by itself.
+      </p>
+    </div>
+  )
 
   return (
-    <Shell merchant={view.merchantName}>
-      <div className="space-y-5">
-        <div className="flex items-baseline justify-between gap-3">
-          <h1 className="amount font-semibold text-display">{taka(view.shortfallCents)}</h1>
-          <span className="figure text-small text-muted-foreground">{countdown} left</span>
-        </div>
-
-        {view.status === 'partial' ? (
-          <p className="rounded-lg bg-pending-subtle px-3 py-2 text-pending-subtle-foreground text-small">
-            {taka(view.receivedAmountCents)} received so far. Send the remaining{' '}
-            {taka(view.shortfallCents)} using the same reference.
-          </p>
-        ) : null}
-
-        <div className="space-y-2">
-          <CopyRow label="Send to" value={view.receivingMsisdn} />
-          <CopyRow label="Amount" value={(view.shortfallCents / 100).toFixed(2)} />
-          {view.refCode ? <CopyRow label="Reference" value={view.refCode} /> : null}
-        </div>
-
-        <BkashGuide
-          data={{
-            msisdn: view.receivingMsisdn,
-            amount: taka(view.shortfallCents),
-            refCode: view.refCode ?? '',
-            buyerLabel: buyerDigits.length >= 11 ? buyerDigits : 'You',
-          }}
-        />
-
-        <p className="flex items-center justify-center gap-2 text-center text-micro text-muted-foreground">
-          <span className="inline-block size-1.5 animate-pulse rounded-full bg-pending" />
-          Waiting for your payment. This page updates by itself.
+    <>
+      <main className="mx-auto flex min-h-svh w-full max-w-4xl flex-col justify-center px-5 py-8">
+        <p className="mb-5 text-center text-micro text-muted-foreground md:text-left">
+          {view.merchantName}
         </p>
-      </div>
-    </Shell>
+
+        {/* Side by side once there is room for both; the mock is a fixed 280px,
+            so anything narrower would squeeze the details rather than share. */}
+        <div className="flex flex-col gap-8 md:flex-row md:items-start md:gap-10">
+          <div className="mx-auto w-full max-w-sm md:mx-0 md:flex-1">{details}</div>
+          <div className="hidden md:block">
+            <BkashGuide data={guide} />
+          </div>
+        </div>
+
+        <p className="mt-8 text-center text-micro text-muted-foreground md:text-left">
+          Verified by Jomma. We never ask for your PIN.
+        </p>
+      </main>
+
+      <Dialog open={guideOpen} onOpenChange={setGuideOpen}>
+        <DialogContent className="max-h-[92svh] overflow-auto p-4 sm:max-w-md">
+          <DialogHeader className="sr-only">
+            <DialogTitle>How to pay with bKash</DialogTitle>
+          </DialogHeader>
+          <BkashGuide data={guide} />
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 

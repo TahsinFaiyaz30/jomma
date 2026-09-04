@@ -1,38 +1,33 @@
 'use client'
 
-import {
-  AppBar,
-  Band,
-  Bird,
-  Divider,
-  PINK,
-  px,
-  Recipient,
-  SearchField,
-  SearchGlyph,
-} from './bkash-chrome'
+import { motion } from 'motion/react'
+import { useEffect, useState } from 'react'
+import { AppBar, Band, Bird, Divider, PINK, px, Recipient, SearchGlyph } from './bkash-chrome'
 import { type GlyphName, PickerGlyph, ServiceGlyph, TabGlyph } from './bkash-icons'
 
 /**
  * The bKash Send Money flow, redrawn as a guide.
  *
- * Laid out from the reference screenshots at their native 914px width and scaled
- * to the mock — see `px()` in ./bkash-chrome, so a measurement taken off a
- * screenshot can be used directly. Every value on screen comes from the live
- * intent: the store's receiving number, the store's amount, this order's
- * reference code.
+ * Four screens, not eight: tapping around inside one screen is not a page
+ * change, and animating it as one is what made an earlier version feel like a
+ * slideshow of screenshots rather than someone using an app. Steps 2–4 are all
+ * the Send Money screen, and 5–7 are all the amount screen.
  *
- * Four things are deliberately not reproduced, and all four are choices:
+ * Laid out from the reference screenshots at their native 914px width and
+ * scaled uniformly — see `px()` in ./bkash-chrome, so a measurement taken off a
+ * screenshot can be used directly in both axes. Every value on screen comes from
+ * the live intent.
+ *
+ * What is deliberately not reproduced:
  *
  * - **The device status bar and the floating chat bubble.** Phone furniture, not
- *   bKash's, and a fake clock in a guide is noise.
- * - **Recent and All contacts on the picker.** That list is the buyer's own
- *   phonebook. Stand-ins would only invite tapping a row instead of typing the
- *   number that is actually needed.
- * - **The promo banner and Quick Features.** One is an advert with a photograph
- *   in it; the other is a strip of recently paid numbers.
- * - **A balance.** Jomma cannot know the buyer's balance, so New Balance reads
- *   as unknown rather than showing a number that would be a fabrication.
+ *   bKash's.
+ * - **Recent and All contacts, and the Quick Features numbers.** Those are the
+ *   buyer's own phonebook and payment history.
+ * - **The promo artwork.** Standing in as a grey skeleton so the page still has
+ *   its real shape and still runs off the bottom edge the way it does in the app.
+ * - **A balance.** Jomma cannot know a buyer's balance, so New Balance reads as
+ *   unknown rather than showing a number that would be a fabrication.
  *
  * The icons are drawn approximations, not bKash's artwork.
  *
@@ -41,22 +36,40 @@ import { type GlyphName, PickerGlyph, ServiceGlyph, TabGlyph } from './bkash-ico
  */
 
 function Highlight({ children, on }: { children: React.ReactNode; on: boolean }) {
-  if (!on) return <>{children}</>
   return (
     <div className="relative">
-      <span
-        className="pointer-events-none absolute animate-pulse"
-        style={{ inset: -3, borderRadius: 10, boxShadow: `0 0 0 2px ${PINK}` }}
-        aria-hidden="true"
-      />
+      {on ? (
+        <motion.span
+          className="pointer-events-none absolute"
+          style={{ inset: -3, borderRadius: 10 }}
+          animate={{
+            boxShadow: [`0 0 0 2px ${PINK}66`, `0 0 0 2px ${PINK}`, `0 0 0 2px ${PINK}66`],
+          }}
+          transition={{ duration: 1.4, repeat: Number.POSITIVE_INFINITY }}
+          aria-hidden="true"
+        />
+      ) : null}
       {children}
     </div>
   )
 }
 
-/* ── Screen 1: home ───────────────────────────────────────────────────────── */
+/** Grey stand-in for artwork this guide has no business reproducing. */
+function Skeleton({ h, r = 16, w }: { h: number; r?: number; w?: string }) {
+  return (
+    <div
+      style={{
+        height: px(h),
+        width: w ?? '100%',
+        borderRadius: px(r),
+        backgroundColor: '#ededed',
+      }}
+    />
+  )
+}
 
-/** bKash tints each service glyph differently; these are the closest matches. */
+/* ── Home ─────────────────────────────────────────────────────────────────── */
+
 const SERVICES: Array<{ label: string; tint: string; glyph: GlyphName }> = [
   { label: 'Send Money', tint: '#e2136e', glyph: 'send' },
   { label: 'Mobile Recharge', tint: '#2e9e6b', glyph: 'recharge' },
@@ -75,23 +88,55 @@ const TABS = [
   { label: 'Inbox', glyph: 'inbox' as const },
 ]
 
-export function HomeScreen({ buyerLabel }: { buyerLabel: string }) {
+function ServiceTile({
+  label,
+  tint,
+  glyph,
+  highlighted,
+}: {
+  label: string
+  tint: string
+  glyph: GlyphName
+  highlighted: boolean
+}) {
+  return (
+    <div className="flex flex-col items-center" style={{ gap: px(30) }}>
+      <Highlight on={highlighted}>
+        <div
+          className="flex items-center justify-center"
+          style={{
+            width: px(110),
+            height: px(110),
+            borderRadius: '50%',
+            backgroundColor: '#f6f6f7',
+          }}
+        >
+          <ServiceGlyph name={glyph} size={px(56)} color={tint} />
+        </div>
+      </Highlight>
+      <span className="text-center" style={{ fontSize: px(30), color: '#3f3f46', lineHeight: 1.2 }}>
+        {label}
+      </span>
+    </div>
+  )
+}
+
+export function HomePage({ buyerLabel }: { buyerLabel: string }) {
   return (
     <div className="flex h-full flex-col" style={{ backgroundColor: '#fff' }}>
-      {/* Pink hero. The real one carries a village-at-dusk illustration; this is
-          the same silhouette reduced to shapes. */}
+      {/* Hero. 95 → 405 in the reference, so 310 tall. */}
       <div className="relative shrink-0 overflow-hidden" style={{ height: px(310) }}>
         <div className="absolute inset-0" style={{ backgroundColor: PINK }} />
         <svg
           className="absolute inset-x-0 bottom-0"
-          viewBox="0 0 914 190"
+          viewBox="0 0 914 150"
           preserveAspectRatio="none"
-          style={{ height: px(150), opacity: 0.35 }}
+          style={{ height: px(150), opacity: 0.3 }}
           aria-hidden="true"
         >
           <path
-            d="M0 190V120c60-14 90 10 140 4s70-40 130-30 90 46 150 40 96-52 164-40 130 56 190 46 140-30 140-30v80z"
-            fill="#c1105e"
+            d="M0 150V96c58-13 88 9 137 4s69-38 128-29 88 44 147 39 94-50 161-39 128 55 187 45 154-28 154-28v62z"
+            fill="#b60e57"
           />
         </svg>
 
@@ -105,39 +150,41 @@ export function HomeScreen({ buyerLabel }: { buyerLabel: string }) {
               width: px(100),
               height: px(100),
               borderRadius: '50%',
-              backgroundColor: 'rgba(255,255,255,0.28)',
-              border: '2px solid rgba(255,255,255,0.5)',
+              backgroundColor: 'rgba(255,255,255,0.3)',
+              border: '1.5px solid rgba(255,255,255,0.55)',
             }}
           />
           <div className="min-w-0 flex-1">
-            <p className="truncate" style={{ fontSize: px(38), color: '#fff', fontWeight: 500 }}>
+            <p className="truncate" style={{ fontSize: px(40), color: '#fff', fontWeight: 500 }}>
               {buyerLabel}
             </p>
+            {/* Pill: 286 x 50 in the reference, with a 36px rounded logo tile. */}
             <div
               className="inline-flex items-center"
               style={{
-                gap: px(16),
-                marginTop: px(12),
+                gap: px(14),
+                marginTop: px(14),
+                height: px(50),
                 backgroundColor: '#fff',
-                borderRadius: px(30),
-                padding: `${px(8)}px ${px(22)}px ${px(8)}px ${px(8)}px`,
+                borderRadius: px(25),
+                padding: `0 ${px(24)}px 0 ${px(7)}px`,
               }}
             >
               <span
                 className="flex items-center justify-center"
                 style={{
-                  width: px(42),
-                  height: px(42),
-                  borderRadius: px(10),
+                  width: px(36),
+                  height: px(36),
+                  borderRadius: px(9),
                   backgroundColor: PINK,
                   color: '#fff',
-                  fontSize: px(26),
+                  fontSize: px(24),
                   fontWeight: 700,
                 }}
               >
                 ৳
               </span>
-              <span style={{ fontSize: px(30), color: '#333' }}>Tap for Balance</span>
+              <span style={{ fontSize: px(30), color: '#2b2b2b' }}>Tap for Balance</span>
             </div>
           </div>
 
@@ -145,86 +192,116 @@ export function HomeScreen({ buyerLabel }: { buyerLabel: string }) {
             className="flex shrink-0 items-center justify-center"
             style={{ width: px(84), height: px(84), borderRadius: '50%', backgroundColor: '#fff' }}
           >
-            <SearchGlyph size={px(42)} color="#333" />
+            <SearchGlyph size={px(40)} color="#2b2b2b" />
           </div>
           <div
             className="flex shrink-0 items-center justify-center"
             style={{ width: px(84), height: px(84), borderRadius: '50%', backgroundColor: '#fff' }}
           >
-            <Bird size={px(42)} color={PINK} />
+            <Bird size={px(40)} color={PINK} />
           </div>
         </div>
       </div>
 
-      {/* The white sheet that overlaps the hero. */}
+      {/*
+        The white sheet. `overflow-hidden` matters: in the real app the content
+        runs off the bottom edge, and a guide that neatly fits everything looks
+        like a different screen.
+      */}
       <div
-        className="relative flex-1"
+        className="relative min-h-0 flex-1 overflow-hidden"
         style={{
           backgroundColor: '#fff',
-          borderTopLeftRadius: px(28),
-          borderTopRightRadius: px(28),
-          marginTop: px(-4),
+          borderTopLeftRadius: px(30),
+          borderTopRightRadius: px(30),
+          marginTop: px(-6),
           paddingTop: px(50),
         }}
       >
         <div className="grid grid-cols-4" style={{ rowGap: px(97) }}>
-          {SERVICES.map(({ label, tint, glyph }) => {
-            const isSend = label === 'Send Money'
-            return (
-              <div key={label} className="flex flex-col items-center" style={{ gap: px(30) }}>
-                <Highlight on={isSend}>
-                  <div
-                    className="flex items-center justify-center"
-                    style={{
-                      width: px(110),
-                      height: px(110),
-                      borderRadius: '50%',
-                      backgroundColor: '#f6f6f7',
-                    }}
-                  >
-                    <ServiceGlyph name={glyph} size={px(56)} color={tint} />
-                  </div>
-                </Highlight>
-                <span
-                  className="text-center"
-                  style={{ fontSize: px(30), color: '#3f3f46', lineHeight: 1.15 }}
-                >
-                  {label}
-                </span>
-              </div>
-            )
-          })}
+          {SERVICES.map(({ label, tint, glyph }) => (
+            <ServiceTile
+              key={label}
+              label={label}
+              tint={tint}
+              glyph={glyph}
+              highlighted={label === 'Send Money'}
+            />
+          ))}
         </div>
 
-        <div className="flex justify-center" style={{ marginTop: px(54) }}>
+        {/* The third row, faded and half-hidden behind See More. */}
+        <div
+          className="grid grid-cols-4"
+          style={{ marginTop: px(97), opacity: 0.22, filter: 'blur(1.4px)' }}
+          aria-hidden="true"
+        >
+          {['#5aa9e6', '#e2136e', '#8a9099', '#7c5cc4'].map((tint) => (
+            <div key={tint} className="flex justify-center">
+              <div
+                style={{
+                  width: px(110),
+                  height: px(110),
+                  borderRadius: '50%',
+                  backgroundColor: '#f6f6f7',
+                  border: `2px solid ${tint}33`,
+                }}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-center" style={{ marginTop: px(-58) }}>
           <span
-            className="inline-flex items-center"
+            className="inline-flex items-center bg-white"
             style={{
               gap: px(12),
-              border: '1px solid #ededed',
+              border: '1px solid #ececec',
               borderRadius: px(40),
-              padding: `${px(16)}px ${px(38)}px`,
+              padding: `${px(14)}px ${px(34)}px`,
               fontSize: px(30),
               color: PINK,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.07)',
             }}
           >
             See More <span style={{ fontSize: px(24) }}>⌄</span>
           </span>
         </div>
+
+        {/* Promo. Real artwork replaced with a skeleton. */}
+        <div style={{ padding: `${px(60)}px ${px(36)}px 0` }}>
+          <Skeleton h={265} />
+        </div>
+
+        {/* Quick Features, minus the numbers — they are the buyer's history.
+            Left as skeletons so the page still runs off the bottom edge. */}
+        <div style={{ padding: `${px(46)}px ${px(36)}px 0` }}>
+          <Skeleton h={34} r={8} w="38%" />
+          <div className="grid grid-cols-3" style={{ gap: px(28), marginTop: px(30) }}>
+            <Skeleton h={130} />
+            <Skeleton h={130} />
+            <Skeleton h={130} />
+          </div>
+          <div className="grid grid-cols-3" style={{ gap: px(28), marginTop: px(28) }}>
+            <Skeleton h={160} />
+            <Skeleton h={160} />
+            <Skeleton h={160} />
+          </div>
+        </div>
       </div>
 
+      {/* Tab bar: 1855 → 1940 in the reference, so 85 tall. */}
       <div
         className="flex shrink-0 items-start justify-around"
         style={{
-          borderTop: '1px solid #eee',
-          height: px(104),
-          paddingTop: px(10),
+          borderTop: '1px solid #ededed',
+          height: px(85),
+          paddingTop: px(6),
           backgroundColor: '#fff',
         }}
       >
         {TABS.map(({ label, glyph }, index) => (
-          <div key={label} className="flex flex-col items-center" style={{ gap: px(8) }}>
+          <div key={label} className="flex flex-col items-center" style={{ gap: px(6) }}>
             <TabGlyph
               name={glyph}
               size={px(46)}
@@ -239,11 +316,54 @@ export function HomeScreen({ buyerLabel }: { buyerLabel: string }) {
           </div>
         ))}
       </div>
+
+      {/* The gesture strip below the tab bar, 1940 → 1980 in the reference.
+          Without it the labels sit in the frame's rounded corner and clip. */}
+      <div
+        className="flex shrink-0 items-center justify-center"
+        style={{ height: px(40), backgroundColor: '#fff' }}
+      >
+        <div
+          style={{
+            width: px(300),
+            height: px(6),
+            borderRadius: px(3),
+            backgroundColor: '#d4d4d8',
+          }}
+        />
+      </div>
     </div>
   )
 }
 
-/* ── Screen 2: contact picker ─────────────────────────────────────────────── */
+/* ── Send Money ───────────────────────────────────────────────────────────── */
+
+export type SendPhase = 'empty' | 'typed' | 'sheet'
+
+/** Reveals the number a character at a time, so step 2 → 3 reads as typing. */
+function useTypedValue(target: string, active: boolean): string {
+  const [count, setCount] = useState(active ? target.length : 0)
+
+  useEffect(() => {
+    if (!active) {
+      setCount(0)
+      return
+    }
+    setCount(0)
+    const timer = setInterval(() => {
+      setCount((current) => {
+        if (current >= target.length) {
+          clearInterval(timer)
+          return current
+        }
+        return current + 1
+      })
+    }, 55)
+    return () => clearInterval(timer)
+  }, [active, target])
+
+  return target.slice(0, count)
+}
 
 const PICKER_CARDS = [
   { label: 'Priyo Numbers (0)', glyph: 'priyo' as const },
@@ -251,185 +371,190 @@ const PICKER_CARDS = [
   { label: 'Group Send Money', glyph: 'group' as const },
 ]
 
-export function PickerScreen({ msisdn }: { msisdn: string }) {
+export function SendMoneyPage({ msisdn, phase }: { msisdn: string; phase: SendPhase }) {
+  const dimmed = phase === 'sheet'
+  const typed = useTypedValue(msisdn, phase !== 'empty')
+  const showResult = phase !== 'empty'
+
   return (
-    <div className="flex h-full flex-col" style={{ backgroundColor: '#fff' }}>
-      <AppBar title="Send Money" />
-      <Highlight on>
-        <SearchField placeholder="Enter name or number" />
+    <div className="relative flex h-full flex-col" style={{ backgroundColor: '#fff' }}>
+      <AppBar title="Send Money" dimmed={dimmed} />
+
+      {/* One search field for the whole page — it fills in rather than the page
+          being replaced, which is what actually happens. */}
+      <Highlight on={phase === 'empty'}>
+        <div style={{ padding: `${px(34)}px ${px(36)}px` }}>
+          <div
+            className="flex items-center"
+            style={{
+              height: px(97),
+              gap: px(28),
+              paddingLeft: px(28),
+              borderRadius: px(14),
+              backgroundColor: '#f7f7f7',
+              border: '1px solid #ececec',
+            }}
+          >
+            <SearchGlyph size={px(44)} color="#9a9a9a" />
+            {typed ? (
+              <span className="figure" style={{ fontSize: px(34), color: '#1f2937' }}>
+                {typed}
+              </span>
+            ) : (
+              <span style={{ fontSize: px(34), color: '#a9a9a9' }}>Enter name or number</span>
+            )}
+          </div>
+        </div>
       </Highlight>
       <Band />
 
-      <div className="grid grid-cols-3" style={{ gap: px(30), padding: `${px(28)}px ${px(36)}px` }}>
-        {PICKER_CARDS.map(({ label, glyph }) => (
-          <div
-            key={label}
-            className="flex flex-col"
-            style={{
-              gap: px(24),
-              border: '1px solid #ececec',
-              borderRadius: px(16),
-              padding: `${px(28)}px ${px(24)}px`,
-              minHeight: px(217),
-            }}
-          >
-            <PickerGlyph name={glyph} size={px(66)} color={PINK} />
-            <span style={{ fontSize: px(30), color: '#3f3f46', lineHeight: 1.25 }}>{label}</span>
+      {showResult ? (
+        <motion.div
+          className="flex flex-1 flex-col items-center"
+          style={{ paddingTop: px(200) }}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+        >
+          <p style={{ fontSize: px(38), color: '#8b8b8b' }}>
+            Send Money to{' '}
+            <span className="figure" style={{ color: '#111', fontWeight: 600 }}>
+              {msisdn}
+            </span>
+          </p>
+          <div style={{ marginTop: px(72) }}>
+            <Highlight on={phase === 'typed'}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  backgroundColor: PINK,
+                  color: '#fff',
+                  borderRadius: px(12),
+                  padding: `${px(30)}px ${px(48)}px`,
+                  fontSize: px(38),
+                }}
+              >
+                Tap to continue
+              </span>
+            </Highlight>
           </div>
-        ))}
-      </div>
+        </motion.div>
+      ) : (
+        <>
+          <div
+            className="grid grid-cols-3"
+            style={{ gap: px(30), padding: `${px(28)}px ${px(36)}px` }}
+          >
+            {PICKER_CARDS.map(({ label, glyph }) => (
+              <div
+                key={label}
+                className="flex flex-col"
+                style={{
+                  gap: px(24),
+                  border: '1px solid #ececec',
+                  borderRadius: px(16),
+                  padding: `${px(28)}px ${px(24)}px`,
+                  minHeight: px(217),
+                }}
+              >
+                <PickerGlyph name={glyph} size={px(66)} color={PINK} />
+                <span style={{ fontSize: px(30), color: '#3f3f46', lineHeight: 1.25 }}>
+                  {label}
+                </span>
+              </div>
+            ))}
+          </div>
+          <Band />
+          <div
+            className="flex min-h-0 flex-1 items-center justify-center"
+            style={{ padding: px(60) }}
+          >
+            <p style={{ fontSize: px(32), color: '#8b8b8b', textAlign: 'center', lineHeight: 1.5 }}>
+              Type{' '}
+              <span className="figure" style={{ color: '#111', fontWeight: 600 }}>
+                {msisdn}
+              </span>{' '}
+              into the box above
+            </p>
+          </div>
+        </>
+      )}
 
-      <Band />
+      {/* The scrim and sheet, which slide in over this same page. */}
+      {dimmed ? (
+        <motion.div
+          className="absolute inset-x-0 bottom-0"
+          style={{ top: px(127), backgroundColor: 'rgba(60,60,60,0.62)' }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.22 }}
+        />
+      ) : null}
 
-      {/*
-        Recent and All contacts sit here in the real app. Not drawn: it is the
-        buyer's own phonebook and has nothing to do with this payment.
-      */}
-      <div className="flex min-h-0 flex-1 items-center justify-center" style={{ padding: px(60) }}>
-        <p style={{ fontSize: px(32), color: '#8b8b8b', textAlign: 'center', lineHeight: 1.5 }}>
-          Type{' '}
-          <span className="figure" style={{ color: '#111', fontWeight: 600 }}>
-            {msisdn}
-          </span>{' '}
-          into the box above
-        </p>
-      </div>
-    </div>
-  )
-}
-
-/* ── Screen 3: number entered ─────────────────────────────────────────────── */
-
-function SendMoneyTo({ msisdn }: { msisdn: string }) {
-  return (
-    <p style={{ fontSize: px(38), color: '#8b8b8b' }}>
-      Send Money to{' '}
-      <span className="figure" style={{ color: '#111', fontWeight: 600 }}>
-        {msisdn}
-      </span>
-    </p>
-  )
-}
-
-export function EnteredScreen({ msisdn }: { msisdn: string }) {
-  return (
-    <div className="flex h-full flex-col" style={{ backgroundColor: '#fff' }}>
-      <AppBar title="Send Money" />
-      <SearchField value={msisdn} />
-      <Band />
-
-      <div className="flex flex-1 flex-col items-center" style={{ paddingTop: px(200) }}>
-        <SendMoneyTo msisdn={msisdn} />
-        <div style={{ marginTop: px(72) }}>
+      {dimmed ? (
+        <motion.div
+          className="absolute inset-x-0 bottom-0"
+          style={{
+            backgroundColor: '#fff',
+            borderTopLeftRadius: px(46),
+            borderTopRightRadius: px(46),
+          }}
+          initial={{ y: '100%' }}
+          animate={{ y: 0 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 34 }}
+        >
+          <div style={{ padding: `${px(44)}px ${px(36)}px ${px(36)}px` }}>
+            <p style={{ fontSize: px(32), color: '#8b8b8b' }}>Before you proceed:</p>
+            <p className="figure" style={{ fontSize: px(52), color: '#111', marginTop: px(20) }}>
+              {msisdn} <span style={{ fontSize: px(34), color: PINK, fontWeight: 500 }}>Edit</span>
+            </p>
+            <p style={{ fontSize: px(32), color: '#4b5563', marginTop: px(14) }}>
+              Please check if the number is correct.
+            </p>
+          </div>
           <Highlight on>
-            <button
-              type="button"
-              tabIndex={-1}
+            <div
+              className="flex items-center justify-between"
               style={{
                 backgroundColor: PINK,
                 color: '#fff',
-                borderRadius: px(12),
-                padding: `${px(30)}px ${px(48)}px`,
+                padding: `${px(34)}px ${px(36)}px`,
                 fontSize: px(38),
+                fontWeight: 600,
               }}
             >
-              Tap to continue
-            </button>
+              <span>Yes, the number is correct</span>
+              <span style={{ fontSize: px(44) }} aria-hidden="true">
+                →
+              </span>
+            </div>
           </Highlight>
-        </div>
-      </div>
+        </motion.div>
+      ) : null}
     </div>
   )
 }
 
-/* ── Screen 4: confirm the number ─────────────────────────────────────────── */
-
-export function ConfirmNumberScreen({ msisdn }: { msisdn: string }) {
-  return (
-    <div className="relative flex h-full flex-col" style={{ backgroundColor: '#fff' }}>
-      {/* The screen underneath, still visible through the scrim. */}
-      <AppBar title="Send Money" dimmed />
-      <SearchField value={msisdn} />
-      <Band />
-      <div className="flex flex-1 flex-col items-center" style={{ paddingTop: px(200) }}>
-        <SendMoneyTo msisdn={msisdn} />
-        <div style={{ marginTop: px(72) }}>
-          <span
-            style={{
-              display: 'inline-block',
-              backgroundColor: PINK,
-              color: '#fff',
-              borderRadius: px(12),
-              padding: `${px(30)}px ${px(48)}px`,
-              fontSize: px(38),
-            }}
-          >
-            Tap to continue
-          </span>
-        </div>
-      </div>
-
-      {/* bKash dims everything below the app bar, not the bar itself. */}
-      <div
-        className="absolute inset-x-0 bottom-0"
-        style={{ top: px(127), backgroundColor: 'rgba(60,60,60,0.62)' }}
-      />
-
-      <div
-        className="absolute inset-x-0 bottom-0"
-        style={{
-          backgroundColor: '#fff',
-          borderTopLeftRadius: px(46),
-          borderTopRightRadius: px(46),
-        }}
-      >
-        <div style={{ padding: `${px(44)}px ${px(36)}px ${px(36)}px` }}>
-          <p style={{ fontSize: px(32), color: '#8b8b8b' }}>Before you proceed:</p>
-          <p className="figure" style={{ fontSize: px(52), color: '#111', marginTop: px(20) }}>
-            {msisdn} <span style={{ fontSize: px(34), color: PINK, fontWeight: 500 }}>Edit</span>
-          </p>
-          <p style={{ fontSize: px(32), color: '#4b5563', marginTop: px(14) }}>
-            Please check if the number is correct.
-          </p>
-        </div>
-
-        <Highlight on>
-          <div
-            className="flex items-center justify-between"
-            style={{
-              backgroundColor: PINK,
-              color: '#fff',
-              padding: `${px(34)}px ${px(36)}px`,
-              fontSize: px(38),
-              fontWeight: 600,
-            }}
-          >
-            <span>Yes, the number is correct</span>
-            <span style={{ fontSize: px(44) }} aria-hidden="true">
-              →
-            </span>
-          </div>
-        </Highlight>
-      </div>
-    </div>
-  )
-}
-
-/* ── Screen 5: amount, reference, PIN ─────────────────────────────────────── */
+/* ── Amount, reference, PIN ───────────────────────────────────────────────── */
 
 const KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', '↵']
 
-export function AmountScreen({
+export type AmountFocus = 'amount' | 'reference' | 'pin'
+
+export function AmountPage({
   msisdn,
   amount,
   refCode,
-  highlight,
+  focus,
 }: {
   msisdn: string
   amount: string
   refCode: string
-  highlight: 'amount' | 'reference' | 'pin'
+  focus: AmountFocus
 }) {
+  // The reference is typed in on its own step, not present from the start.
+  const typedRef = useTypedValue(refCode, focus !== 'amount')
+
   return (
     <div className="flex h-full flex-col" style={{ backgroundColor: '#fff' }}>
       <AppBar title="Send Money" />
@@ -440,7 +565,7 @@ export function AmountScreen({
       <Recipient msisdn={msisdn} />
       <Band />
 
-      <Highlight on={highlight === 'amount'}>
+      <Highlight on={focus === 'amount'}>
         <div className="grid grid-cols-3" style={{ padding: `${px(28)}px ${px(36)}px` }}>
           <div>
             <p style={{ fontSize: px(32), color: '#6b7280' }}>Amount</p>
@@ -450,10 +575,8 @@ export function AmountScreen({
           </div>
           <div className="text-center">
             <p style={{ fontSize: px(32), color: '#6b7280' }}>Charge</p>
-            {/*
-              bKash's own fee, which comes off the sender — the store receives
-              the full amount regardless. Shown the way the app shows it.
-            */}
+            {/* bKash's own fee, taken from the sender — the store receives the
+                full amount regardless. Shown the way the app shows it. */}
             <p className="amount" style={{ fontSize: px(46), color: '#b0b0b0' }}>
               + ৳0.00
             </p>
@@ -468,23 +591,29 @@ export function AmountScreen({
       </Highlight>
       <Band />
 
-      <Highlight on={highlight === 'reference'}>
+      <Highlight on={focus === 'reference'}>
         <div style={{ padding: `${px(26)}px ${px(36)}px` }}>
           <div className="flex items-baseline justify-between">
             <p style={{ fontSize: px(32), color: '#6b7280' }}>Reference</p>
-            <p style={{ fontSize: px(30), color: '#a1a1aa' }}>{refCode.length}/50</p>
+            <p style={{ fontSize: px(30), color: '#a1a1aa' }}>{typedRef.length}/50</p>
           </div>
-          <p
-            className="figure"
-            style={{ fontSize: px(40), color: '#111', marginTop: px(14), fontWeight: 600 }}
-          >
-            {refCode}
-          </p>
+          {typedRef ? (
+            <p
+              className="figure"
+              style={{ fontSize: px(40), color: '#111', marginTop: px(14), fontWeight: 600 }}
+            >
+              {typedRef}
+            </p>
+          ) : (
+            <p style={{ fontSize: px(38), color: '#a9a9a9', marginTop: px(14) }}>
+              Tap to add a note
+            </p>
+          )}
         </div>
       </Highlight>
       <Band />
 
-      <Highlight on={highlight === 'pin'}>
+      <Highlight on={focus === 'pin'}>
         <div
           className="flex items-center justify-between"
           style={{ padding: `${px(30)}px ${px(36)}px` }}
@@ -498,7 +627,13 @@ export function AmountScreen({
             <rect x="4" y="10" width="16" height="11" rx="2.5" fill={PINK} />
             <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke={PINK} strokeWidth="2.2" />
           </svg>
-          <span style={{ fontSize: px(38), color: '#a1a1aa' }}>Enter PIN</span>
+          {focus === 'pin' ? (
+            <span className="figure" style={{ fontSize: px(44), color: '#111', letterSpacing: 4 }}>
+              ••••
+            </span>
+          ) : (
+            <span style={{ fontSize: px(38), color: '#a1a1aa' }}>Enter PIN</span>
+          )}
           <svg
             viewBox="0 0 24 24"
             style={{ width: px(52), height: px(52) }}
@@ -526,7 +661,7 @@ export function AmountScreen({
       <div
         className="flex items-center justify-between"
         style={{
-          backgroundColor: '#a0a0a0',
+          backgroundColor: focus === 'pin' ? PINK : '#a0a0a0',
           color: '#fff',
           padding: `${px(26)}px ${px(36)}px`,
           fontSize: px(36),
@@ -571,9 +706,9 @@ export function AmountScreen({
   )
 }
 
-/* ── Screen 6: confirm and hold ───────────────────────────────────────────── */
+/* ── Confirm and hold ─────────────────────────────────────────────────────── */
 
-export function ConfirmSendScreen({
+export function ConfirmPage({
   msisdn,
   amount,
   refCode,
@@ -609,8 +744,8 @@ export function ConfirmSendScreen({
         </div>
         <div style={{ padding: `${px(26)}px ${px(36)}px` }}>
           <p style={{ fontSize: px(32), color: '#6b7280' }}>New Balance</p>
-          {/* Unknown by design. Jomma cannot see a buyer's balance, and drawing
-              a number here would be inventing one. */}
+          {/* Unknown by design. Jomma cannot see a buyer's balance, and a number
+              here would be invented. */}
           <p style={{ fontSize: px(46), color: '#d4d4d8' }}>—</p>
         </div>
       </div>
@@ -631,15 +766,7 @@ export function ConfirmSendScreen({
       <Divider />
 
       <div className="flex items-start" style={{ gap: px(24), padding: `${px(30)}px ${px(36)}px` }}>
-        <div
-          className="shrink-0"
-          style={{
-            width: px(56),
-            height: px(56),
-            borderRadius: px(10),
-            border: `2px solid ${PINK}`,
-          }}
-        />
+        <PickerGlyph name="priyo" size={px(56)} color={PINK} />
         <p style={{ fontSize: px(32), color: '#4b5563', lineHeight: 1.4 }}>
           You can send money free up to 25,000 Tk. monthly by adding Priyo number.
         </p>
