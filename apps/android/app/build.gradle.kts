@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
@@ -8,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.jomma.notifier"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.jomma.notifier"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0.0"
     }
@@ -30,12 +29,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
+    // AGP 9 provides Kotlin support itself — no kotlin-android plugin, and
+    // jvmTarget follows compileOptions.
     buildFeatures {
         compose = true
+        // AGP 9 stopped generating BuildConfig by default. The heartbeat reports
+        // app_version from it, which is how the dashboard shows which build a
+        // phone is running.
+        buildConfig = true
     }
 
     packaging {
@@ -58,6 +59,9 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    // Material Symbols. The whole set, so a screen can use the right icon
+    // rather than the nearest one in the core subset.
+    implementation(libs.androidx.compose.material.icons.extended)
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

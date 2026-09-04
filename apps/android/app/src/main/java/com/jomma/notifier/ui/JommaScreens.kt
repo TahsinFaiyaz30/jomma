@@ -1,25 +1,61 @@
 package com.jomma.notifier.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Article
+import androidx.compose.material.icons.outlined.BatteryChargingFull
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.Monitor
+import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Send
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -27,7 +63,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,11 +74,19 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Three destinations. Deliberately plain — nobody uses this app, they check it.
+ *
+ * Everything structural uses Material colour roles, so on Android 12+ the whole
+ * thing re-tints to the wallpaper. The status colours are the exception and are
+ * fixed on purpose; see Theme.kt.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun JommaScreens(
     state: UiState,
     captures: List<Capture>,
-    modifier: Modifier = Modifier,
+    snackbarHost: SnackbarHostState,
     onScan: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onRequestSms: () -> Unit,
@@ -50,25 +96,59 @@ fun JommaScreens(
     onTestCapture: () -> Unit,
     onReprovision: () -> Unit,
 ) {
-    var tab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Status", "Log", "Setup")
+    var destination by remember { mutableIntStateOf(0) }
 
-    Column(modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = tab) {
-            tabs.forEachIndexed { index, title ->
-                Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(if (destination == 1) "Log" else if (destination == 2) "Setup" else "Jomma Notifier") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+            )
+        },
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = destination == 0,
+                    onClick = { destination = 0 },
+                    icon = { Icon(Icons.Outlined.MonitorHeart, contentDescription = null) },
+                    label = { Text("Status") },
+                )
+                NavigationBarItem(
+                    selected = destination == 1,
+                    onClick = { destination = 1 },
+                    icon = { Icon(Icons.Outlined.Article, contentDescription = null) },
+                    label = { Text("Log") },
+                )
+                NavigationBarItem(
+                    selected = destination == 2,
+                    onClick = { destination = 2 },
+                    icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
+                    label = { Text("Setup") },
+                )
             }
-        }
-
-        when (tab) {
-            0 -> StatusScreen(state, onScan, onFlush, onHeartbeat, onTestCapture, onReprovision)
-            1 -> LogScreen(captures)
-            else -> SetupScreen(state, onOpenNotificationSettings, onRequestSms, onOpenBatterySettings, onScan)
+        },
+        snackbarHost = { SnackbarHost(snackbarHost) },
+    ) { padding ->
+        Box(Modifier.padding(padding)) {
+            when (destination) {
+                0 -> StatusScreen(state, onScan, onFlush, onHeartbeat, onTestCapture, onReprovision)
+                1 -> LogScreen(captures)
+                else -> SetupScreen(
+                    state,
+                    onOpenNotificationSettings,
+                    onRequestSms,
+                    onOpenBatterySettings,
+                    onScan,
+                )
+            }
         }
     }
 }
 
-/** One glance answers "is it working?". */
+/** One glance answers "is it working?". The status card is the whole product. */
 @Composable
 private fun StatusScreen(
     state: UiState,
@@ -78,119 +158,213 @@ private fun StatusScreen(
     onTestCapture: () -> Unit,
     onReprovision: () -> Unit,
 ) {
+    val status = LocalStatusColors.current
+
+    val container by animateColorAsState(
+        targetValue = when (state.health) {
+            Health.Connected -> status.connectedContainer
+            Health.Degraded -> status.degradedContainer
+            Health.Down -> status.downContainer
+        },
+        label = "statusContainer",
+    )
+    val accent = when (state.health) {
+        Health.Connected -> status.connected
+        Health.Degraded -> status.degraded
+        Health.Down -> status.down
+    }
+    val icon: ImageVector = when (state.health) {
+        Health.Connected -> Icons.Filled.CheckCircle
+        Health.Degraded -> Icons.Filled.Warning
+        Health.Down -> Icons.Filled.Error
+    }
+
     Column(
-        Modifier.fillMaxSize().padding(20.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(20.dp)
-                    .background(
-                        when (state.health) {
-                            Health.Connected -> Color(0xFF2E9E5B)
-                            Health.Degraded -> Color(0xFFD08B1E)
-                            Health.Down -> Color(0xFFC0392B)
-                        },
-                        CircleShape,
-                    ),
-            )
-            Text(
-                text = "  " + when (state.health) {
-                    Health.Connected -> "Connected"
-                    Health.Degraded -> "Needs attention"
-                    Health.Down -> "Not working"
-                },
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Medium,
-            )
-        }
-
-        if (state.revoked) {
-            Card {
-                Column(Modifier.padding(16.dp)) {
-                    Text("This device was revoked", fontWeight = FontWeight.Medium)
+        ElevatedCard(
+            colors = CardDefaults.elevatedCardColors(containerColor = container),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                Modifier.padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(40.dp))
+                Column {
                     Text(
-                        "Captures are not being sent. Ask for a new provisioning code from the dashboard.",
-                        style = MaterialTheme.typography.bodySmall,
+                        when (state.health) {
+                            Health.Connected -> "Connected"
+                            Health.Degraded -> "Needs attention"
+                            Health.Down -> "Not working"
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        when {
+                            state.revoked -> "Revoked — re-provision this device"
+                            !state.provisioned -> "Not provisioned yet"
+                            !state.hasNotificationAccess -> "Notification access is off"
+                            state.queueDepth > 0 -> "${state.queueDepth} waiting to send"
+                            else -> "Watching ${state.accountMsisdn ?: "this account"}"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
         }
 
         if (!state.provisioned) {
-            Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Not provisioned", fontWeight = FontWeight.Medium)
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Set this device up", style = MaterialTheme.typography.titleMedium)
                     Text(
                         "Open Accounts in the Jomma dashboard, add a device, and scan the code it shows.",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
-                    Button(onClick = onScan, enabled = !state.busy) { Text("Scan provisioning code") }
+                    FilledTonalButton(onClick = onScan, enabled = !state.busy) {
+                        Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Scan provisioning code")
+                    }
                 }
             }
             return@Column
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            StatRow("Account", state.accountMsisdn ?: "—")
-            StatRow("Last capture", state.lastCaptureAt?.let(::ago) ?: "never")
-            StatRow("Last heartbeat", if (state.lastHeartbeatAt == 0L) "never" else ago(state.lastHeartbeatAt))
-            StatRow("Queue", "${state.queueDepth} pending")
-            StatRow("Today", "${state.capturedToday} captured")
+        Card(Modifier.fillMaxWidth()) {
+            Column {
+                StatListItem(Icons.Outlined.CloudUpload, "Last capture", state.lastCaptureAt?.let(::ago) ?: "never")
+                HorizontalDivider()
+                StatListItem(Icons.Filled.Bolt, "Last heartbeat", if (state.lastHeartbeatAt == 0L) "never" else ago(state.lastHeartbeatAt))
+                HorizontalDivider()
+                StatListItem(Icons.Outlined.Send, "Queue", "${state.queueDepth} pending")
+                HorizontalDivider()
+                StatListItem(Icons.Outlined.Monitor, "Today", "${state.capturedToday} captured")
+            }
         }
 
-        HorizontalDivider()
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onTestCapture) { Text("Send test capture") }
-            OutlinedButton(onClick = onFlush) { Text("Flush") }
+        if (state.queueDepth > 0) {
+            val progress by animateFloatAsState(
+                targetValue = (state.queueDepth.coerceAtMost(50) / 50f),
+                label = "queue",
+            )
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onHeartbeat) { Text("Heartbeat now") }
-            OutlinedButton(onClick = onReprovision) { Text("Re-provision") }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            FilledTonalButton(onClick = onTestCapture, modifier = Modifier.weight(1f)) {
+                Text("Test capture")
+            }
+            OutlinedButton(onClick = onFlush, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Outlined.Refresh, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Flush")
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onHeartbeat, modifier = Modifier.weight(1f)) { Text("Heartbeat") }
+            OutlinedButton(onClick = onReprovision, modifier = Modifier.weight(1f)) { Text("Re-provision") }
         }
     }
 }
 
+@Composable
+private fun StatListItem(icon: ImageVector, label: String, value: String) {
+    ListItem(
+        leadingContent = { Icon(icon, contentDescription = null) },
+        headlineContent = { Text(label) },
+        trailingContent = { Text(value, style = MaterialTheme.typography.labelLarge) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
+}
+
 /**
- * Recent captures with delivery status. Raw text is visible on purpose: when
- * the parser breaks, this is where you read what actually arrived.
+ * Recent captures with delivery status. Raw text is visible on purpose: when the
+ * parser breaks, this is where you read what actually arrived.
  */
 @Composable
 private fun LogScreen(captures: List<Capture>) {
+    val status = LocalStatusColors.current
+
     if (captures.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Nothing captured yet.", style = MaterialTheme.typography.bodyMedium)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Outlined.Article,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(48.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("Nothing captured yet", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Messages appear here the moment they arrive.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         return
     }
 
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         items(captures, key = { it.localId }) { capture ->
-            Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (capture.sent) status.connected else status.degraded),
+                        )
+                        Text(
+                            if (capture.sent) "sent" else "queued",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (capture.sent) status.connected else status.degraded,
+                        )
+                        Text(capture.source, style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            clock(capture.capturedAt),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
-                        if (capture.sent) "sent" else "queued",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (capture.sent) Color(0xFF2E9E5B) else Color(0xFFD08B1E),
+                        capture.raw,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
                     )
-                    Text(capture.source, style = MaterialTheme.typography.labelSmall)
-                    Text(clock(capture.capturedAt), style = MaterialTheme.typography.labelSmall)
-                    if (capture.attempts > 0) {
-                        Text("${capture.attempts} attempts", style = MaterialTheme.typography.labelSmall)
+                    if (capture.attempts > 0 || capture.lastError != null) {
+                        Text(
+                            listOfNotNull(
+                                if (capture.attempts > 0) "${capture.attempts} attempts" else null,
+                                capture.lastError,
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = status.down,
+                        )
                     }
                 }
-                Text(
-                    capture.raw,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                )
-                capture.lastError?.let {
-                    Text(it, style = MaterialTheme.typography.labelSmall, color = Color(0xFFC0392B))
-                }
             }
-            HorizontalDivider()
         }
     }
 }
@@ -205,31 +379,38 @@ private fun SetupScreen(
     onScan: () -> Unit,
 ) {
     Column(
-        Modifier.fillMaxSize().padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        CheckRow(
+        CheckCard(
+            icon = Icons.Outlined.NotificationsActive,
             label = "Notification access",
             granted = state.hasNotificationAccess,
             detail = "The primary capture path. Without it nothing is captured at all.",
             action = "Open settings",
             onAction = onOpenNotificationSettings,
         )
-        CheckRow(
+        CheckCard(
+            icon = Icons.Outlined.Sms,
             label = "SMS permission",
             granted = state.hasSmsPermission,
-            detail = "The second path. Catches what notifications miss.",
+            detail = "The second path. Catches what notifications miss, and fails independently.",
             action = "Grant",
             onAction = onRequestSms,
         )
-        CheckRow(
+        CheckCard(
+            icon = Icons.Outlined.BatteryChargingFull,
             label = "Battery optimisation",
             granted = null,
-            detail = "Exempt this app, then check the OEM's own autostart settings — on Xiaomi, Oppo, Vivo and Samsung those override standard Android and are the usual cause of a silently dead notifier.",
+            detail = "Exempt this app, then check the manufacturer's own autostart settings. On Xiaomi, Oppo, Vivo and Samsung those override standard Android and are the usual cause of a silently dead notifier.",
             action = "Open settings",
             onAction = onOpenBatterySettings,
         )
-        CheckRow(
+        CheckCard(
+            icon = Icons.Outlined.QrCodeScanner,
             label = "Provisioning",
             granted = state.provisioned && !state.revoked,
             detail = state.serverUrl ?: "Not provisioned",
@@ -240,41 +421,48 @@ private fun SetupScreen(
 }
 
 @Composable
-private fun CheckRow(
+private fun CheckCard(
+    icon: ImageVector,
     label: String,
     granted: Boolean?,
     detail: String,
     action: String,
     onAction: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                when (granted) {
-                    true -> "✓  "
-                    false -> "✗  "
-                    null -> "•  "
-                },
-                color = when (granted) {
-                    true -> Color(0xFF2E9E5B)
-                    false -> Color(0xFFC0392B)
-                    null -> Color(0xFF888888)
-                },
-            )
-            Text(label, fontWeight = FontWeight.Medium)
-        }
-        Text(detail, style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = onAction) { Text(action) }
+    val status = LocalStatusColors.current
+    val tint = when (granted) {
+        true -> status.connected
+        false -> status.down
+        null -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    HorizontalDivider()
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(icon, contentDescription = null, tint = tint)
+                Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                when (granted) {
+                    true -> Icon(Icons.Filled.CheckCircle, contentDescription = "granted", tint = tint)
+                    false -> Icon(Icons.Filled.Error, contentDescription = "missing", tint = tint)
+                    null -> Unit
+                }
+            }
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = onAction) { Text(action) }
+        }
+    }
 }
 
 @Composable
-private fun StatRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-    }
+fun JommaSurface(content: @Composable () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.background, content = content)
 }
 
 private fun ago(timestamp: Long): String {

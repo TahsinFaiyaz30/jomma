@@ -111,3 +111,8 @@ temp/
 # Next.js generates these into apps/web; disabled via agentRules:false
 apps/web/AGENTS.md
 apps/web/CLAUDE.md
+
+# Gradle wrapper jar is committed on purpose (standard practice); build output is not.
+apps/android/.gradle/
+apps/android/app/build/
+apps/android/build/

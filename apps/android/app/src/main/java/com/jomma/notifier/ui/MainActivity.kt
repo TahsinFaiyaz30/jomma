@@ -7,25 +7,20 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
 /**
- * Four screens, deliberately plain. Nobody uses this app — they check it.
- * The status dot is the whole product.
+ * Three destinations, deliberately plain. Nobody uses this app — they check it.
+ * The status card is the whole product.
  */
 class MainActivity : ComponentActivity() {
 
@@ -41,6 +36,8 @@ class MainActivity : ComponentActivity() {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Material You wants the app drawing behind the system bars.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         setContent {
@@ -56,22 +53,20 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                Surface(color = MaterialTheme.colorScheme.background) {
-                    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-                        JommaScreens(
-                            state = state,
-                            captures = captures,
-                            modifier = Modifier.padding(padding),
-                            onScan = ::launchScanner,
-                            onOpenNotificationSettings = ::openNotificationAccessSettings,
-                            onRequestSms = ::requestSmsPermission,
-                            onOpenBatterySettings = ::openBatterySettings,
-                            onFlush = viewModel::flushNow,
-                            onHeartbeat = viewModel::heartbeatNow,
-                            onTestCapture = viewModel::sendTestCapture,
-                            onReprovision = viewModel::reprovision,
-                        )
-                    }
+                JommaSurface {
+                    JommaScreens(
+                        state = state,
+                        captures = captures,
+                        snackbarHost = snackbar,
+                        onScan = ::launchScanner,
+                        onOpenNotificationSettings = ::openNotificationAccessSettings,
+                        onRequestSms = ::requestSmsPermission,
+                        onOpenBatterySettings = ::openBatterySettings,
+                        onFlush = viewModel::flushNow,
+                        onHeartbeat = viewModel::heartbeatNow,
+                        onTestCapture = viewModel::sendTestCapture,
+                        onReprovision = viewModel::reprovision,
+                    )
                 }
             }
         }
