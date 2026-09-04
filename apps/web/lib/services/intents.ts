@@ -1,22 +1,16 @@
 import { createHash } from 'node:crypto'
 import { fromPublicId, toPublicId } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
-import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, sql } from 'drizzle-orm'
 import { ApiError } from '@/lib/api/errors'
 import type { CreateIntentInput } from '@/lib/api/schemas'
 import type { Tx } from '@/lib/db/client'
 import { db } from '@/lib/db/client'
-import {
-  amountLocks,
-  idempotencyKeys,
-  incomingPayments,
-  orderPayments,
-  paymentIntents,
-  paymentRefs,
-} from '@/lib/db/schema'
+import { amountLocks, idempotencyKeys, paymentIntents, paymentRefs } from '@/lib/db/schema'
 import { listAccountHealth, reclaimExpiredLock, routableAccounts } from './accounts'
 import { audit } from './audit'
 import { queueEvent } from './events'
+import { getInstalments } from './instalments'
 import {
   allocateRefCode,
   expireRefCode,
@@ -43,15 +37,28 @@ export interface IntentView {
   ref_code: string | null
   receiving_account: { provider: string; msisdn: string; display_name: string }
   client_reference: string
+  /**
+   * Every payment that settled this intent, in the order they were applied.
+   *
+   * More than one is normal — a buyer can send part and then the rest. Each
+   * carries its position and what was still owed after it, so a client can
+   * render the sequence without recomputing the arithmetic and getting a
+   * different answer than the dashboard.
+   */
   payments: Array<{
+    sequence: number
     trx_id: string | null
     sender_msisdn: string | null
     amount: number
+    running_total: number
+    outstanding_after: number
     occurred_at: string | null
     applied_at: string
     match_confidence: string
     matched_by: string
   }>
+  /** True when more than one payment went into it. */
+  split: boolean
   shortfall: number
   excess: number
   metadata: Record<string, unknown>
@@ -246,20 +253,7 @@ export async function getIntentView(intentId: string): Promise<IntentView | null
     orderBy: desc(paymentRefs.createdAt),
   })
 
-  const applications = await db
-    .select({
-      trxId: incomingPayments.trxId,
-      senderMsisdn: incomingPayments.senderMsisdn,
-      amountCents: orderPayments.appliedCents,
-      occurredAt: incomingPayments.occurredAt,
-      appliedAt: orderPayments.appliedAt,
-      confidence: orderPayments.matchConfidence,
-      matchedBy: orderPayments.matchedBy,
-    })
-    .from(orderPayments)
-    .innerJoin(incomingPayments, eq(orderPayments.incomingPaymentId, incomingPayments.id))
-    .where(and(eq(orderPayments.intentId, intentId), isNull(orderPayments.reversedAt)))
-    .orderBy(orderPayments.appliedAt)
+  const ledger = await getInstalments(intentId, intent.amountCents)
 
   return {
     id: toPublicId('intent', intent.id),
@@ -273,13 +267,17 @@ export async function getIntentView(intentId: string): Promise<IntentView | null
       display_name: intent.receivingAccount.label,
     },
     client_reference: intent.clientReference,
-    payments: applications.map((row) => ({
+    split: ledger.split,
+    payments: ledger.instalments.map((row) => ({
+      sequence: row.sequence,
       trx_id: row.trxId,
       sender_msisdn: row.senderMsisdn,
       amount: row.amountCents,
-      occurred_at: row.occurredAt?.toISOString() ?? null,
-      applied_at: row.appliedAt.toISOString(),
-      match_confidence: row.confidence,
+      running_total: row.runningTotalCents,
+      outstanding_after: row.outstandingAfterCents,
+      occurred_at: row.occurredAt,
+      applied_at: row.appliedAt,
+      match_confidence: row.matchConfidence,
       matched_by: row.matchedBy,
     })),
     shortfall: Math.max(0, intent.amountCents - intent.receivedAmountCents),

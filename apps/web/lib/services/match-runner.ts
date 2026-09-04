@@ -1,10 +1,10 @@
 import { env } from '@jomma/shared/env'
-import { and, eq, isNull, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { amountLocks, incomingPayments, paymentIntents, paymentRefs } from '@/lib/db/schema'
 import { logger } from '@/lib/logger'
 import type { CandidateIntent, MatchResult, ObservedPayment } from '@/lib/matching'
-import { resolveMatch } from '@/lib/matching'
+import { normalizeRef, resolveMatch } from '@/lib/matching'
 import { applyPayment, LockRaceError } from './apply'
 import { audit } from './audit'
 
@@ -23,9 +23,25 @@ export interface MatchRunResult {
 
 /** Open and partially-paid intents on the same account whose outstanding balance
     equals what arrived. The gate is re-applied inside the scorer regardless. */
+/**
+ * Open and part-paid intents this payment could belong to.
+ *
+ * Two ways in, because there are two ways to be identified:
+ *
+ * - **By reference.** The code is the identifier, so an intent holding it is a
+ *   candidate whatever the amount. This is what lets a part payment match, and
+ *   what makes the amount arithmetic rather than a lookup key.
+ * - **By amount.** For payments that arrive with no reference at all — bKash's
+ *   field is optional and buyers skip it — an exact outstanding balance is the
+ *   only identifier available, and the exclusive lock is what makes it one.
+ *
+ * Loading a candidate is not matching it. Everything here still goes through the
+ * scorer, which is where an inexact amount is required to carry an exact code.
+ */
 async function loadCandidates(
   receivingAccountId: string,
   amountCents: number,
+  referenceNormalized: string | null,
 ): Promise<CandidateIntent[]> {
   const rows = await db
     .select({
@@ -45,12 +61,15 @@ async function loadCandidates(
     .where(
       and(
         eq(paymentIntents.receivingAccountId, receivingAccountId),
+        inArray(paymentIntents.status, ['open', 'partial']),
         or(
-          and(eq(paymentIntents.status, 'open'), eq(paymentIntents.amountCents, amountCents)),
-          and(
-            eq(paymentIntents.status, 'partial'),
-            sql`${paymentIntents.amountCents} - ${paymentIntents.receivedAmountCents} = ${amountCents}`,
-          ),
+          // Exactly settles the balance — the reference-less path.
+          eq(paymentIntents.amountCents, amountCents),
+          sql`${paymentIntents.amountCents} - ${paymentIntents.receivedAmountCents} = ${amountCents}`,
+          // Holds the reference this payment quoted, at any amount.
+          referenceNormalized
+            ? sql`upper(regexp_replace(${paymentRefs.code}, '[^A-Za-z0-9]', '', 'g')) = ${referenceNormalized}`
+            : sql`false`,
         ),
       ),
     )
@@ -112,7 +131,11 @@ export async function runMatcher(incomingPaymentId: string): Promise<MatchRunRes
   const candidates =
     payment.amountCents === null
       ? []
-      : await loadCandidates(payment.receivingAccountId, payment.amountCents)
+      : await loadCandidates(
+          payment.receivingAccountId,
+          payment.amountCents,
+          normalizeRef(payment.referenceRaw),
+        )
 
   const result = resolveMatch(observed, candidates, {
     approveThreshold: config.MATCH_APPROVE_THRESHOLD,

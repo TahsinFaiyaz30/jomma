@@ -27,19 +27,30 @@ export const WEIGHTS = {
 export const DEFAULT_WINDOW_MINUTES = 10
 
 /**
- * Amount is a gate, not a signal.
+ * How the amount relates to what is still owed.
  *
- * Below the gate the automatic path never fires, no matter how many other
- * signals line up. Partial and over payments have their own explicit outcomes;
- * they are not "nearly matched".
+ * Not a verdict on its own. The reference code is the identifier — it is
+ * generated per intent, unique among open ones, and alone clears the approve
+ * threshold. Amount is arithmetic once identity is established, and only
+ * becomes an identifier when no reference arrived.
  *
- * The receiving account is a second gate for the same reason: money that landed
- * on the Nagad number cannot settle an intent addressed to the bKash one.
+ * The receiving account stays an absolute gate: money that landed on the Nagad
+ * number cannot settle an intent addressed to the bKash one, however well
+ * everything else lines up.
  */
+export type AmountFit = 'settles' | 'short' | 'over' | 'none'
+
+export function amountFit(payment: ObservedPayment, intent: CandidateIntent): AmountFit {
+  if (payment.amountCents === null) return 'none'
+  if (payment.amountCents <= 0) return 'none'
+  if (payment.receivingAccountId !== intent.receivingAccountId) return 'none'
+  if (payment.amountCents === intent.outstandingCents) return 'settles'
+  return payment.amountCents < intent.outstandingCents ? 'short' : 'over'
+}
+
+/** Kept for callers that only need the yes/no. */
 export function passesGate(payment: ObservedPayment, intent: CandidateIntent): boolean {
-  if (payment.amountCents === null) return false
-  if (payment.receivingAccountId !== intent.receivingAccountId) return false
-  return payment.amountCents === intent.outstandingCents
+  return amountFit(payment, intent) !== 'none'
 }
 
 export function holdsActiveLock(payment: ObservedPayment, intent: CandidateIntent): boolean {
@@ -71,14 +82,15 @@ export function score(
     withinWindow: false,
   }
 
-  if (!passesGate(payment, intent)) {
-    return {
-      intent,
-      score: Number.NEGATIVE_INFINITY,
-      signals,
-      confidence: null,
-    }
+  const fit = amountFit(payment, intent)
+  const gated = {
+    intent,
+    score: Number.NEGATIVE_INFINITY,
+    signals,
+    confidence: null,
   }
+
+  if (fit === 'none') return gated
 
   let total = 0
   const reference = normalizeRef(payment.referenceRaw)
@@ -93,6 +105,31 @@ export function score(
     signals.referenceFuzzy = true
     total += WEIGHTS.referenceFuzzy
   }
+
+  /*
+   * An amount that does not settle the balance needs the reference to be
+   * exactly right.
+   *
+   * With an exact reference, identity is already established and the amount is
+   * just arithmetic — short becomes a part payment, over becomes a completed
+   * order plus an excess the merchant is told about. That is the whole point of
+   * issuing a code per intent.
+   *
+   * Without one, the amount *is* the identifier: it is held exclusively by a
+   * single open intent on this account, which is what lets a payment with no
+   * reference at all still match on sender plus lock. bKash's reference field is
+   * optional and buyers skip it, so that path has to keep working — but it only
+   * works because the amount is exact, so an inexact amount with no code is not
+   * a match, it is a question for a human.
+   *
+   * Fuzzy is not enough either. A single-character typo plus an arbitrary amount
+   * would let one buyer's money land on another buyer's order, and the person
+   * whose money moved would have no way to see it.
+   *
+   * Nothing here rejects a payment. Below this bar it goes to the queue, where a
+   * human sees every candidate at once and decides.
+   */
+  if (fit !== 'settles' && !signals.referenceExact) return gated
 
   if (sameMsisdn(payment.senderMsisdn, intent.expectedMsisdn)) {
     signals.senderMatch = true

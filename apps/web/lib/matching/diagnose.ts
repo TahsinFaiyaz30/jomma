@@ -1,5 +1,5 @@
 import { levenshtein, minutesBetween, normalizeRef, sameMsisdn } from './normalize'
-import { DEFAULT_WINDOW_MINUTES, holdsActiveLock, passesGate, score } from './score'
+import { amountFit, DEFAULT_WINDOW_MINUTES, holdsActiveLock, score } from './score'
 import type { CandidateIntent, MatchOptions, ObservedPayment } from './types'
 
 /**
@@ -50,21 +50,30 @@ export function diagnoseCandidates(
     const senderMatches = sameMsisdn(payment.senderMsisdn, intent.expectedMsisdn)
     const minutesApart = minutesBetween(intent.payClickedAt, payment.receivedAt)
 
-    const gateReason: CandidateDiagnosis['gateReason'] =
-      payment.amountCents === null
+    /*
+     * Gated means "the automatic path would not touch this", so it has to be
+     * read off the same rule the scorer uses rather than a second copy of it.
+     * A short or over payment carrying an exact reference is *not* gated — the
+     * amount is arithmetic once the code identifies the intent.
+     */
+    const fit = amountFit(payment, intent)
+    const referenceExact = referenceDistance === 0
+    const gated = fit === 'none' || (fit !== 'settles' && !referenceExact)
+
+    const gateReason: CandidateDiagnosis['gateReason'] = !gated
+      ? null
+      : payment.amountCents === null
         ? 'unparsed'
         : payment.receivingAccountId !== intent.receivingAccountId
           ? 'account'
-          : payment.amountCents !== intent.outstandingCents
-            ? 'amount'
-            : null
+          : 'amount'
 
     return {
       intent,
       amountDeltaCents:
         payment.amountCents === null ? null : payment.amountCents - intent.outstandingCents,
       referenceDistance,
-      referenceExact: referenceDistance === 0,
+      referenceExact,
       senderMatches,
       // An intent that named a payer, where somebody else paid. Worth showing —
       // it is approvable, but it is the pattern you want to notice repeating.
@@ -74,7 +83,7 @@ export function diagnoseCandidates(
       minutesApart,
       withinWindow: minutesApart <= windowMinutes,
       score: score(payment, intent, options).score,
-      gated: !passesGate(payment, intent),
+      gated,
       gateReason,
     }
   })

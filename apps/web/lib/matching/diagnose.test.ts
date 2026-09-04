@@ -4,16 +4,27 @@ import { ACCOUNT_B, intent, lock, minutesAfter, payment, T0 } from './fixtures'
 
 describe('diagnoseCandidates', () => {
   it('reports the amount delta instead of hiding a gated candidate', () => {
-    // The scorer drops this entirely. A human working the queue needs to see it.
-    const [first] = diagnoseCandidates(payment({ amountCents: 100_000 }), [
+    // Short by ৳200 with only a near-miss reference, so the scorer drops it. A
+    // human working the queue still needs to see it and the size of the gap.
+    const [first] = diagnoseCandidates(payment({ amountCents: 100_000, referenceRaw: 'K7M3' }), [
       intent({ amountCents: 120_000, refCode: 'K7M2' }),
     ])
 
     expect(first?.gated).toBe(true)
     expect(first?.gateReason).toBe('amount')
     expect(first?.amountDeltaCents).toBe(-20_000)
-    expect(first?.referenceExact).toBe(true)
+    expect(first?.referenceExact).toBe(false)
     expect(first?.score).toBe(Number.NEGATIVE_INFINITY)
+  })
+
+  it('does not call a part payment gated when the reference is exact', () => {
+    const [first] = diagnoseCandidates(payment({ amountCents: 100_000 }), [
+      intent({ amountCents: 120_000, refCode: 'K7M2' }),
+    ])
+
+    expect(first?.gated).toBe(false)
+    expect(first?.amountDeltaCents).toBe(-20_000)
+    expect(first?.referenceExact).toBe(true)
   })
 
   it('reports the reference edit distance', () => {

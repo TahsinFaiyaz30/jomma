@@ -13,23 +13,62 @@ import { score, WEIGHTS } from './score'
  */
 
 describe('the amount gate', () => {
-  it('never auto-approves on an amount mismatch, however strong the other signals', () => {
+  /*
+   * The rule here changed deliberately, and these tests are the record of it.
+   *
+   * Amount used to be an absolute gate: nothing matched unless it settled the
+   * balance exactly. That made a part payment unmatchable even with a perfect
+   * reference, which is the wrong answer — the reference code is the identifier
+   * we issue precisely so that identity does not depend on the amount.
+   *
+   * What replaced it: an exact reference makes the amount arithmetic. Without
+   * one, the amount is still the identifier and still has to be exact.
+   */
+
+  it('matches a part payment when the reference is exactly right', () => {
+    const candidate = intent({ refCode: 'K7M2' })
+
+    // ৳1,200 owed, ৳1,000 sent, correct code. A part payment, not a mismatch.
+    const result = resolveMatch(payment({ amountCents: 100_000 }), [candidate])
+
+    expect(result.kind).toBe('matched')
+  })
+
+  it('matches an over payment when the reference is exactly right', () => {
+    const candidate = intent({ refCode: 'K7M2' })
+    const result = resolveMatch(payment({ amountCents: 130_000 }), [candidate])
+
+    expect(result.kind).toBe('matched')
+  })
+
+  it('still refuses an inexact amount when the reference is only close', () => {
+    // Sender, lock and window all fire, and the code is one character out. That
+    // is enough to identify a payment whose amount corroborates it, and not
+    // enough to move money onto an order the amount does not fit.
     const candidate = intent({
       refCode: 'K7M2',
       expectedMsisdn: '8801712345678',
       lock: lock(),
     })
 
-    // Every signal fires: exact reference, matching sender, active lock, and
-    // well inside the window. Only the amount is wrong, by one poisha.
-    const result = resolveMatch(payment({ amountCents: 119_999 }), [candidate])
+    const result = resolveMatch(payment({ amountCents: 119_999, referenceRaw: 'K7M3' }), [
+      candidate,
+    ])
+
+    expect(result.kind).toBe('unmatched')
+    if (result.kind === 'unmatched') expect(result.reason).toBe('amount_gate')
+  })
+
+  it('still refuses an inexact amount with no reference at all', () => {
+    const candidate = intent({ expectedMsisdn: '8801712345678', lock: lock() })
+    const result = resolveMatch(payment({ amountCents: 119_999, referenceRaw: null }), [candidate])
 
     expect(result.kind).toBe('unmatched')
     if (result.kind === 'unmatched') expect(result.reason).toBe('amount_gate')
   })
 
   it('scores a gated candidate as -Infinity so no sort can promote it', () => {
-    const scored = score(payment({ amountCents: 119_999 }), intent())
+    const scored = score(payment({ amountCents: 119_999, referenceRaw: null }), intent())
     expect(scored.score).toBe(Number.NEGATIVE_INFINITY)
     expect(scored.confidence).toBeNull()
   })

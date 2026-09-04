@@ -45,7 +45,14 @@ function check(label, condition, detail) {
 const section = (name) => console.log(`\n${name}`)
 const trxId = () => randomBytes(5).toString('hex').toUpperCase()
 
-/** A bKash send-money message, in the format the parser expects. */
+/**
+ * A bKash send-money message.
+ *
+ * `ref` is optional on purpose: leaving it out is how a buyer who skipped the
+ * reference field is simulated, and that is the only case where the manual
+ * TrxID path is still load-bearing — with a reference, a short payment now
+ * verifies itself.
+ */
 function bkashMessage({ taka, ref, trx, sender = '01712345678' }) {
   const now = new Date()
   const stamp =
@@ -53,7 +60,8 @@ function bkashMessage({ taka, ref, trx, sender = '01712345678' }) {
     `${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ` +
     `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
   return (
-    `You have received Tk ${taka.toFixed(2)} from ${sender}. Ref ${ref}. Fee Tk 0.00. ` +
+    `You have received Tk ${taka.toFixed(2)} from ${sender}. ` +
+    `${ref ? `Ref ${ref}. ` : ''}Fee Tk 0.00. ` +
     `Balance Tk 45,320.00. TrxID ${trx} at ${stamp}`
   )
 }
@@ -156,7 +164,7 @@ async function main() {
 
   /* ── Split payment ────────────────────────────────────────────────────── */
 
-  section('Split payment')
+  section('Split payment, reference skipped')
 
   const total = 90_000 + Math.floor(Math.random() * 20_000)
   const intent = await createIntent(total, { provider: 'bkash' })
@@ -165,9 +173,9 @@ async function main() {
   const msisdn = intent.receiving_account.msisdn
   const half = Math.floor(total / 2)
 
-  // First instalment, short of the total.
+  // No reference, so nothing auto-matches and the TrxID is the way through.
   const trx1 = trxId()
-  await capture(msisdn, bkashMessage({ taka: half / 100, ref: intent.ref_code, trx: trx1 }))
+  await capture(msisdn, bkashMessage({ taka: half / 100, trx: trx1 }))
   const sub1 = await (await pay(intent.id, '/submit', { trx_id: trx1 })).json()
   check(
     'first instalment is underpaid, not rejected',
@@ -187,6 +195,7 @@ async function main() {
   check('one payment is listed', mid.payments?.length === 1, JSON.stringify(mid.payments))
 
   // Second instalment clears the rest.
+  // The remainder *does* carry the reference, so it needs no help.
   const trx2 = trxId()
   await capture(
     msisdn,
@@ -205,6 +214,89 @@ async function main() {
     done.payments?.reduce((sum, p) => sum + p.amount, 0) === total,
   )
 
+  /* ── Automatic partial ────────────────────────────────────────────────── */
+
+  section('Partial paid with the reference — no manual step')
+
+  const autoTotal = 70_000 + Math.floor(Math.random() * 20_000)
+  const autoIntent = await createIntent(autoTotal, { provider: 'bkash' })
+  const autoMsisdn = autoIntent.receiving_account.msisdn
+  const firstPart = Math.floor(autoTotal / 3)
+
+  await capture(
+    autoMsisdn,
+    bkashMessage({ taka: firstPart / 100, ref: autoIntent.ref_code, trx: trxId() }),
+  )
+  const afterFirst = await (await pay(autoIntent.id, '/status')).json()
+  check(
+    'a short payment with the code verifies itself',
+    afterFirst.status === 'partial',
+    afterFirst.status,
+  )
+  check(
+    'and is counted',
+    afterFirst.received_amount === firstPart,
+    String(afterFirst.received_amount),
+  )
+  check(
+    'with the rest still outstanding',
+    afterFirst.shortfall === autoTotal - firstPart,
+    String(afterFirst.shortfall),
+  )
+
+  // A second instalment, also short, also with the code.
+  const secondPart = Math.floor((autoTotal - firstPart) / 2)
+  await capture(
+    autoMsisdn,
+    bkashMessage({ taka: secondPart / 100, ref: autoIntent.ref_code, trx: trxId() }),
+  )
+  const afterSecond = await (await pay(autoIntent.id, '/status')).json()
+  check('a second short payment also verifies itself', afterSecond.payments?.length === 2)
+  check(
+    'the running balance is right',
+    afterSecond.received_amount === firstPart + secondPart,
+    String(afterSecond.received_amount),
+  )
+
+  // The remainder closes it.
+  await capture(
+    autoMsisdn,
+    bkashMessage({
+      taka: (autoTotal - firstPart - secondPart) / 100,
+      ref: autoIntent.ref_code,
+      trx: trxId(),
+    }),
+  )
+  const closed = await (await pay(autoIntent.id, '/status')).json()
+  check('the third closes the order', closed.status === 'matched', closed.status)
+  check('three instalments are linked to it', closed.payments?.length === 3)
+
+  /* ── A skipped reference still needs the manual path ──────────────────── */
+
+  section('Reference skipped')
+
+  const noRefTotal = 45_000 + Math.floor(Math.random() * 20_000)
+  const noRef = await createIntent(noRefTotal, { provider: 'bkash' })
+  const noRefTrx = trxId()
+
+  // Short, and no reference at all — exactly the case that must not auto-match.
+  await capture(
+    noRef.receiving_account.msisdn,
+    `You have received Tk ${(Math.floor(noRefTotal / 2) / 100).toFixed(2)} from 01712345678. ` +
+      `Fee Tk 0.00. Balance Tk 45,320.00. TrxID ${noRefTrx} at 04/09/2026 19:00`,
+  )
+  const stillOpen = await (await pay(noRef.id, '/status')).json()
+  check('it does not auto-match', stillOpen.status === 'open', stillOpen.status)
+  check(
+    'and nothing is counted',
+    stillOpen.received_amount === 0,
+    String(stillOpen.received_amount),
+  )
+
+  const rescued = await (await pay(noRef.id, '/submit', { trx_id: noRefTrx })).json()
+  check('the TrxID rescues it as underpaid', rescued.resolution === 'underpaid', rescued.resolution)
+  check('and it says how much is left', rescued.shortfall > 0, String(rescued.shortfall))
+
   /* ── Overpayment ──────────────────────────────────────────────────────── */
 
   section('Overpayment')
@@ -212,9 +304,10 @@ async function main() {
   const overTotal = 40_000 + Math.floor(Math.random() * 20_000)
   const overIntent = await createIntent(overTotal, { provider: 'bkash' })
   const overTrx = trxId()
+  // Reference skipped again, so the submission is what resolves it.
   await capture(
     overIntent.receiving_account.msisdn,
-    bkashMessage({ taka: (overTotal + 5_000) / 100, ref: overIntent.ref_code, trx: overTrx }),
+    bkashMessage({ taka: (overTotal + 5_000) / 100, trx: overTrx }),
   )
   const overSub = await (await pay(overIntent.id, '/submit', { trx_id: overTrx })).json()
   check(
