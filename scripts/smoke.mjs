@@ -338,23 +338,40 @@ check(
 )
 
 /*
- * Pinned to the same provider as the intent that spent this TrxID.
+ * Must land on the same receiving *account* as the intent that spent this
+ * TrxID — not merely the same provider.
  *
- * Submissions are scoped to the intent's own receiving account, so a second
- * intent that routed elsewhere would report the TrxID as simply not found —
- * correct, but it would not exercise the reuse guard. Same account, so the
- * payment is visible and `already_used` is the answer under test.
+ * Submissions are scoped to the intent's own account, so a second intent that
+ * routed elsewhere reports the TrxID as simply not found. That is correct
+ * behaviour, but it does not exercise the reuse guard, and asking for the same
+ * provider does not pin the account when both seeded accounts are bKash.
+ * Checkout balances across healthy accounts, so this asks until it gets one.
  */
-const fresh = await client(
-  'POST',
-  '/v1/intents',
-  {
-    amount: amount + 7,
-    client_reference: `ORD-SUB-${nonce}`,
-    provider: created.json.receiving_account?.provider,
-    payer_msisdn: '01712345678',
-  },
-  { 'idempotency-key': `smoke-sub-${nonce}` },
+const spentOn = created.json.receiving_account?.msisdn
+
+async function intentOnSameAccount() {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const candidate = await client(
+      'POST',
+      '/v1/intents',
+      {
+        amount: amount + 7 + attempt,
+        client_reference: `ORD-SUB-${nonce}-${attempt}`,
+        provider: created.json.receiving_account?.provider,
+        payer_msisdn: '01712345678',
+      },
+      { 'idempotency-key': `smoke-sub-${nonce}-${attempt}` },
+    )
+    if (candidate.json.receiving_account?.msisdn === spentOn) return candidate
+  }
+  return null
+}
+
+const fresh = await intentOnSameAccount()
+check(
+  'a second intent can be placed on the same receiving account',
+  fresh !== null,
+  `never routed back to ${spentOn} in 8 attempts`,
 )
 
 const stolen = await client('POST', '/v1/submissions', {

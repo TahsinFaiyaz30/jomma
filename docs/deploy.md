@@ -82,14 +82,19 @@ way an account comes into existence:
 DATABASE_URL='postgres://...?sslmode=require' \
 JOMMA_ADMIN_EMAIL='you@example.com' \
 JOMMA_ADMIN_PASSWORD='...' \
-pnpm db:seed
+pnpm db:seed --admin-only
 ```
 
-The seed prints an API key and a device token once. Copy them then; they are
-hashed at rest and cannot be shown again.
+That creates the admin account and **nothing else**. Sign in, then add your own
+receiving accounts, your app and its API key, and a webhook endpoint from the
+dashboard.
 
-> The seed also creates two demo receiving accounts and a demo app. Delete them
-> from the dashboard before you point a real phone at this.
+> **`--admin-only` is not optional here.** The plain `pnpm db:seed` is the
+> development seed: it creates a demo app and two receiving accounts on numbers
+> nobody owns. Checkout routes real payments across every healthy account, so a
+> live instance carrying them can hand a buyer a pay page telling them to send
+> money to a stranger's number. The seed now refuses to write demo data to a
+> non-local database for that reason, but run the right command anyway.
 
 ---
 

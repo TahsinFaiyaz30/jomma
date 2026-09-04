@@ -101,9 +101,16 @@ pnpm dev:worker   # the scheduler</pre></div>
   </p></div>
 
   <div class="note danger"><p>
-    <strong>The seed creates demo data.</strong> Two demo receiving accounts and
-    a demo app, so the smoke suites have something to work with. Delete them from
-    the dashboard before you point a real phone at this.
+    <strong><code>db:seed</code> is the development seed.</strong> It creates a
+    demo app and two receiving accounts on numbers nobody owns, so the smoke
+    suites have something to work with. It <em>refuses</em> to run against a
+    non-local database: checkout routes real payments across every healthy
+    account, so a live instance carrying those could hand a buyer a pay page
+    telling them to send money to a stranger's number.
+  </p><p>
+    To bootstrap a deployment, run <code>pnpm db:seed --admin-only</code>. That
+    creates the admin account and nothing else; you add your own receiving
+    accounts, app and webhook endpoint from the dashboard.
   </p></div>
 
   <p>Port 3000 taken? Use another, and set <code>APP_URL</code> to match:</p>
@@ -217,7 +224,12 @@ pnpm dev:worker   # the scheduler</pre></div>
 DATABASE_URL='postgres://...?sslmode=require' \
 JOMMA_ADMIN_EMAIL='you@example.com' \
 JOMMA_ADMIN_PASSWORD='...' \
-pnpm db:seed</pre></div>
+pnpm db:seed --admin-only</pre></div>
+
+  <p>
+    That creates the admin and nothing else. Sign in, then add your own
+    receiving accounts, your app and its API key, and a webhook endpoint.
+  </p>
 
   <div class="note warn"><p>
     <strong>Never use Render's own free Postgres.</strong> It is deleted after 30

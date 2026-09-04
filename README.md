@@ -491,8 +491,14 @@ signup** — accounts come from the seed or another admin, and
 `PORT=3100 pnpm dev` if 3000 is taken. Set `APP_URL` to match, or sign-in fails
 the origin check and looks like a wrong password.
 
-> The seed creates two demo receiving accounts and a demo app. **Delete them
-> from the dashboard before pointing a real phone at this.**
+> `pnpm db:seed` is the **development** seed: it creates a demo app and two
+> receiving accounts on numbers nobody owns, so the smoke suites have something
+> to work with. It refuses to run against a non-local database, because checkout
+> routes real payments across every healthy account — a live instance carrying
+> those could tell a buyer to send money to a stranger.
+>
+> To bootstrap a deployment, use **`pnpm db:seed --admin-only`**, which creates
+> the admin account and nothing else.
 
 ### Postgres 18 is required
 

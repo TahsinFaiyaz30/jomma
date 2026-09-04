@@ -7,16 +7,57 @@ import { db, pool } from './client'
 import { apiKeys, apps, devices, receivingAccounts, users, webhookEndpoints } from './schema'
 
 /**
- * Development seed. One app, one API key, one receiving account, one device.
+ * Development seed. One app, one API key, two receiving accounts, two devices.
  *
  * Idempotent: re-running finds the existing app and receiving account by slug
  * and msisdn and only mints new credentials, so `pnpm db:seed` twice does not
  * produce two of everything.
+ *
+ * ## Why this refuses to touch a remote database
+ *
+ * The demo fixtures are not harmless filler. They include two receiving
+ * accounts on numbers nobody involved owns, and checkout routes intents across
+ * whichever accounts are healthy — so a live instance carrying them can hand a
+ * real buyer a pay page telling them to send money to a stranger. They also
+ * bring an API key nobody is tracking and a webhook endpoint pointing at
+ * localhost.
+ *
+ * Guarding on `NODE_ENV` did not prevent that, because the documented way to
+ * bootstrap production is to run this from a laptop against a remote
+ * `DATABASE_URL`, where `NODE_ENV` is `development`. The check has to be on
+ * *where the data is going*, not on where the command was typed.
+ *
+ *   pnpm db:seed                 full dev seed, localhost only
+ *   pnpm db:seed --admin-only    just the admin account, safe against remote
  */
 
+/** Localhost, in the forms a connection string actually uses. */
+function isLocalDatabase(url: string): boolean {
+  try {
+    const { hostname } = new URL(url)
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+  } catch {
+    return false
+  }
+}
+
 async function main() {
+  const adminOnly = process.argv.includes('--admin-only')
+
   if (env().NODE_ENV === 'production') {
     throw new Error('Refusing to seed a production database.')
+  }
+
+  if (!adminOnly && !isLocalDatabase(env().DATABASE_URL)) {
+    throw new Error(
+      'Refusing to write demo data to a non-local database.\n\n' +
+        '  The dev seed creates two receiving accounts on numbers you do not own,\n' +
+        '  and checkout routes real payments across every healthy account — so a\n' +
+        '  buyer could be told to send money to one of them.\n\n' +
+        '  To bootstrap a deployment, create only the admin account:\n\n' +
+        '    pnpm db:seed --admin-only\n\n' +
+        '  Then add your own receiving accounts and app from the dashboard.',
+    )
   }
 
   /*
@@ -46,6 +87,23 @@ async function main() {
       body: { email: adminEmail, password: adminPassword, name: 'Admin' },
     })
     adminCreated = true
+  }
+
+  if (adminOnly) {
+    console.log(`
+Admin ready.
+
+  Dashboard login     ${adminEmail}
+  Dashboard password  ${adminCreated ? adminPassword : '(unchanged — that admin already existed)'}
+
+  Nothing else was created. From the dashboard, add:
+
+    1. Your receiving accounts, under Accounts, and provision a phone for each.
+    2. Your app and an API key, under Apps.
+    3. A webhook endpoint for that app.
+`)
+    await pool.end()
+    return
   }
 
   const [app] = await db
