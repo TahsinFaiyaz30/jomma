@@ -16,7 +16,6 @@ export {
 } from './resolve'
 export {
   confidenceFrom,
-  holdsActiveLock,
   passesGate,
   score,
   scoreAll,
@@ -24,7 +23,6 @@ export {
 } from './score'
 export type {
   CandidateIntent,
-  CandidateLock,
   MatchOptions,
   MatchResult,
   ObservedPayment,

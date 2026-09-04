@@ -1,11 +1,10 @@
 import { env } from '@jomma/shared/env'
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { amountLocks, incomingPayments, paymentIntents, paymentRefs } from '@/lib/db/schema'
-import { logger } from '@/lib/logger'
+import { incomingPayments, paymentIntents, paymentRefs } from '@/lib/db/schema'
 import type { CandidateIntent, MatchResult, ObservedPayment } from '@/lib/matching'
 import { normalizeRef, resolveMatch } from '@/lib/matching'
-import { applyPayment, LockRaceError } from './apply'
+import { applyPayment } from './apply'
 import { audit } from './audit'
 
 /**
@@ -47,16 +46,11 @@ async function loadCandidates(
     .select({
       intent: paymentIntents,
       refCode: paymentRefs.code,
-      lock: amountLocks,
     })
     .from(paymentIntents)
     .leftJoin(
       paymentRefs,
       and(eq(paymentRefs.intentId, paymentIntents.id), eq(paymentRefs.status, 'open')),
-    )
-    .leftJoin(
-      amountLocks,
-      and(eq(amountLocks.intentId, paymentIntents.id), eq(amountLocks.status, 'active')),
     )
     .where(
       and(
@@ -74,7 +68,7 @@ async function loadCandidates(
       ),
     )
 
-  return rows.map(({ intent, refCode, lock }) => ({
+  return rows.map(({ intent, refCode }) => ({
     id: intent.id,
     receivingAccountId: intent.receivingAccountId,
     amountCents: intent.amountCents,
@@ -84,15 +78,6 @@ async function loadCandidates(
     payClickedAt: intent.payClickedAt,
     expiresAt: intent.expiresAt,
     status: intent.status,
-    lock: lock
-      ? {
-          id: lock.id,
-          receivingAccountId: lock.receivingAccountId,
-          amountCents: lock.amountCents,
-          status: lock.status,
-          expiresAt: lock.expiresAt,
-        }
-      : null,
   }))
 }
 
@@ -126,6 +111,7 @@ export async function runMatcher(incomingPaymentId: string): Promise<MatchRunRes
     referenceRaw: payment.referenceRaw,
     transactionType: payment.transactionType,
     receivedAt: payment.receivedAt,
+    occurredAt: payment.occurredAt,
   }
 
   const candidates =
@@ -176,27 +162,16 @@ export async function runMatcher(incomingPaymentId: string): Promise<MatchRunRes
   }
 
   const winner = result.candidate
-
-  try {
-    await db.transaction(async (tx) => {
-      await applyPayment(tx, {
-        intentId: winner.intent.id,
-        incomingPaymentId: payment.id,
-        appliedCents: payment.amountCents as number,
-        confidence: winner.confidence ?? 'lock',
-        matchedBy: 'automatic',
-        matchScore: winner.score,
-      })
+  await db.transaction(async (tx) => {
+    await applyPayment(tx, {
+      intentId: winner.intent.id,
+      incomingPaymentId: payment.id,
+      appliedCents: payment.amountCents as number,
+      confidence: winner.confidence ?? 'lock',
+      matchedBy: 'automatic',
+      matchScore: winner.score,
     })
-  } catch (error) {
-    if (error instanceof LockRaceError) {
-      // Another approval got there first. Not an error worth surfacing — the
-      // payment stays unmatched and the next pass re-evaluates it.
-      logger.warn({ incomingPaymentId: payment.id }, 'lost the lock race; leaving unmatched')
-      return { result, applied: false, intentId: null }
-    }
-    throw error
-  }
+  })
 
   return { result, applied: true, intentId: winner.intent.id }
 }

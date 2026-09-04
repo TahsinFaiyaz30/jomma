@@ -2,13 +2,7 @@ import 'server-only'
 
 import { and, asc, eq, ne, or } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import {
-  amountLocks,
-  incomingPayments,
-  paymentIntents,
-  paymentRefs,
-  receivingAccounts,
-} from '@/lib/db/schema'
+import { incomingPayments, paymentIntents, paymentRefs, receivingAccounts } from '@/lib/db/schema'
 import type { CandidateIntent, ObservedPayment } from '@/lib/matching'
 import { type CandidateDiagnosis, diagnoseCandidates } from '@/lib/matching'
 import { applyPayment } from './apply'
@@ -106,6 +100,7 @@ export async function getQueue(limit = 100): Promise<QueueItem[]> {
       referenceRaw: payment.referenceRaw,
       transactionType: payment.transactionType,
       receivedAt: payment.receivedAt,
+      occurredAt: payment.occurredAt,
     }
 
     /*
@@ -117,17 +112,12 @@ export async function getQueue(limit = 100): Promise<QueueItem[]> {
       .select({
         intent: paymentIntents,
         refCode: paymentRefs.code,
-        lock: amountLocks,
         appName: paymentIntents.clientReference,
       })
       .from(paymentIntents)
       .leftJoin(
         paymentRefs,
         and(eq(paymentRefs.intentId, paymentIntents.id), eq(paymentRefs.status, 'open')),
-      )
-      .leftJoin(
-        amountLocks,
-        and(eq(amountLocks.intentId, paymentIntents.id), eq(amountLocks.status, 'active')),
       )
       .where(
         and(
@@ -138,7 +128,7 @@ export async function getQueue(limit = 100): Promise<QueueItem[]> {
       )
       .limit(40)
 
-    const candidateIntents: CandidateIntent[] = rows.map(({ intent, refCode, lock }) => ({
+    const candidateIntents: CandidateIntent[] = rows.map(({ intent, refCode }) => ({
       id: intent.id,
       receivingAccountId: intent.receivingAccountId,
       amountCents: intent.amountCents,
@@ -148,15 +138,6 @@ export async function getQueue(limit = 100): Promise<QueueItem[]> {
       payClickedAt: intent.payClickedAt,
       expiresAt: intent.expiresAt,
       status: intent.status,
-      lock: lock
-        ? {
-            id: lock.id,
-            receivingAccountId: lock.receivingAccountId,
-            amountCents: lock.amountCents,
-            status: lock.status,
-            expiresAt: lock.expiresAt,
-          }
-        : null,
     }))
 
     const byId = new Map(rows.map((row) => [row.intent.id, row.intent]))
@@ -168,8 +149,7 @@ export async function getQueue(limit = 100): Promise<QueueItem[]> {
         (d) =>
           d.amountDeltaCents === 0 ||
           (d.referenceDistance !== null && d.referenceDistance <= 2) ||
-          d.senderMatches ||
-          d.holdsLock,
+          d.senderMatches,
       )
       .slice(0, 6)
       .map(({ intent, ...diagnosis }) => {

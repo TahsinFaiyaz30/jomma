@@ -36,14 +36,14 @@ QR from the dashboard.
 
 ### `POST /v1/intents`
 
-Create a payment request. This allocates a reference code and an amount lock.
+Create a payment request. This allocates a reference code.
 
 ```jsonc
 // Request
 {
   "amount": 120000,                    // poisha. ৳1,200.00
   "client_reference": "ORD-2026-001043",
-  "payer_msisdn": "8801712345678",     // optional, boosts match confidence
+  "payer_msisdn": "8801712345678",     // required for automatic matching
   "provider": "bkash",                 // bkash | nagad | any
   "ttl_seconds": 300,                  // default 300, max 3600
   "metadata": { "store_id": "st_912" } // opaque, returned on webhooks
@@ -59,7 +59,7 @@ original intent rather than allocating a second code.
   "id": "int_01J8X...",
   "status": "open",
   "amount": 120000,
-  "ref_code": "K7M2",
+  "ref_code": "Q76WDREB",
   "receiving_account": {
     "provider": "bkash",
     "msisdn": "8801799887766",
@@ -71,9 +71,14 @@ original intent rather than allocating a second code.
 }
 ```
 
-**`409 no_capacity`** when every healthy receiving account already has an open
-lock on that exact amount, and the reference pool for the amount is exhausted.
-Rare. Client should retry after a short delay or fall back to manual entry.
+**`409 no_capacity`** when every healthy receiving account is momentarily out of
+free reference codes. Rare, and it clears on its own as open intents settle.
+
+There is **no amount lock**. Any number of buyers can owe the same amount on the
+same receiving account at the same time — they are told apart by their reference
+codes, not by what they owe. An earlier design held (account, amount)
+exclusively, which meant the third customer to buy a ৳500 item could not check
+out at all.
 
 **`503 no_healthy_account`** when every receiving account is `disabled` or has a
 stale heartbeat. The client must not show a pay page in this state.
@@ -88,7 +93,7 @@ Poll this from the pay page every 2–3 seconds.
   "status": "matched",          // open | matched | partial | over | expired | cancelled
   "amount": 120000,
   "received_amount": 120000,
-  "ref_code": "K7M2",
+  "ref_code": "Q76WDREB",
   "payments": [
     {
       "trx_id": "BK7X2M9QP1",
@@ -111,8 +116,8 @@ what they overpaid. The client decides what to do with each; Jomma only reports.
 
 ### `POST /v1/intents/:id/cancel`
 
-Releases the lock and expires the reference code immediately. Safe to call on an
-already-cancelled intent.
+Expires the reference code immediately. Safe to call on an already-cancelled
+intent.
 
 ### `POST /v1/intents/:id/extend`
 
@@ -121,7 +126,8 @@ already-cancelled intent.
 ```
 
 Use when a buyer underpays and you want to hold the order while they top up.
-Fails with `409 lock_taken` if another intent has since claimed that amount.
+Fails with `409 lock_taken` only for the intent's own state — a matched or
+cancelled intent cannot be extended.
 
 ### `POST /v1/submissions`
 
@@ -172,7 +178,7 @@ crediting. Nine outcomes:
   "shortfall": 20000,
   "top_up": {
     "amount": 20000,
-    "ref_code": "K7M2",
+    "ref_code": "Q76WDREB",
     "receiving_msisdn": "8801799887766"
   }
 }
@@ -223,7 +229,7 @@ account still works but something is wrong — surface a fallback.
       "local_id": "c_8891",                // device-side id, for ack
       "source": "notification",            // notification | sms
       "package": "com.bKash.customerapp",
-      "raw": "You have received Tk 1,200.00 from 01712345678. Ref K7M2. Fee Tk 0.00. Balance Tk 45,320.00. TrxID BK7X2M9QP1 at 03/09/2026 14:35",
+      "raw": "You have received Tk 1,200.00 from 01712345678. Ref Q76WDREB. Fee Tk 0.00. Balance Tk 45,320.00. TrxID BK7X2M9QP1 at 03/09/2026 14:35",
       "captured_at": "2026-09-03T14:35:13Z" // device clock, display only
     }
   ]

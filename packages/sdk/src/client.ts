@@ -173,7 +173,7 @@ class IntentsResource {
     })
   }
 
-  /** Holds an order while a buyer tops up. Throws `lock_taken` if the amount went. */
+  /** Holds an order while a buyer tops up. Throws `lock_taken` if it is no longer extendable. */
   async extend(intentId: string, ttlSeconds: number): Promise<Intent> {
     return this.client.request<Intent>({
       method: 'POST',

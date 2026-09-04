@@ -1,4 +1,4 @@
-import type { IntentStatus, LockStatus, MatchConfidence, TransactionType } from '@jomma/shared'
+import type { IntentStatus, MatchConfidence, TransactionType } from '@jomma/shared'
 
 /**
  * The matcher's inputs are plain data, never database rows. Nothing in this
@@ -15,16 +15,17 @@ export interface ObservedPayment {
   /** Straight off the message, before normalisation. */
   referenceRaw: string | null
   transactionType: TransactionType | null
-  /** Server clock. Authoritative for every window calculation. */
+  /** Server clock. When Jomma first saw it, not when it happened. */
   receivedAt: Date
-}
-
-export interface CandidateLock {
-  id: string
-  receivingAccountId: string
-  amountCents: number
-  status: LockStatus
-  expiresAt: Date
+  /**
+   * The time in the provider's own message, in UTC.
+   *
+   * This is the trustworthy clock. A notification can be delayed, re-delivered
+   * or captured late, and the server sees it whenever it arrives — but the
+   * timestamp bKash wrote into the message never changes. Null when the parser
+   * could not read a date, in which case the window falls back to `receivedAt`.
+   */
+  occurredAt: Date | null
 }
 
 export interface CandidateIntent {
@@ -43,14 +44,12 @@ export interface CandidateIntent {
   payClickedAt: Date
   expiresAt: Date
   status: IntentStatus
-  lock: CandidateLock | null
 }
 
 export interface SignalBreakdown {
   referenceExact: boolean
   referenceFuzzy: boolean
   senderMatch: boolean
-  activeLock: boolean
   withinWindow: boolean
 }
 

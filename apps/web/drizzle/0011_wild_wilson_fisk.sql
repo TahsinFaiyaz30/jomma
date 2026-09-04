@@ -1,0 +1,1 @@
+DROP TABLE "amount_locks" CASCADE;

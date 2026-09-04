@@ -1,5 +1,5 @@
 import { levenshtein, minutesBetween, normalizeRef, sameMsisdn } from './normalize'
-import { admits, DEFAULT_WINDOW_MINUTES, holdsActiveLock, type Refusal, score } from './score'
+import { admits, DEFAULT_WINDOW_MINUTES, type Refusal, score } from './score'
 import type { CandidateIntent, MatchOptions, ObservedPayment } from './types'
 
 /**
@@ -25,7 +25,6 @@ export interface CandidateDiagnosis {
   senderMatches: boolean
   /** Sender was declared on the intent but does not match what arrived. */
   senderConflicts: boolean
-  holdsLock: boolean
   minutesApart: number
   withinWindow: boolean
   /** The real score, -Infinity when gated — what the automatic path saw. */
@@ -76,7 +75,6 @@ export function diagnoseCandidates(
       // it is approvable, but it is the pattern you want to notice repeating.
       senderConflicts:
         !senderMatches && Boolean(intent.expectedMsisdn) && Boolean(payment.senderMsisdn),
-      holdsLock: holdsActiveLock(payment, intent),
       minutesApart,
       withinWindow: minutesApart <= windowMinutes,
       score: score(payment, intent, options).score,

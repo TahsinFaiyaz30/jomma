@@ -21,7 +21,6 @@ export const WEIGHTS = {
   referenceExact: 100,
   referenceFuzzy: 80,
   senderMatch: 60,
-  activeLock: 50,
   withinWindow: 20,
 } as const
 
@@ -56,6 +55,35 @@ export type Refusal =
   | 'reference_inexact'
   | 'sender_undeclared'
   | 'sender_mismatch'
+  | 'before_window'
+  | 'after_window'
+
+/**
+ * Slack on each end of the payment window.
+ *
+ * Needed on the lower bound for two unavoidable reasons. bKash writes minutes,
+ * not seconds, so a payment made at 14:35:40 reads as 14:35:00 and can look
+ * fractionally earlier than a checkout that began at 14:35:20. And the orphan
+ * case is real: money sometimes lands a moment *before* the intent commits,
+ * which is exactly what the 30-second retry loop exists to pick up.
+ *
+ * Needed on the upper bound because a payment sent in the last seconds before
+ * expiry can carry a timestamp a minute past it.
+ *
+ * Five minutes absorbs all of that and still refuses a payment from an hour ago.
+ */
+const WINDOW_GRACE_MS = 5 * 60_000
+
+/**
+ * When the payment happened, by the most trustworthy clock available.
+ *
+ * The message's own timestamp first — it is written by the provider and never
+ * changes. The server clock only as a fallback for a message whose date the
+ * parser could not read.
+ */
+function paymentTime(payment: ObservedPayment): Date {
+  return payment.occurredAt ?? payment.receivedAt
+}
 
 /**
  * The hard requirements for touching money without a human.
@@ -74,6 +102,8 @@ export type Refusal =
  *    message says which number paid. If those disagree, or if nobody ever said,
  *    then whoever sent this has not been identified and the payment is not
  *    theirs to credit on evidence this thin.
+ * 4. **The time.** It has to have happened between the buyer starting checkout
+ *    and the intent expiring, read off the provider's own timestamp.
  *
  * The amount is deliberately *not* one of them. With the reference and the
  * sender both established the payer is identified, and how much they sent is
@@ -92,6 +122,19 @@ export function admits(payment: ObservedPayment, intent: CandidateIntent): Refus
   if (!intent.expectedMsisdn) return 'sender_undeclared'
   if (!sameMsisdn(payment.senderMsisdn, intent.expectedMsisdn)) return 'sender_mismatch'
 
+  /*
+   * 4. **The clock.** The payment has to have happened during this checkout.
+   *
+   * Money that moved before the buyer even opened the page cannot be for this
+   * order, and money that moved after it expired is for whatever they did next.
+   * Both bounds are real protection rather than tidiness: a reference code is
+   * reissued after its cooldown, so without this a payment carrying a recycled
+   * code could be attached to the wrong intent entirely.
+   */
+  const at = paymentTime(payment).getTime()
+  if (at < intent.payClickedAt.getTime() - WINDOW_GRACE_MS) return 'before_window'
+  if (at > intent.expiresAt.getTime() + WINDOW_GRACE_MS) return 'after_window'
+
   return null
 }
 
@@ -106,16 +149,6 @@ export function amountFit(payment: ObservedPayment, intent: CandidateIntent): Am
 /** Kept for callers that only need the yes/no. */
 export function passesGate(payment: ObservedPayment, intent: CandidateIntent): boolean {
   return admits(payment, intent) === null
-}
-
-export function holdsActiveLock(payment: ObservedPayment, intent: CandidateIntent): boolean {
-  const lock = intent.lock
-  if (!lock) return false
-  if (lock.status !== 'active') return false
-  // A lock the expiry sweep has not reached yet is still an expired lock.
-  if (lock.expiresAt.getTime() <= payment.receivedAt.getTime()) return false
-  if (lock.receivingAccountId !== payment.receivingAccountId) return false
-  return lock.amountCents === payment.amountCents
 }
 
 /**
@@ -133,7 +166,6 @@ export function score(
     referenceExact: false,
     referenceFuzzy: false,
     senderMatch: false,
-    activeLock: false,
     withinWindow: false,
   }
 
@@ -160,11 +192,6 @@ export function score(
     total += WEIGHTS.senderMatch
   }
 
-  if (holdsActiveLock(payment, intent)) {
-    signals.activeLock = true
-    total += WEIGHTS.activeLock
-  }
-
   // Absolute difference, not signed: a payment that arrived just *before* the
   // intent committed is the orphan case, and re-matching it is exactly what the
   // 30-second retry loop exists to do.
@@ -181,7 +208,6 @@ export function confidenceFrom(signals: SignalBreakdown): MatchConfidence | null
   if (signals.referenceExact) return 'exact'
   if (signals.referenceFuzzy) return 'fuzzy'
   if (signals.senderMatch) return 'sender'
-  if (signals.activeLock) return 'lock'
   return null
 }
 

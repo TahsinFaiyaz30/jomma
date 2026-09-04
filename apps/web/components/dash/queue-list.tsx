@@ -336,7 +336,6 @@ function CandidateRow({
 
         {d.senderMatches ? <Chip tone="matched">sender matches</Chip> : null}
         {d.senderConflicts ? <Chip tone="ambiguous">different sender</Chip> : null}
-        {d.holdsLock ? <Chip tone="matched">holds the lock</Chip> : null}
         {d.withinWindow ? null : <Chip tone="neutral">outside the window</Chip>}
         {candidate.status === 'expired' ? <Chip tone="neutral">intent expired</Chip> : null}
       </div>

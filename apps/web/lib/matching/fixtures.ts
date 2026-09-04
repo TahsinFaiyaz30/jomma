@@ -1,4 +1,4 @@
-import type { CandidateIntent, CandidateLock, ObservedPayment } from './types'
+import type { CandidateIntent, ObservedPayment } from './types'
 
 /**
  * Builders for the matcher suite. Kept out of the test files so the synthetic
@@ -27,17 +27,8 @@ export function payment(overrides: Partial<ObservedPayment> = {}): ObservedPayme
     referenceRaw: 'K7M2',
     transactionType: 'send_money',
     receivedAt: T0,
-    ...overrides,
-  }
-}
-
-export function lock(overrides: Partial<CandidateLock> = {}): CandidateLock {
-  return {
-    id: 'lock-1',
-    receivingAccountId: ACCOUNT_A,
-    amountCents: 120_000,
-    status: 'active',
-    expiresAt: minutesAfter(T0, 5),
+    // The provider's own clock, which the window is read from.
+    occurredAt: T0,
     ...overrides,
   }
 }
@@ -56,7 +47,6 @@ export function intent(overrides: Partial<CandidateIntent> = {}): CandidateInten
     payClickedAt: minutesAfter(T0, -2),
     expiresAt: minutesAfter(T0, 3),
     status: 'open',
-    lock: null,
     ...overrides,
   }
 }

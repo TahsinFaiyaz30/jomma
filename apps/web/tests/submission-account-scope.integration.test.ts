@@ -2,7 +2,6 @@ import { and, eq } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { db, pool } from '@/lib/db/client'
 import {
-  amountLocks,
   incomingPayments,
   orderPayments,
   paymentIntents,
@@ -44,7 +43,6 @@ afterAll(async () => {
   for (const intent of intents) {
     await db.delete(orderPayments).where(eq(orderPayments.intentId, intent.id))
     await db.delete(paymentSubmissions).where(eq(paymentSubmissions.intentId, intent.id))
-    await db.delete(amountLocks).where(eq(amountLocks.intentId, intent.id))
   }
   await db.delete(paymentIntents).where(eq(paymentIntents.clientReference, CLIENT_REF))
   await db.delete(incomingPayments).where(eq(incomingPayments.trxId, FOREIGN_TRX))

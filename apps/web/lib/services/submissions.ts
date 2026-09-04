@@ -11,7 +11,7 @@ import {
   type receivingAccounts,
 } from '@/lib/db/schema'
 import { sameMsisdn } from '@/lib/matching'
-import { AlreadyAppliedError, applyPayment, LockRaceError } from './apply'
+import { AlreadyAppliedError, applyPayment } from './apply'
 import { audit } from './audit'
 import { minutesAgo } from './time'
 
@@ -276,7 +276,6 @@ async function resolveFound(
     )
   } catch (error) {
     if (error instanceof AlreadyAppliedError) throw ApiError.duplicateSubmission()
-    if (error instanceof LockRaceError) throw ApiError.lockTaken()
     throw error
   }
 

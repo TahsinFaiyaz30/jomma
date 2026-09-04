@@ -8,6 +8,7 @@ import { StatusDot } from '@/components/status'
 import { ThemeSegmented } from '@/components/theme-toggle'
 import { db } from '@/lib/db/client'
 import { incomingPayments } from '@/lib/db/schema'
+import { REF_CODE_LENGTH } from '@/lib/services/refs'
 import { QUEUE_STALE_HOURS, UTILIZATION_STOP, UTILIZATION_WARN } from '@/lib/thresholds'
 
 export const metadata: Metadata = { title: 'Settings' }
@@ -206,8 +207,8 @@ export default async function SettingsPage() {
                 value={`${config.INTENT_DEFAULT_TTL_SECONDS}s default · ${config.INTENT_MAX_TTL_SECONDS}s max`}
               />
               <ConfigRow
-                label="Reference cooldown"
-                value={`${Math.round(config.REF_CODE_COOLDOWN_SECONDS / 3600)} h`}
+                label="Reference code"
+                value={`${REF_CODE_LENGTH} characters, never reused`}
               />
               <ConfigRow
                 label="Device IP allowlist"

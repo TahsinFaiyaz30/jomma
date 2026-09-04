@@ -1,22 +1,38 @@
 import { randomInt } from 'node:crypto'
-import { env } from '@jomma/shared/env'
-import { and, eq, gt, or, sql } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { Database, Tx } from '@/lib/db/client'
 import { paymentRefs } from '@/lib/db/schema'
 
 /**
  * Reference codes.
  *
- * Four characters from a 32-symbol alphabet: ~1M combinations, which is ample
- * against the handful of codes open at any moment and short enough that a buyer
- * will actually type it into the bKash reference field.
+ * Eight characters from a 31-symbol alphabet: 31^8, about 853 billion. A
+ * provider's reference field takes far more than eight, so length is the
+ * cheapest entropy available and there is no reason to be stingy with it.
+ *
+ * **A code is never issued twice.** Not once per open intent, not once per
+ * payer, not once per provider — once, ever. That is a unique index across the
+ * whole table rather than a probability argument, so it holds however many
+ * codes are drawn. The generator can still collide; the database catches it and
+ * the loop draws again, which means every code that reaches a buyer is provably
+ * distinct from every code that ever has.
+ *
+ * This replaced a 24-hour cooldown after expiry. A cooldown only narrowed the
+ * window in which a late payment could land on the next buyer holding the same
+ * code. Permanent uniqueness closes it.
  *
  * I, L, O, 0 and 1 are excluded. A buyer reading a code off a screen and typing
- * it on a phone keypad confuses those constantly, and every confusion costs a
- * Levenshtein-1 fuzzy match at best and a manual review at worst.
+ * it on a phone keypad confuses those constantly, and every confusion is a
+ * payment that does not match automatically.
+ *
+ * No punctuation, deliberately. `normalizeRef` strips non-alphanumerics before
+ * comparing, so a symbol in the code would be discarded by our own matcher, and
+ * whether a provider's field preserves one is unverified. It would buy entropy
+ * we do not need at the cost of transcription errors we cannot afford. Matching
+ * is case-insensitive — both sides are upper-cased first.
  */
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-export const REF_CODE_LENGTH = 4
+export const REF_CODE_LENGTH = 8
 export const REF_CODE_SPACE = ALPHABET.length ** REF_CODE_LENGTH
 
 const MAX_ATTEMPTS = 12
@@ -39,53 +55,24 @@ export class RefPoolExhausted extends Error {
 /**
  * Allocates a code and writes the row, inside the caller's transaction.
  *
- * Two constraints, not one:
- *
- * - The partial unique index rejects a code that is currently `open`.
- * - `cooldownUntil` keeps a code out of circulation for 24 hours after it
- *   expires, so a buyer who pays late cannot land on the next buyer who happened
- *   to draw the same four characters.
- *
- * Both are checked up front and the unique index is relied on to settle races,
- * so two concurrent creates can never both win the same code.
+ * The unique index is the guarantee, not the pre-check. Any check-then-insert
+ * leaves a window between the two, so the insert is simply attempted and a
+ * 23505 means somebody drew the same code first — draw again. Twelve attempts
+ * against 853 billion values is not a limit anybody reaches; it exists so a
+ * genuinely broken generator fails loudly instead of spinning forever.
  */
 export async function allocateRefCode(
   tx: Database | Tx,
   intentId: string,
   expiresAt: Date,
-  now: Date = new Date(),
 ): Promise<string> {
-  const cooldownSeconds = env().REF_CODE_COOLDOWN_SECONDS
-  const cooldownUntil = new Date(expiresAt.getTime() + cooldownSeconds * 1000)
-
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const code = randomRefCode()
 
-    const blocked = await tx
-      .select({ id: paymentRefs.id })
-      .from(paymentRefs)
-      .where(
-        and(
-          eq(paymentRefs.code, code),
-          or(eq(paymentRefs.status, 'open'), gt(paymentRefs.cooldownUntil, now)),
-        ),
-      )
-      .limit(1)
-
-    if (blocked.length > 0) continue
-
     try {
-      await tx.insert(paymentRefs).values({
-        code,
-        intentId,
-        status: 'open',
-        expiresAt,
-        cooldownUntil,
-      })
+      await tx.insert(paymentRefs).values({ code, intentId, status: 'open', expiresAt })
       return code
     } catch (error) {
-      // 23505 = unique_violation. Another request took this code between the
-      // check and the insert; draw again.
       if (isUniqueViolation(error)) continue
       throw error
     }
@@ -94,7 +81,7 @@ export async function allocateRefCode(
   throw new RefPoolExhausted()
 }
 
-/** Marks the code consumed. The cooldown clock keeps running from expiry. */
+/** Marks the code consumed. It never returns to circulation. */
 export async function consumeRefCode(tx: Database | Tx, intentId: string, now = new Date()) {
   await tx
     .update(paymentRefs)
@@ -103,15 +90,10 @@ export async function consumeRefCode(tx: Database | Tx, intentId: string, now = 
 }
 
 /** Cancel and expiry both land here: the code stops matching immediately. */
-export async function expireRefCode(tx: Database | Tx, intentId: string, now = new Date()) {
+export async function expireRefCode(tx: Database | Tx, intentId: string) {
   await tx
     .update(paymentRefs)
-    .set({
-      status: 'expired',
-      cooldownUntil: sql`greatest(${paymentRefs.cooldownUntil}, ${new Date(
-        now.getTime() + env().REF_CODE_COOLDOWN_SECONDS * 1000,
-      ).toISOString()}::timestamptz)`,
-    })
+    .set({ status: 'expired' })
     .where(and(eq(paymentRefs.intentId, intentId), eq(paymentRefs.status, 'open')))
 }
 
@@ -119,10 +101,7 @@ export async function expireRefCode(tx: Database | Tx, intentId: string, now = n
 export async function extendRefCode(tx: Database | Tx, intentId: string, expiresAt: Date) {
   await tx
     .update(paymentRefs)
-    .set({
-      expiresAt,
-      cooldownUntil: new Date(expiresAt.getTime() + env().REF_CODE_COOLDOWN_SECONDS * 1000),
-    })
+    .set({ expiresAt })
     .where(and(eq(paymentRefs.intentId, intentId), eq(paymentRefs.status, 'open')))
 }
 

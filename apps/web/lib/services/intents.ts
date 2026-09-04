@@ -1,13 +1,12 @@
 import { createHash } from 'node:crypto'
 import { fromPublicId, toPublicId } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
-import { and, desc, eq, gt, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { ApiError } from '@/lib/api/errors'
 import type { CreateIntentInput } from '@/lib/api/schemas'
-import type { Tx } from '@/lib/db/client'
 import { db } from '@/lib/db/client'
-import { amountLocks, idempotencyKeys, paymentIntents, paymentRefs } from '@/lib/db/schema'
-import { listAccountHealth, reclaimExpiredLock, routableAccounts } from './accounts'
+import { idempotencyKeys, paymentIntents, paymentRefs } from '@/lib/db/schema'
+import { listAccountHealth, routableAccounts } from './accounts'
 import { audit } from './audit'
 import { queueEvent } from './events'
 import { getInstalments } from './instalments'
@@ -96,12 +95,23 @@ export async function createIntent(options: {
   }
 
   /*
-   * Try each healthy account in routing order. A 409 on the lock means another
-   * buyer is already being asked for this exact amount on this number, which is
-   * a reason to try the next account — not to fail the request.
+   * Try each healthy account in routing order.
+   *
+   * There used to be an exclusive claim on (account, amount) here, so two
+   * buyers could never be asked for the same number of taka on the same number
+   * at once. That existed because the amount was how a reference-less payment
+   * got identified — and it is gone, along with the thing it protected. The
+   * reference and the sender identify a payment now, so two customers buying
+   * the same product at the same price are perfectly distinguishable and there
+   * is nothing to hold.
+   *
+   * Keeping it would have meant the third customer to want a ৳500 item could
+   * not check out at all, which is not a trade-off, it is a bug.
+   *
+   * The loop remains because reference-code allocation can still lose a race,
+   * and because falling through to another account is the right answer when the
+   * first is momentarily out of codes.
    */
-  let lastFailure: 'lock' | 'refs' | null = null
-
   for (const account of eligible) {
     try {
       const created = await db.transaction(async (tx) => {
@@ -127,17 +137,7 @@ export async function createIntent(options: {
           .returning()
         if (!intent) throw new Error('Insert returned no intent')
 
-        await reclaimExpiredLock(tx, account.id, options.input.amount, now)
-
-        await tx.insert(amountLocks).values({
-          receivingAccountId: account.id,
-          amountCents: options.input.amount,
-          intentId: intent.id,
-          status: 'active',
-          expiresAt,
-        })
-
-        const refCode = await allocateRefCode(tx, intent.id, expiresAt, now)
+        const refCode = await allocateRefCode(tx, intent.id, expiresAt)
 
         await audit(tx, {
           action: 'intent.created',
@@ -176,28 +176,25 @@ export async function createIntent(options: {
       return { intent: view, replayed: false }
     } catch (error) {
       if (isUniqueViolation(error)) {
-        // Either the amount lock or the idempotency key. If it was the key, a
-        // concurrent request with the same key won — replay its result.
+        /*
+         * The idempotency key, now that there is no amount lock to collide on.
+         * A concurrent request with the same key won the race — replay its
+         * result rather than allocating a second reference code.
+         */
         if (options.idempotencyKey) {
           const replay = await replayIdempotent(options.appId, options.idempotencyKey, requestHash)
           if (replay) return { intent: replay, replayed: true }
         }
-        lastFailure = 'lock'
         continue
       }
-      if (error instanceof RefPoolExhausted) {
-        lastFailure = 'refs'
-        continue
-      }
+      if (error instanceof RefPoolExhausted) continue
       throw error
     }
   }
 
-  throw ApiError.noCapacity(
-    lastFailure === 'refs'
-      ? 'The reference code pool is momentarily exhausted. Retry shortly.'
-      : 'Every healthy account already has an open lock on that exact amount.',
-  )
+  // Only one way to get here now: every eligible account was momentarily out of
+  // reference codes. Rare, and it clears on its own as open intents settle.
+  throw ApiError.noCapacity('The reference code pool is momentarily exhausted. Retry shortly.')
 }
 
 /** Same key, same body, inside 24h -> the original intent, not a second code. */
@@ -328,8 +325,7 @@ export async function cancelIntent(options: {
 
     if (!updated) return
 
-    await releaseLocks(tx, options.intentId, now)
-    await expireRefCode(tx, options.intentId, now)
+    await expireRefCode(tx, options.intentId)
 
     await audit(tx, {
       action: 'intent.cancelled',
@@ -367,21 +363,14 @@ export async function cancelIntent(options: {
   return view
 }
 
-export async function releaseLocks(tx: Tx, intentId: string, now = new Date()): Promise<void> {
-  await tx
-    .update(amountLocks)
-    .set({ status: 'released', releasedAt: now })
-    .where(and(eq(amountLocks.intentId, intentId), eq(amountLocks.status, 'active')))
-}
-
 /* ── Extend ───────────────────────────────────────────────────────────────── */
 
 /**
  * Holds an order while a buyer tops up an underpayment.
  *
- * Fails with `lock_taken` when the intent's own lock has lapsed and another
- * intent has since claimed that amount on that account — extending would
- * otherwise silently create the collision the lock exists to prevent.
+ * Used to be able to fail with `lock_taken`, when another intent had claimed
+ * the same amount on the same account in the meantime. There are no amount
+ * claims any more, so extending is now only refused for the intent's own state.
  */
 export async function extendIntent(options: {
   intentId: string
@@ -400,32 +389,6 @@ export async function extendIntent(options: {
 
     if (intent.status !== 'open' && intent.status !== 'partial' && intent.status !== 'expired') {
       throw ApiError.lockTaken(`An intent in status "${intent.status}" cannot be extended.`)
-    }
-
-    const ownLock = await tx.query.amountLocks.findFirst({
-      where: and(
-        eq(amountLocks.intentId, options.intentId),
-        eq(amountLocks.status, 'active'),
-        gt(amountLocks.expiresAt, now),
-      ),
-    })
-
-    if (ownLock) {
-      await tx.update(amountLocks).set({ expiresAt }).where(eq(amountLocks.id, ownLock.id))
-    } else {
-      await reclaimExpiredLock(tx, intent.receivingAccountId, intent.amountCents, now)
-      try {
-        await tx.insert(amountLocks).values({
-          receivingAccountId: intent.receivingAccountId,
-          amountCents: intent.amountCents,
-          intentId: options.intentId,
-          status: 'active',
-          expiresAt,
-        })
-      } catch (error) {
-        if (isUniqueViolation(error)) throw ApiError.lockTaken()
-        throw error
-      }
     }
 
     await tx
@@ -485,8 +448,7 @@ export async function expireDueIntents(limit = 200): Promise<number> {
       if (!updated) return
       expired += 1
 
-      await releaseLocks(tx, row.id, now)
-      await expireRefCode(tx, row.id, now)
+      await expireRefCode(tx, row.id)
 
       await audit(tx, {
         action: 'intent.expired',

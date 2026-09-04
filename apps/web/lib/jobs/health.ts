@@ -3,7 +3,7 @@ import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
 import { db, schema } from '@/lib/db/client'
 import { logger } from '@/lib/logger'
 
-const { amountLocks, idempotencyKeys, incomingPayments, notifierEvents, receivingAccounts } = schema
+const { idempotencyKeys, incomingPayments, notifierEvents, receivingAccounts } = schema
 
 /**
  * Health sweeps.
@@ -18,25 +18,6 @@ const { amountLocks, idempotencyKeys, incomingPayments, notifierEvents, receivin
  * hosting without a persistent background process a configuration choice rather
  * than a different system.
  */
-
-/**
- * Locks whose TTL has passed.
- *
- * The partial unique index keys on `status = 'active'`, so a lapsed lock would
- * block a legitimate new claim on the same (account, amount). The create path
- * also reclaims inline, which makes this a tidiness job rather than something
- * correctness depends on.
- */
-export async function sweepExpiredLocks(): Promise<number> {
-  const released = await db
-    .update(amountLocks)
-    .set({ status: 'expired' })
-    .where(and(eq(amountLocks.status, 'active'), lt(amountLocks.expiresAt, new Date())))
-    .returning({ id: amountLocks.id })
-
-  if (released.length > 0) logger.debug({ count: released.length }, 'expired amount locks')
-  return released.length
-}
 
 /**
  * A phone that is switched off cannot tell you it is switched off, so absence

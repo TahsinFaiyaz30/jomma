@@ -4,11 +4,10 @@ import type { Provider } from '@jomma/shared'
 import { and, eq, isNull } from 'drizzle-orm'
 import { ApiError } from '@/lib/api/errors'
 import { db } from '@/lib/db/client'
-import { amountLocks, orderPayments, paymentIntents } from '@/lib/db/schema'
+import { orderPayments, paymentIntents } from '@/lib/db/schema'
 import { PARSERS } from '@/lib/parsers'
-import { listAccountHealth, reclaimExpiredLock, routableAccounts } from './accounts'
+import { listAccountHealth, routableAccounts } from './accounts'
 import { audit } from './audit'
-import { isUniqueViolation } from './refs'
 
 /**
  * Choosing how to pay, on Jomma's own page.
@@ -96,10 +95,10 @@ export async function listCheckoutMethods(intentId: string): Promise<CheckoutMet
  * Move an open, unpaid intent to a different provider.
  *
  * The reference code survives — it belongs to the intent, not the account — so a
- * buyer who already wrote the code down does not have to start again. The lock
- * does not: it is keyed on (account, amount) and has to be released on the old
- * account and taken on the new one, which can fail if another buyer is mid-flow
- * for the same amount there.
+ * buyer who already wrote the code down does not have to start again. There is
+ * nothing else to move: the amount claim that used to be released here and
+ * re-taken on the new account is gone, which also means this can no longer fail
+ * because somebody else is mid-flow at the same price.
  */
 export async function switchCheckoutMethod(options: {
   intentId: string
@@ -144,54 +143,28 @@ export async function switchCheckoutMethod(options: {
   const eligible = routableAccounts(accounts, options.provider)
   if (eligible.length === 0) throw ApiError.noHealthyAccount()
 
-  for (const account of eligible) {
-    try {
-      await db.transaction(async (tx) => {
-        const now = new Date()
+  const account = eligible[0]
+  if (!account) throw ApiError.noHealthyAccount()
 
-        // Release the old claim first, so switching back and forth does not
-        // leave the buyer holding two locks at the same amount.
-        await tx
-          .update(amountLocks)
-          .set({ status: 'released' })
-          .where(and(eq(amountLocks.intentId, intent.id), eq(amountLocks.status, 'active')))
+  await db.transaction(async (tx) => {
+    await tx
+      .update(paymentIntents)
+      .set({ receivingAccountId: account.id })
+      .where(eq(paymentIntents.id, intent.id))
 
-        await reclaimExpiredLock(tx, account.id, intent.amountCents, now)
+    await audit(tx, {
+      action: 'intent.rerouted',
+      actorType: 'client',
+      appId: intent.appId,
+      intentId: intent.id,
+      requestId: options.requestId ?? null,
+      payload: {
+        from: intent.receivingAccount.provider,
+        to: options.provider,
+        receiving_account_id: account.id,
+      },
+    })
+  })
 
-        await tx.insert(amountLocks).values({
-          receivingAccountId: account.id,
-          amountCents: intent.amountCents,
-          intentId: intent.id,
-          status: 'active',
-          expiresAt: intent.expiresAt,
-        })
-
-        await tx
-          .update(paymentIntents)
-          .set({ receivingAccountId: account.id })
-          .where(eq(paymentIntents.id, intent.id))
-
-        await audit(tx, {
-          action: 'intent.rerouted',
-          actorType: 'client',
-          appId: intent.appId,
-          intentId: intent.id,
-          requestId: options.requestId ?? null,
-          payload: {
-            from: intent.receivingAccount.provider,
-            to: options.provider,
-            receiving_account_id: account.id,
-          },
-        })
-      })
-
-      return { changed: true }
-    } catch (error) {
-      // Another buyer holds this amount on this account. Try the next one.
-      if (isUniqueViolation(error)) continue
-      throw error
-    }
-  }
-
-  throw ApiError.noHealthyAccount()
+  return { changed: true }
 }

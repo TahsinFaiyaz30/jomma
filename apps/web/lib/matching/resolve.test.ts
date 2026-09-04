@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACCOUNT_A, ACCOUNT_B, intent, lock, minutesAfter, payment, T0 } from './fixtures'
+import { ACCOUNT_A, ACCOUNT_B, intent, minutesAfter, payment, T0 } from './fixtures'
 import { resolveMatch } from './resolve'
 import { score, WEIGHTS } from './score'
 
@@ -48,7 +48,6 @@ describe('the amount gate', () => {
     const candidate = intent({
       refCode: 'K7M2',
       expectedMsisdn: '8801712345678',
-      lock: lock(),
     })
 
     const result = resolveMatch(payment({ amountCents: 119_999, referenceRaw: 'K7M3' }), [
@@ -60,7 +59,7 @@ describe('the amount gate', () => {
   })
 
   it('still refuses an inexact amount with no reference at all', () => {
-    const candidate = intent({ expectedMsisdn: '8801712345678', lock: lock() })
+    const candidate = intent({ expectedMsisdn: '8801712345678' })
     const result = resolveMatch(payment({ amountCents: 119_999, referenceRaw: null }), [candidate])
 
     expect(result.kind).toBe('unmatched')
@@ -76,7 +75,6 @@ describe('the amount gate', () => {
   it('rejects a payment that landed on a different receiving account', () => {
     const candidate = intent({
       receivingAccountId: ACCOUNT_B,
-      lock: lock({ receivingAccountId: ACCOUNT_B }),
     })
     const result = resolveMatch(payment({ receivingAccountId: ACCOUNT_A }), [candidate])
 
@@ -152,9 +150,7 @@ describe('reference matching', () => {
 
   it('refuses a payment with no reference at all', () => {
     // The buyer skipped the field. Recoverable by TrxID, never automatically.
-    const result = resolveMatch(payment({ referenceRaw: null }), [
-      intent({ refCode: 'K7M2', lock: lock() }),
-    ])
+    const result = resolveMatch(payment({ referenceRaw: null }), [intent({ refCode: 'K7M2' })])
 
     expect(result.kind).toBe('unmatched')
   })
@@ -186,7 +182,73 @@ describe('the sender requirement', () => {
   })
 })
 
-describe('sender and lock signals', () => {
+describe('the payment window', () => {
+  /*
+   * A payment has to have happened during this checkout. Read off the message's
+   * own timestamp, because a notification can be delayed or captured late but
+   * the time the provider wrote never changes.
+   *
+   * Both ends are real protection. Reference codes are reissued after their
+   * cooldown, so without an upper bound a payment carrying a recycled code
+   * could attach to an intent that had nothing to do with it.
+   */
+  it('refuses money that moved before the buyer started checkout', () => {
+    const result = resolveMatch(
+      // An hour before this intent existed. Perfect reference, right sender.
+      payment({ occurredAt: minutesAfter(T0, -60) }),
+      [intent({ payClickedAt: minutesAfter(T0, -2), expiresAt: minutesAfter(T0, 3) })],
+    )
+
+    expect(result.kind).toBe('unmatched')
+  })
+
+  it('refuses money that moved after the intent expired', () => {
+    const result = resolveMatch(payment({ occurredAt: minutesAfter(T0, 60) }), [
+      intent({ payClickedAt: minutesAfter(T0, -2), expiresAt: minutesAfter(T0, 3) }),
+    ])
+
+    expect(result.kind).toBe('unmatched')
+  })
+
+  it('accepts money inside the window', () => {
+    const result = resolveMatch(payment({ occurredAt: T0 }), [
+      intent({ payClickedAt: minutesAfter(T0, -2), expiresAt: minutesAfter(T0, 3) }),
+    ])
+
+    expect(result.kind).toBe('matched')
+  })
+
+  it('tolerates a payment a moment before the intent committed', () => {
+    // The orphan case, plus bKash writing minutes rather than seconds. Both can
+    // put a legitimate payment fractionally before the start.
+    const result = resolveMatch(payment({ occurredAt: minutesAfter(T0, -3) }), [
+      intent({ payClickedAt: T0, expiresAt: minutesAfter(T0, 5) }),
+    ])
+
+    expect(result.kind).toBe('matched')
+  })
+
+  it('falls back to the server clock when the message had no readable date', () => {
+    const result = resolveMatch(payment({ occurredAt: null, receivedAt: minutesAfter(T0, -60) }), [
+      intent({ payClickedAt: minutesAfter(T0, -2), expiresAt: minutesAfter(T0, 3) }),
+    ])
+
+    expect(result.kind).toBe('unmatched')
+  })
+
+  it('prefers the message clock over a late capture', () => {
+    // Captured an hour late — the notification sat on a phone that was off —
+    // but the provider says it happened inside the window. That is the one
+    // that counts.
+    const result = resolveMatch(payment({ occurredAt: T0, receivedAt: minutesAfter(T0, 60) }), [
+      intent({ payClickedAt: minutesAfter(T0, -2), expiresAt: minutesAfter(T0, 3) }),
+    ])
+
+    expect(result.kind).toBe('matched')
+  })
+})
+
+describe('ranking signals', () => {
   /*
    * Sender-plus-lock used to be enough on its own — it was how a buyer who
    * skipped the reference field still got matched. It is not any more.
@@ -198,7 +260,7 @@ describe('sender and lock signals', () => {
    */
   it('refuses sender plus lock when the buyer skipped the reference field', () => {
     const result = resolveMatch(payment({ referenceRaw: null }), [
-      intent({ refCode: 'K7M2', expectedMsisdn: '8801712345678', lock: lock() }),
+      intent({ refCode: 'K7M2', expectedMsisdn: '8801712345678' }),
     ])
 
     expect(result.kind).toBe('unmatched')
@@ -206,7 +268,7 @@ describe('sender and lock signals', () => {
 
   it('refuses a no-reference payment when the sender is undeclared too', () => {
     const result = resolveMatch(payment({ referenceRaw: null, senderMsisdn: '8801999999999' }), [
-      intent({ expectedMsisdn: null, lock: lock() }),
+      intent({ expectedMsisdn: null }),
     ])
 
     expect(result.kind).toBe('unmatched')
@@ -217,22 +279,10 @@ describe('sender and lock signals', () => {
    * own, but they rank candidates and they are what an admin reads in the queue
    * to understand why something landed there.
    */
-  it('ignores a lock that had already expired when the money arrived', () => {
-    const expired = lock({ expiresAt: minutesAfter(T0, -1) })
-    const scored = score(payment(), intent({ lock: expired }))
-    expect(scored.signals.activeLock).toBe(false)
-  })
-
-  it('ignores a lock that has already been consumed', () => {
-    const consumed = lock({ status: 'consumed' })
-    const scored = score(payment(), intent({ lock: consumed }))
-    expect(scored.signals.activeLock).toBe(false)
-  })
-
   it('drops the recency signal outside the ten-minute window', () => {
-    const scored = score(payment(), intent({ payClickedAt: minutesAfter(T0, -11), lock: lock() }))
+    const scored = score(payment(), intent({ payClickedAt: minutesAfter(T0, -11) }))
     expect(scored.signals.withinWindow).toBe(false)
-    expect(scored.score).toBe(WEIGHTS.referenceExact + WEIGHTS.senderMatch + WEIGHTS.activeLock)
+    expect(scored.score).toBe(WEIGHTS.referenceExact + WEIGHTS.senderMatch)
   })
 
   it('still counts recency for a payment that arrived before the intent committed', () => {
@@ -251,7 +301,7 @@ describe('the ambiguity rule', () => {
    */
   it('escalates rather than choosing between two admissible candidates', () => {
     const result = resolveMatch(payment(), [
-      intent({ id: 'int-a', refCode: 'K7M2', expectedMsisdn: '8801712345678', lock: lock() }),
+      intent({ id: 'int-a', refCode: 'K7M2', expectedMsisdn: '8801712345678' }),
       intent({ id: 'int-b', refCode: 'K7M2', expectedMsisdn: '8801712345678' }),
     ])
 
@@ -297,7 +347,6 @@ describe('payments nothing claims', () => {
       intent({
         refCode: 'K7M2',
         expectedMsisdn: '8801712345678',
-        lock: lock(),
       }),
     ])
 
@@ -306,7 +355,7 @@ describe('payments nothing claims', () => {
       expect(result.reason).toBe('wrong_transaction_type')
       // The score is still recorded so the reviewer sees it was otherwise perfect.
       expect(result.candidates[0]!.score).toBe(
-        WEIGHTS.referenceExact + WEIGHTS.senderMatch + WEIGHTS.activeLock + WEIGHTS.withinWindow,
+        WEIGHTS.referenceExact + WEIGHTS.senderMatch + WEIGHTS.withinWindow,
       )
     }
   })

@@ -7,7 +7,6 @@ import {
   captureSourceEnum,
   ingestAdapterEnum,
   intentStatusEnum,
-  lockStatusEnum,
   matchConfidenceEnum,
   matchedByEnum,
   parseStatusEnum,
@@ -87,10 +86,12 @@ export const paymentIntents = pgTable(
 )
 
 /**
- * A 4-character reference code, unique among open ones.
+ * An 8-character reference code, unique across the whole table.
  *
- * The partial index is the whole mechanism: a code can be reused later, but never
- * while another intent is still waiting on it.
+ * Not "unique among the open ones" — unique full stop, for all time. A code is
+ * never issued to a second intent, which is what makes it safe to treat as the
+ * identifier: now that the amount identifies nothing, this is the thing that
+ * says whose money a payment is.
  */
 export const paymentRefs = pgTable(
   'payment_refs',
@@ -103,54 +104,12 @@ export const paymentRefs = pgTable(
     status: refStatusEnum('status').notNull().default('open'),
     expiresAt: timestampTz('expires_at').notNull(),
     consumedAt: timestampTz('consumed_at'),
-    /** A code is not reissued within 24h of expiry, so a late payer cannot
-        collide with the next buyer who happened to draw the same four letters. */
-    cooldownUntil: timestampTz('cooldown_until'),
     createdAt: createdAt(),
   },
   (table) => [
-    uniqueIndex('ux_payment_refs_code_open').on(table.code).where(sql`status = 'open'`),
-    // Fuzzy matching scans open codes; cooldown lookups scan recently expired.
-    index('ix_payment_refs_code').on(table.code, table.status),
+    // Total, not partial. A code belongs to exactly one intent, ever.
+    uniqueIndex('ux_payment_refs_code').on(table.code),
     index('ix_payment_refs_intent').on(table.intentId),
-    index('ix_payment_refs_cooldown').on(table.cooldownUntil),
-  ],
-)
-
-/**
- * An exclusive claim on (account, amount) so two buyers are never asked for the
- * same number of taka on the same number at the same time.
- *
- * docs/matching.md specifies `unique (receiving_account_id, amount_cents) where
- * expires_at > now()`. Postgres rejects that: index predicates must be
- * IMMUTABLE and `now()` is STABLE. The equivalent guarantee is an explicit
- * status column plus a worker sweep that flips `active` -> `expired`. Read paths
- * still test `expires_at`, so a lock the sweeper has not reached yet is never
- * treated as held.
- */
-export const amountLocks = pgTable(
-  'amount_locks',
-  {
-    id: primaryId(),
-    receivingAccountId: fkId('receiving_account_id')
-      .notNull()
-      .references(() => receivingAccounts.id, { onDelete: 'cascade' }),
-    amountCents: poisha('amount_cents').notNull(),
-    intentId: fkId('intent_id')
-      .notNull()
-      .references(() => paymentIntents.id, { onDelete: 'cascade' }),
-    status: lockStatusEnum('status').notNull().default('active'),
-    expiresAt: timestampTz('expires_at').notNull(),
-    consumedAt: timestampTz('consumed_at'),
-    releasedAt: timestampTz('released_at'),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    uniqueIndex('ux_amount_locks_active')
-      .on(table.receivingAccountId, table.amountCents)
-      .where(sql`status = 'active'`),
-    index('ix_amount_locks_intent').on(table.intentId),
-    index('ix_amount_locks_sweep').on(table.status, table.expiresAt),
   ],
 )
 
@@ -316,7 +275,6 @@ export const paymentIntentsRelations = relations(paymentIntents, ({ one, many })
     references: [receivingAccounts.id],
   }),
   refs: many(paymentRefs),
-  locks: many(amountLocks),
   applications: many(orderPayments),
   submissions: many(paymentSubmissions),
 }))
@@ -325,17 +283,6 @@ export const paymentRefsRelations = relations(paymentRefs, ({ one }) => ({
   intent: one(paymentIntents, {
     fields: [paymentRefs.intentId],
     references: [paymentIntents.id],
-  }),
-}))
-
-export const amountLocksRelations = relations(amountLocks, ({ one }) => ({
-  intent: one(paymentIntents, {
-    fields: [amountLocks.intentId],
-    references: [paymentIntents.id],
-  }),
-  account: one(receivingAccounts, {
-    fields: [amountLocks.receivingAccountId],
-    references: [receivingAccounts.id],
   }),
 }))
 

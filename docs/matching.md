@@ -435,6 +435,12 @@ matcher about why something was refused.
 3. **The sender.** The buyer declares which number they will pay from and the
    message says which number paid. Disagree, or never declared, and the payer is
    not identified.
+4. **The time.** The payment must have happened between the buyer starting
+   checkout and the intent expiring, read from the provider's own timestamp in
+   the message rather than from when Jomma saw it — a notification can be
+   delayed or captured late, but the time bKash wrote never changes. Five
+   minutes of slack each side absorbs minute-granularity timestamps and the
+   orphan case where money lands just before the intent commits.
 
 The **amount is not a requirement**. With the reference and sender established
 the payer is known, and how much arrived is arithmetic: short leaves a balance
@@ -470,3 +476,58 @@ money that landed on a different account resolves as not-found for this intent,
 and a payment from a number the intent never declared is escalated to a human
 rather than credited — the money is real, so refusing it would strand it, but
 nobody is credited until a person has looked.
+
+
+---
+
+## There is no amount lock
+
+An earlier design held `(receiving_account, amount)` exclusively among open
+intents, so two buyers were never asked for the same number of taka on the same
+number at once. It existed for one reason: the amount was how a payment with no
+reference got identified, and that only works if exactly one intent is expecting
+it.
+
+Both halves are gone. Reference-less payments no longer auto-match at all, so
+nothing identifies by amount, and the exclusivity was pure cost — with two
+receiving accounts, only two customers could ever be buying the same ৳500 item
+at once, and the third got `no_capacity` and could not check out.
+
+Removing it took the concurrency guard in `applyPayment` with it, since the
+lock's conditional update had been serialising concurrent applications to one
+intent as a side effect. That is now an explicit `SELECT … FOR UPDATE` on the
+intent row, which is what it was really protecting: without it, two payments
+landing at once would each miss the other's uncommitted row when recomputing
+`received_amount_cents`, and the second commit would erase the first.
+
+
+---
+
+## Reference codes
+
+Eight characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789` — 31 symbols, so 31^8,
+about 853 billion. I, L, O, 0 and 1 are left out because a buyer reading a code
+off a screen and typing it on a phone keypad confuses them constantly, and every
+confusion is a payment that does not match automatically.
+
+**A code is never issued twice.** Not once per open intent, not once per payer,
+not once per provider — once, ever. `ux_payment_refs_code` is a total unique
+index, so this is a database guarantee rather than a probability argument. The
+generator can still draw a collision; the insert fails with 23505 and the loop
+draws again, which means every code that reaches a buyer is provably distinct
+from every code that ever has.
+
+This replaced a 24-hour cooldown after expiry, which only narrowed the window in
+which a late payment could land on the next buyer holding the same code.
+
+Comparison is case-insensitive: `normalizeRef` upper-cases and strips
+non-alphanumerics on both sides before comparing.
+
+### Why there is no punctuation in a code
+
+It would be stripped by our own normaliser before matching, so it could not
+contribute to identification at all. Whether a provider's reference field
+preserves symbols is also unverified, and they are harder to type accurately on
+a phone. Length is free entropy and does none of that damage — and with
+uniqueness enforced by an index, the entropy is a defence against guessing
+rather than against collision.

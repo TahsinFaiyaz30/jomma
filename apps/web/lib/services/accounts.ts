@@ -4,7 +4,7 @@ import { env } from '@jomma/shared/env'
 import { and, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm'
 import type { Database, Tx } from '@/lib/db/client'
 import { db } from '@/lib/db/client'
-import { amountLocks, incomingPayments, receivingAccounts } from '@/lib/db/schema'
+import { incomingPayments, receivingAccounts } from '@/lib/db/schema'
 import { UTILIZATION_STOP } from '@/lib/thresholds'
 import { minutesAgo, startOfBusinessDay, startOfBusinessMonth } from './time'
 
@@ -123,32 +123,6 @@ export function routableAccounts(
     if (Math.abs(byUtilisation) > 0.001) return byUtilisation
     return randomInt(0, 2) === 0 ? -1 : 1
   })
-}
-
-/**
- * Frees a lock whose TTL has passed but which the worker sweep has not reached.
- *
- * The partial unique index keys on `status = 'active'`, so a stale row would
- * block a legitimate new claim until the next sweep. Reclaiming inline makes the
- * sweeper a tidiness job rather than something correctness depends on.
- */
-export async function reclaimExpiredLock(
-  tx: Database | Tx,
-  receivingAccountId: string,
-  amountCents: number,
-  now: Date = new Date(),
-): Promise<void> {
-  await tx
-    .update(amountLocks)
-    .set({ status: 'expired' })
-    .where(
-      and(
-        eq(amountLocks.receivingAccountId, receivingAccountId),
-        eq(amountLocks.amountCents, amountCents),
-        eq(amountLocks.status, 'active'),
-        sql`${amountLocks.expiresAt} <= ${now.toISOString()}`,
-      ),
-    )
 }
 
 /** Bumps the account's capture clock. Feeds the "no captures for 3 hours" alert. */

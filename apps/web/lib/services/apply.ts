@@ -2,7 +2,7 @@ import type { IntentStatus, MatchConfidence, MatchedBy } from '@jomma/shared'
 import { toPublicId } from '@jomma/shared'
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import type { Tx } from '@/lib/db/client'
-import { amountLocks, incomingPayments, orderPayments, paymentIntents } from '@/lib/db/schema'
+import { incomingPayments, orderPayments, paymentIntents } from '@/lib/db/schema'
 import { audit } from './audit'
 import { queueEvent } from './events'
 import { consumeRefCode, isUniqueViolation } from './refs'
@@ -17,13 +17,6 @@ import { consumeRefCode, isUniqueViolation } from './refs'
  *
  * Must be called inside a transaction.
  */
-
-export class LockRaceError extends Error {
-  constructor() {
-    super('lock_race')
-    this.name = 'LockRaceError'
-  }
-}
 
 export class AlreadyAppliedError extends Error {
   readonly appliedToIntentId: string | null
@@ -57,34 +50,29 @@ export interface ApplyOptions {
 export async function applyPayment(tx: Tx, options: ApplyOptions): Promise<ApplyResult> {
   const now = new Date()
 
-  const intent = await tx.query.paymentIntents.findFirst({
-    where: eq(paymentIntents.id, options.intentId),
-  })
-  if (!intent) throw new Error(`Unknown intent ${options.intentId}`)
-
   /*
-   * Race guard 1 — the lock.
+   * Race guard 1 — the intent row itself.
    *
-   * A conditional update, exactly as docs/matching.md specifies: two
-   * simultaneous approvals both try to flip the same row from `active`, one
-   * updates zero rows and rolls back.
+   * `FOR UPDATE`, so concurrent applications against one intent are serialised.
+   * This has to be the first statement that touches the row: everything below
+   * reads the running total, adds to it, and writes it back, and under READ
+   * COMMITTED two transactions doing that at once would each miss the other's
+   * uncommitted insert and the second commit would erase the first payment from
+   * the total. The money would still be in `order_payments`, but the intent
+   * would under-report it and the buyer would be asked to pay again.
    *
-   * An intent with no active lock (an expired one being revived, or a top-up on
-   * a partial) is allowed through — there is nothing to race for.
+   * The amount lock used to serialise this as a side effect — its conditional
+   * update let exactly one concurrent apply win. That lock is gone, so the guard
+   * is now explicit and on the row it was always really protecting.
    */
-  const activeLock = await tx.query.amountLocks.findFirst({
-    where: and(eq(amountLocks.intentId, options.intentId), eq(amountLocks.status, 'active')),
-  })
+  const [intent] = await tx
+    .select()
+    .from(paymentIntents)
+    .where(eq(paymentIntents.id, options.intentId))
+    .for('update')
+    .limit(1)
 
-  if (activeLock) {
-    const won = await tx
-      .update(amountLocks)
-      .set({ status: 'consumed', consumedAt: now })
-      .where(and(eq(amountLocks.id, activeLock.id), eq(amountLocks.status, 'active')))
-      .returning({ id: amountLocks.id })
-
-    if (won.length === 0) throw new LockRaceError()
-  }
+  if (!intent) throw new Error(`Unknown intent ${options.intentId}`)
 
   /*
    * Race guard 2 — the payment.

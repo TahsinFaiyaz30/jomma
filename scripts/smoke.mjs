@@ -28,6 +28,23 @@ const hasSecondDevice = Boolean(deviceToken2 && deviceId2)
 let passed = 0
 let failed = 0
 
+/**
+ * A bKash-style timestamp for *now*, in the dd/mm/yyyy the parser expects.
+ *
+ * Not hardcoded. The matcher requires a payment to have happened between the
+ * buyer starting checkout and the intent expiring, read from the timestamp in
+ * the message — so a fixed date in a fixture stops matching the moment the
+ * calendar moves past it.
+ */
+function bkashStamp(offsetMinutes = 0) {
+  const at = new Date(Date.now() + offsetMinutes * 60_000)
+  const pad = (n) => String(n).padStart(2, '0')
+  return (
+    `${pad(at.getDate())}/${pad(at.getMonth() + 1)}/${at.getFullYear()} ` +
+    `${pad(at.getHours())}:${pad(at.getMinutes())}`
+  )
+}
+
 function check(label, condition, detail = '') {
   if (condition) {
     passed++
@@ -161,7 +178,12 @@ const created = await client(
 
 check('create returns 201', created.status === 201, `got ${created.status}`)
 check('id is prefixed', created.json.id?.startsWith('int_'), created.json.id)
-check('ref code is 4 chars', created.json.ref_code?.length === 4, created.json.ref_code)
+check('ref code is 8 chars', created.json.ref_code?.length === 8, created.json.ref_code)
+check(
+  'and uses no ambiguous characters',
+  /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/.test(created.json.ref_code ?? ''),
+  created.json.ref_code,
+)
 check('request_id present', Boolean(created.json.request_id))
 check('rate limit headers present', created.headers.get('x-ratelimit-limit') !== null)
 
@@ -189,22 +211,19 @@ const collision = await client(
   { amount, client_reference: 'ORD-COLLIDE' },
   { 'idempotency-key': `smoke-collide-${nonce}` },
 )
-if (accountCount === 1) {
-  check(
-    'same amount on the only account is 409',
-    collision.status === 409,
-    `got ${collision.status}`,
-  )
-  check('with code no_capacity', collision.json.error?.code === 'no_capacity')
-} else {
-  // With redundancy the same amount is not a conflict, it is a routing decision.
-  // Section 8 drives that to exhaustion.
-  check(
-    'same amount routes to another account',
-    collision.status === 201,
-    `got ${collision.status}`,
-  )
-}
+// Two buyers owing the same amount is ordinary, not a conflict. There used to
+// be an exclusive claim on (account, amount) and it meant the third customer to
+// buy a given item could not check out at all.
+check(
+  'a second buyer at the same amount is fine',
+  collision.status === 201,
+  `got ${collision.status}`,
+)
+check(
+  'and gets their own reference code',
+  collision.json.ref_code && collision.json.ref_code !== created.json.ref_code,
+  `${created.json.ref_code} vs ${collision.json.ref_code}`,
+)
 
 /* ── 3. Auth and validation ───────────────────────────────────────────────── */
 
@@ -256,7 +275,7 @@ const capture = await captureDevice('POST', '/device/v1/capture', {
       local_id: 'c_smoke_1',
       source: 'notification',
       package: 'com.bKash.customerapp',
-      raw: `You have received Tk ${taka} from 01712345678. Ref ${refCode}. Fee Tk 0.00. TrxID ${trxId} at 03/09/2026 14:35`,
+      raw: `You have received Tk ${taka} from 01712345678. Ref ${refCode}. Fee Tk 0.00. TrxID ${trxId} at ${bkashStamp()}`,
       captured_at: new Date().toISOString(),
     },
   ],
@@ -275,7 +294,7 @@ const duplicate = await captureDevice('POST', '/device/v1/capture', {
     {
       local_id: 'c_smoke_1_sms',
       source: 'sms',
-      raw: `You have received Tk ${taka} from 01712345678. Ref ${refCode}. Fee Tk 0.00. TrxID ${trxId} at 03/09/2026 14:35`,
+      raw: `You have received Tk ${taka} from 01712345678. Ref ${refCode}. Fee Tk 0.00. TrxID ${trxId} at ${bkashStamp()}`,
       captured_at: new Date().toISOString(),
     },
   ],
@@ -363,7 +382,7 @@ await deviceFor(fresh.json.receiving_account?.msisdn)('POST', '/device/v1/captur
       local_id: 'c_smoke_short',
       source: 'notification',
       package: 'com.bKash.customerapp',
-      raw: `You have received Tk ${(shortAmount / 100).toFixed(2)} from 01799999999. Fee Tk 0.00. TrxID ${shortTrx} at 03/09/2026 14:40`,
+      raw: `You have received Tk ${(shortAmount / 100).toFixed(2)} from 01799999999. Fee Tk 0.00. TrxID ${shortTrx} at ${bkashStamp()}`,
       captured_at: new Date().toISOString(),
     },
   ],
@@ -420,21 +439,31 @@ if (hasSecondDevice) {
   )
 
   check('first intent created', first.status === 201, `got ${first.status}`)
-  // The whole point of a second account: the same amount is no longer a 409.
-  check('same amount routes to the second account', second.status === 201, `got ${second.status}`)
-  check(
-    'the two intents are on different accounts',
-    first.json.receiving_account?.msisdn !== second.json.receiving_account?.msisdn,
-    `${first.json.receiving_account?.msisdn} vs ${second.json.receiving_account?.msisdn}`,
-  )
+  check('a second at the same amount is fine', second.status === 201, `got ${second.status}`)
 
-  const third = await client(
-    'POST',
-    '/v1/intents',
-    { amount: foAmount, client_reference: `FO-3-${nonce}` },
-    { 'idempotency-key': `fo-3-${nonce}` },
+  /*
+   * Concurrency at one price is no longer capped by the number of accounts.
+   * With the amount claim gone, ten buyers can want the same item at once.
+   */
+  const rest = await Promise.all(
+    [3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
+      client(
+        'POST',
+        '/v1/intents',
+        { amount: foAmount, client_reference: `FO-${n}-${nonce}` },
+        { 'idempotency-key': `fo-${n}-${nonce}` },
+      ),
+    ),
   )
-  check('a third at that amount exhausts capacity', third.status === 409, `got ${third.status}`)
+  check(
+    'and so are eight more',
+    rest.every((r) => r.status === 201),
+    rest.map((r) => r.status).join(','),
+  )
+  check(
+    'every one of them got a distinct reference code',
+    new Set([first, second, ...rest].map((r) => r.json.ref_code)).size === rest.length + 2,
+  )
 
   // A capture on the wrong account must not match, however perfect it looks.
   // The receiving account is a gate exactly like the amount is.
@@ -449,7 +478,7 @@ if (hasSecondDevice) {
         local_id: 'c_wrong_account',
         source: 'notification',
         package: 'com.bKash.customerapp',
-        raw: `You have received Tk ${(foAmount / 100).toFixed(2)} from 01712345678. Ref ${first.json.ref_code}. Fee Tk 0.00. TrxID ${wrongAccountTrx} at 03/09/2026 18:35`,
+        raw: `You have received Tk ${(foAmount / 100).toFixed(2)} from 01712345678. Ref ${first.json.ref_code}. Fee Tk 0.00. TrxID ${wrongAccountTrx} at ${bkashStamp()}`,
         captured_at: new Date().toISOString(),
       },
     ],
@@ -476,7 +505,7 @@ const drifted = await device('POST', '/device/v1/capture', {
       local_id: 'c_smoke_drift',
       source: 'notification',
       package: 'com.bKash.customerapp',
-      raw: `You have received Tk 10.00 from 01711111111. Fee Tk 0.00. Balance Tk 987,654.00. TrxID ${driftTrx} at 03/09/2026 16:00`,
+      raw: `You have received Tk 10.00 from 01711111111. Fee Tk 0.00. Balance Tk 987,654.00. TrxID ${driftTrx} at ${bkashStamp()}`,
       captured_at: new Date().toISOString(),
     },
   ],

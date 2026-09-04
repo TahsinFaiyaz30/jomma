@@ -6,7 +6,6 @@ import {
   checkHeartbeatGaps,
   checkParseFailures,
   pruneIdempotencyKeys,
-  sweepExpiredLocks,
 } from './health'
 import { deliverDueWebhooks, requeueStuckDeliveries } from './webhooks'
 
@@ -33,7 +32,6 @@ export interface JobRunResult {
   /** Only the counters for the groups that actually ran. */
   expired?: number
   rematched?: number
-  locksReleased?: number
   webhooksAttempted?: number
   webhooksDelivered?: number
   webhooksRequeued?: number
@@ -72,12 +70,11 @@ export async function runJobs(group: JobGroup = 'all'): Promise<JobRunResult> {
    * so they go through the same service functions the API uses.
    */
   if (wants('sweep')) {
-    const [expired, rematched, locksReleased] = await Promise.all([
+    const [expired, rematched] = await Promise.all([
       attempt('expireDueIntents', expireDueIntents, 0),
       attempt('retryOrphans', retryOrphans, 0),
-      attempt('sweepExpiredLocks', sweepExpiredLocks, 0),
     ])
-    Object.assign(result, { expired, rematched, locksReleased })
+    Object.assign(result, { expired, rematched })
   }
 
   if (wants('webhooks')) {
@@ -119,7 +116,6 @@ export {
   checkHeartbeatGaps,
   checkParseFailures,
   pruneIdempotencyKeys,
-  sweepExpiredLocks,
 } from './health'
 // `replayDelivery` is deliberately not re-exported: `lib/services/app-admin.ts`
 // exports an admin-facing function of the same name, and having both reachable

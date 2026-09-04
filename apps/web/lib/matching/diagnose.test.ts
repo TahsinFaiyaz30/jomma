@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { diagnoseCandidates } from './diagnose'
-import { ACCOUNT_B, intent, lock, minutesAfter, payment, T0 } from './fixtures'
+import { ACCOUNT_B, intent, minutesAfter, payment, T0 } from './fixtures'
 
 describe('diagnoseCandidates', () => {
   it('reports the amount delta instead of hiding a gated candidate', () => {
@@ -82,11 +82,10 @@ describe('diagnoseCandidates', () => {
   it('ranks by score among candidates that all clear the gate', () => {
     const results = diagnoseCandidates(payment({ referenceRaw: 'K7M2', senderMsisdn: null }), [
       intent({ id: 'weak', refCode: 'ZZZZ' }),
-      intent({ id: 'strong', refCode: 'K7M2', lock: lock() }),
+      intent({ id: 'strong', refCode: 'K7M2' }),
     ])
 
     expect(results[0]?.intent.id).toBe('strong')
-    expect(results[0]?.holdsLock).toBe(true)
   })
 
   it('reports the window without gating on it', () => {
