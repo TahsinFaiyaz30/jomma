@@ -69,6 +69,27 @@ export interface PayView {
   methods: CheckoutMethod[]
   /** False once anything has arrived — the account is pinned from then on. */
   canSwitchMethod: boolean
+  /**
+   * The store named a provider at creation, so there is no choice to offer.
+   *
+   * Distinct from `canSwitchMethod`, which is about timing. This one is about
+   * authority: an integration that asked for bKash gets bKash, and showing the
+   * buyer a picker they cannot act on is a step that wastes their time.
+   */
+  methodLocked: boolean
+
+  /**
+   * Whether the sender's number is already on record.
+   *
+   * A boolean, never the number itself: this view is public to anyone holding
+   * the link, and the payer's phone number is not theirs to read.
+   *
+   * When it is true the page does not ask, which also settles a disagreement it
+   * would otherwise have no good answer to — the write is once-only, so a buyer
+   * typing a *different* number than the store recorded would have it quietly
+   * discarded and then be flagged as a sender mismatch when they paid.
+   */
+  payerKnown: boolean
 
   expiresAt: string
   /** Null unless the app registered the host. Never echoed back unchecked. */
@@ -124,6 +145,8 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
       returnUrl: paymentIntents.returnUrl,
       cancelUrl: paymentIntents.cancelUrl,
       refCode: paymentRefs.code,
+      providerPreference: paymentIntents.providerPreference,
+      payerMsisdn: paymentIntents.payerMsisdn,
       provider: receivingAccounts.provider,
       msisdn: receivingAccounts.msisdn,
       merchantName: apps.name,
@@ -172,6 +195,8 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
     // A single applied payment pins the receiving account, because the matcher
     // gates on it — see switchCheckoutMethod.
     canSwitchMethod: applied.length === 0 && row.status === 'open',
+    methodLocked: row.providerPreference !== 'any',
+    payerKnown: Boolean(row.payerMsisdn),
     expiresAt: row.expiresAt.toISOString(),
     returnUrl: safeRedirect(row.returnUrl, hosts),
     cancelUrl: safeRedirect(row.cancelUrl, hosts),
