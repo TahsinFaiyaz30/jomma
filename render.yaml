@@ -72,7 +72,10 @@ services:
   #
   # Cron jobs are not on the free tier. If you are staying free, use an external
   # pinger instead — docs/deploy.md has the details.
-  - type: cronjob
+  # `cron`, not `cronjob`. Render's blueprint schema names this type `cron`, and
+  # the wrong spelling fails the whole sync with no indication of which line —
+  # the notification email just says a sync failed.
+  - type: cron
     name: jomma-jobs
     runtime: node
     region: singapore
