@@ -140,6 +140,61 @@ export async function listApps(): Promise<AppView[]> {
  * Mints a key. The plaintext is returned here and never stored — this is the one
  * moment it exists outside the caller's clipboard.
  */
+/**
+ * Creates a tenant.
+ *
+ * An "app" is one storefront: it owns its API keys, its webhook endpoints, its
+ * intents, and the hostnames the pay page may return a buyer to. Like receiving
+ * accounts, this only ever existed in the development seed, which left a
+ * production instance with no way to create the first one.
+ *
+ * No redirect hosts are registered at creation. That means the hosted pay page
+ * will refuse to send a buyer anywhere until you add them — the safe default,
+ * since an unchecked return URL on a payment page is an open redirect.
+ */
+export async function createApp(options: {
+  name: string
+  actorId: string
+}): Promise<{ id: string; slug: string }> {
+  const name = options.name.trim()
+  if (!name) throw new Error('Give the app a name.')
+
+  const slug = slugify(name)
+  if (!slug) throw new Error('That name has no letters or digits to make a slug from.')
+
+  const existing = await db.query.apps.findFirst({ where: eq(apps.slug, slug) })
+  if (existing) throw new Error(`An app called "${existing.name}" already uses the slug ${slug}.`)
+
+  return db.transaction(async (tx) => {
+    const [app] = await tx.insert(apps).values({ name, slug }).returning()
+    if (!app) throw new Error('Could not create the app.')
+
+    await audit(tx, {
+      action: 'app.created',
+      actorId: options.actorId,
+      actorType: 'admin',
+      appId: app.id,
+      payload: { name, slug },
+    })
+
+    return { id: app.id, slug }
+  })
+}
+
+/** `Tahsin's Shop (BD)` becomes `tahsins-shop-bd`. */
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      // Apostrophes are dropped rather than turned into separators, or every
+      // possessive gains a stray letter: `tahsin-s-store`.
+      .replace(/['’]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64)
+  )
+}
+
 export async function createApiKey(options: {
   appId: string
   name: string

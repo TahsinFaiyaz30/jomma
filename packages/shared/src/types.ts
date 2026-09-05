@@ -183,6 +183,7 @@ export const AUDIT_ACTIONS = [
   'lock.released',
   'device.provisioned',
   'device.revoked',
+  'account.created',
   'account.degraded',
   'account.recovered',
   'balance.drift',
@@ -190,6 +191,7 @@ export const AUDIT_ACTIONS = [
   'apikey.revoked',
   'endpoint.created',
   'webhook.replayed',
+  'app.created',
   'app.updated',
   'statement.imported',
 ] as const

@@ -63,6 +63,74 @@ export async function setAccountStatus(options: {
   })
 }
 
+/**
+ * Adds a number for Jomma to watch.
+ *
+ * This used to exist only in the development seed, which was fine while the
+ * seed also created demo accounts — and became a dead end the moment production
+ * bootstrapped with `--admin-only` and had no way to add a real one.
+ *
+ * Created `disabled`, deliberately. An active account is immediately eligible
+ * for checkout routing, and an account with no phone attached to it cannot see
+ * a payment arrive — so a buyer would be sent to a number nobody is watching.
+ * Provision a device first, then enable it.
+ */
+export async function createReceivingAccount(options: {
+  provider: 'bkash' | 'nagad'
+  msisdn: string
+  label: string
+  actorId: string
+}): Promise<{ id: string; msisdn: string }> {
+  const msisdn = normalizeMsisdn(options.msisdn)
+  if (!msisdn) {
+    throw new Error('Not a Bangladeshi mobile number. Expected 11 digits starting 01.')
+  }
+
+  const existing = await db.query.receivingAccounts.findFirst({
+    where: eq(receivingAccounts.msisdn, msisdn),
+  })
+  if (existing) throw new Error(`${msisdn} is already being watched.`)
+
+  return db.transaction(async (tx) => {
+    const [account] = await tx
+      .insert(receivingAccounts)
+      .values({
+        provider: options.provider,
+        msisdn,
+        label: options.label.trim(),
+        status: 'disabled',
+        statusReason: 'Added from the dashboard. Provision a phone, then enable it.',
+      })
+      .returning()
+
+    if (!account) throw new Error('Could not create the account.')
+
+    await audit(tx, {
+      action: 'account.created',
+      actorId: options.actorId,
+      actorType: 'admin',
+      payload: { account_id: account.id, msisdn, provider: options.provider },
+    })
+
+    return { id: account.id, msisdn }
+  })
+}
+
+/**
+ * `01712345678`, `+880 1712-345678` and `8801712345678` are one number.
+ *
+ * Stored in the 880 form because that is what the parsers produce from a
+ * provider's message, and the matcher compares them directly.
+ */
+function normalizeMsisdn(input: string): string | null {
+  const digits = input.replace(/\D/g, '')
+  const local = digits.startsWith('880') ? digits.slice(3) : digits
+  const withZero = local.startsWith('0') ? local : `0${local}`
+
+  if (!/^01[3-9]\d{8}$/.test(withZero)) return null
+  return `880${withZero.slice(1)}`
+}
+
 export async function acknowledgeAlert(options: {
   eventId: string
   actorId: string

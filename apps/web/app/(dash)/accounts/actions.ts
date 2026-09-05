@@ -2,7 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/session'
-import { acknowledgeAlert, setAccountStatus } from '@/lib/services/account-admin'
+import {
+  acknowledgeAlert,
+  createReceivingAccount,
+  setAccountStatus,
+} from '@/lib/services/account-admin'
 import {
   createDeviceWithProvisioning,
   requestTokenRotation,
@@ -14,6 +18,33 @@ export interface DeviceActionResult {
   message: string
   /** Shown once and never again — the QR image, or a rotated token. */
   secret?: { kind: 'qr'; dataUrl: string; expiresAt: string } | { kind: 'token'; value: string }
+}
+
+export async function addAccountAction(
+  provider: 'bkash' | 'nagad',
+  msisdn: string,
+  label: string,
+): Promise<DeviceActionResult> {
+  const admin = await requireAdmin()
+
+  if (!label.trim()) return { ok: false, message: 'Give the account a label.' }
+
+  try {
+    const account = await createReceivingAccount({
+      provider,
+      msisdn,
+      label,
+      actorId: admin.id,
+    })
+    revalidatePath('/accounts')
+    revalidatePath('/')
+    return {
+      ok: true,
+      message: `${account.msisdn} added, and disabled until a phone is watching it. Add a device below, then enable it.`,
+    }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not add account.' }
+  }
 }
 
 export async function addDeviceAction(

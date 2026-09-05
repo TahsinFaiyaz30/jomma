@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/session'
 import {
   createApiKey,
+  createApp,
   createWebhookEndpoint,
   replayAllFailed,
   replayDelivery,
@@ -17,6 +18,22 @@ export interface AppActionResult {
   message: string
   /** Shown once. Never retrievable again. */
   secret?: { label: string; value: string }
+}
+
+export async function createAppAction(name: string): Promise<AppActionResult> {
+  const admin = await requireAdmin()
+  if (!name.trim()) return { ok: false, message: 'Give the app a name.' }
+
+  try {
+    const app = await createApp({ name, actorId: admin.id })
+    revalidatePath('/apps')
+    return {
+      ok: true,
+      message: `Created as "${app.slug}". Add an API key and a webhook endpoint next.`,
+    }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not create app.' }
+  }
 }
 
 export async function createKeyAction(

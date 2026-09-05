@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import {
+  createAppAction,
   createEndpointAction,
   createKeyAction,
   replayAllFailedAction,
@@ -23,9 +24,60 @@ import { cn } from '@/lib/utils'
 export function AppsView({ apps }: { apps: AppView[] }) {
   return (
     <div className="min-h-0 flex-1 space-y-6 overflow-auto p-6">
+      <NewApp firstOne={apps.length === 0} />
       {apps.map((app) => (
         <AppCard key={app.id} app={app} />
       ))}
+    </div>
+  )
+}
+
+/**
+ * Creating the first tenant.
+ *
+ * Apps used to come only from the development seed, so a production instance
+ * bootstrapped without demo data had no route to its first one — the screen
+ * that manages keys and endpoints rendered an empty page, and nothing on it
+ * could make the thing those keys hang off.
+ */
+function NewApp({ firstOne }: { firstOne: boolean }) {
+  const [pending, startTransition] = useTransition()
+  const [name, setName] = useState('')
+
+  const submit = () =>
+    startTransition(async () => {
+      const result = await createAppAction(name)
+      if (result.ok) {
+        setName('')
+        toast.success(result.message)
+      } else {
+        toast.error(result.message)
+      }
+    })
+
+  return (
+    <div className="rounded-xl border border-border p-4">
+      <h2 className="font-medium text-title">{firstOne ? 'Add your first app' : 'New app'}</h2>
+      <p className="mt-1 max-w-prose text-micro text-muted-foreground">
+        One app is one storefront. It owns its own API keys, webhook endpoints and payments.
+        {firstOne ? ' Nothing can take a payment until one exists.' : null}
+      </p>
+
+      <div className="flex items-center gap-2 pt-3">
+        <Input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && name.trim()) submit()
+          }}
+          placeholder="My Shop"
+          className="h-7 max-w-64 text-small"
+        />
+        <Button size="sm" variant="outline" disabled={pending || !name.trim()} onClick={submit}>
+          {pending ? <Spinner /> : null}
+          Create app
+        </Button>
+      </div>
     </div>
   )
 }
