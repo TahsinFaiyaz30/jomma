@@ -38,8 +38,21 @@ interface CaptureDao {
     @Query("SELECT COUNT(*) FROM captures WHERE capturedAt >= :since")
     fun countSinceFlow(since: Long): Flow<Int>
 
-    @Query("UPDATE captures SET sent = 1, sentAt = :at, lastError = NULL WHERE localId IN (:ids)")
-    suspend fun markSent(ids: List<String>, at: Long = System.currentTimeMillis())
+    /**
+     * One call per outcome, so `accepted` and `filtered` do not have to be
+     * flattened into a single value. Both mean "the server has answered, stop
+     * retrying" — they differ only in what it did next, which is what the Log
+     * screen needs in order to explain a message that never reached the feed.
+     */
+    @Query(
+        "UPDATE captures SET sent = 1, sentAt = :at, lastError = NULL, outcome = :outcome " +
+            "WHERE localId IN (:ids)",
+    )
+    suspend fun markSent(
+        ids: List<String>,
+        outcome: String,
+        at: Long = System.currentTimeMillis(),
+    )
 
     @Query("UPDATE captures SET attempts = attempts + 1, lastError = :error WHERE localId IN (:ids)")
     suspend fun markFailed(ids: List<String>, error: String)

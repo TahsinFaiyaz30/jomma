@@ -35,6 +35,20 @@ class JommaApi(context: Context) {
         encodeDefaults = false
     }
 
+    /**
+     * The same, but it writes fields that happen to equal their default.
+     *
+     * Capture settings are three booleans that default to `false`, and the
+     * server requires all three — a partial body would race the dashboard. With
+     * `encodeDefaults = false` the common case of "keep nothing extra" encodes
+     * as `{}` and is rejected as malformed, which is a bug that only shows up
+     * for the setting most people will actually have.
+     */
+    private val strictJson = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
     sealed interface Result<out T> {
         data class Ok<T>(val value: T) : Result<T>
         /** The token is gone. The app must stop and ask to be re-provisioned. */
@@ -64,6 +78,28 @@ class JommaApi(context: Context) {
             json.decodeFromString(RotateResponse.serializer(), body)
         }
 
+    /**
+     * Read what this account currently keeps.
+     *
+     * Called when the settings screen opens rather than trusting the cached
+     * copy, which can be up to a heartbeat old — and much older if the phone has
+     * been asleep. Showing a switch in the wrong position is worse than a brief
+     * spinner, because the operator will believe it.
+     */
+    suspend fun captureSettings(): Result<SettingsResponse> =
+        get("/device/v1/settings") { body ->
+            json.decodeFromString(SettingsResponse.serializer(), body)
+        }
+
+    /** Writes the full set, never a delta — see the note in lib/api/schemas.ts. */
+    suspend fun updateCaptureSettings(settings: CaptureSettings): Result<SettingsResponse> =
+        post(
+            "/device/v1/settings",
+            strictJson.encodeToString(CaptureSettings.serializer(), settings),
+        ) { body ->
+            json.decodeFromString(SettingsResponse.serializer(), body)
+        }
+
     suspend fun reportEvent(kind: String, detail: String? = null): Result<Unit> =
         post(
             "/device/v1/events",
@@ -72,26 +108,46 @@ class JommaApi(context: Context) {
 
     /**
      * The one call made without a device token, because there is not one yet.
-     * On success the credentials are stored and the device is live.
+     *
+     * The pairing code is the whole credential, so the server URL has to come
+     * from the same QR — there is nothing configured on the phone to send it
+     * to yet. On success the credentials are stored and the device is live.
      */
-    suspend fun provision(baseUrl: String, deviceId: String, token: String): Result<ProvisionResponse> =
+    suspend fun pair(link: PairingLink): Result<ProvisionResponse> =
         withContext(Dispatchers.IO) {
-            val payload = json.encodeToString(
-                ProvisionRequest.serializer(),
-                ProvisionRequest(deviceId, token),
-            )
+            val payload = json.encodeToString(PairRequest.serializer(), PairRequest(link.code))
             val request = Request.Builder()
-                .url("${baseUrl.trimEnd('/')}/device/v1/provision")
+                .url("${link.serverUrl.trimEnd('/')}/device/v1/pair")
                 .post(payload.toRequestBody(JSON_MEDIA))
                 .build()
 
-            execute(request) { body -> json.decodeFromString(ProvisionResponse.serializer(), body) }
+            /*
+             * A 401 here is not revocation.
+             *
+             * This device has no credential to revoke — it is trying to get
+             * one. 401 means the code was wrong, expired, or already used, and
+             * latching `revoked` on it left an unprovisioned phone displaying
+             * "Revoked — re-provision this device", which is both false and
+             * alarming. Opening one stale pairing link was enough to trigger it.
+             */
+            execute(request, latchRevocation = false) { body ->
+                json.decodeFromString(ProvisionResponse.serializer(), body)
+            }
         }
 
     private suspend fun <T> post(
         path: String,
         payload: String,
         parse: (String) -> T,
+    ): Result<T> = authenticated(path, parse) { it.post(payload.toRequestBody(JSON_MEDIA)) }
+
+    private suspend fun <T> get(path: String, parse: (String) -> T): Result<T> =
+        authenticated(path, parse) { it.get() }
+
+    private suspend fun <T> authenticated(
+        path: String,
+        parse: (String) -> T,
+        method: (Request.Builder) -> Request.Builder,
     ): Result<T> = withContext(Dispatchers.IO) {
         val baseUrl = prefs.serverUrl
         val token = prefs.deviceToken
@@ -101,17 +157,24 @@ class JommaApi(context: Context) {
             return@withContext Result.Failed("Device is not provisioned", retryable = false)
         }
 
-        val request = Request.Builder()
+        val builder = Request.Builder()
             .url("${baseUrl.trimEnd('/')}$path")
             .header("Authorization", "Bearer $token")
             .header("X-Device-Id", deviceId)
-            .post(payload.toRequestBody(JSON_MEDIA))
-            .build()
 
-        execute(request, parse)
+        execute(method(builder).build(), parse = parse)
     }
 
-    private fun <T> execute(request: Request, parse: (String) -> T): Result<T> =
+    /**
+     * @param latchRevocation whether a 401 means *this device* lost its
+     *   credential. True for every authenticated call. False for pairing, where
+     *   a 401 means the code was wrong or spent — see the note there.
+     */
+    private fun <T> execute(
+        request: Request,
+        latchRevocation: Boolean = true,
+        parse: (String) -> T,
+    ): Result<T> =
         try {
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
@@ -122,7 +185,7 @@ class JommaApi(context: Context) {
                     // just hammer the endpoint; the app shows a re-provision
                     // screen instead of failing silently.
                     response.code == 401 -> {
-                        prefs.revoked = true
+                        if (latchRevocation) prefs.revoked = true
                         Result.Revoked
                     }
 

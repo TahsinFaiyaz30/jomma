@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -36,31 +35,43 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+                Provisioning by App Link.
+
+                The QR is a plain `https://<host>/pair/<code>` URL, so *any* QR
+                scanner will offer to open it — the camera app, a scanner the
+                operator already has, whatever is on the phone. With
+                android:autoVerify Android fetches
+                `https://<host>/.well-known/assetlinks.json`, checks this app's
+                signing certificate is named there, and then routes the link
+                straight here: no chooser, no browser.
+
+                That verification is also the security property. Since Android
+                12 an app that cannot prove the domain endorses it does not get
+                the link and cannot register for it either, so no other app can
+                intercept a provisioning code. A custom `jomma://` scheme would
+                have been simpler and would have had exactly the opposite
+                property — any app may claim one.
+
+                The host is a build input; see manifestPlaceholders in
+                build.gradle.kts. Self-hosted software has no single domain to
+                hardcode.
+
+                Unverified, this filter still works — the link opens with a
+                chooser rather than silently — and upgrades itself the moment
+                assetlinks.json names the right fingerprint.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="${jommaHost}"
+                    android:pathPrefix="/pair/" />
+            </intent-filter>
         </activity>
-
-        <!--
-            The QR scanner, overridden.
-
-            zxing-android-embedded ships its CaptureActivity with
-            android:screenOrientation="sensorLandscape" hardcoded in the
-            library's own manifest, and manifest merging pulls that straight
-            into the app. The effect is that opening the scanner slams the
-            phone into landscape while the rest of the app is upright — which
-            is not a camera decision, it is the library's decision, and it
-            reads as a bug.
-
-            ScanOptions.setOrientationLocked(false) cannot fix it: that only
-            governs runtime locking, and a manifest attribute wins regardless.
-            The override has to be here.
-
-            `unspecified` matches MainActivity: the system decides, which means
-            the user's own rotation lock is respected. That is what every other
-            app on the phone does.
-        -->
-        <activity
-            android:name="com.journeyapps.barcodescanner.CaptureActivity"
-            android:screenOrientation="unspecified"
-            tools:replace="android:screenOrientation" />
 
         <!--
             The primary capture path. The user must grant notification access in

@@ -3,6 +3,7 @@ package com.jomma.notifier.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.FilterAlt
 import androidx.compose.material.icons.outlined.Monitor
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.NotificationsActive
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -53,6 +56,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -70,6 +74,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jomma.notifier.data.Capture
+import com.jomma.notifier.net.CaptureSettings
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -95,6 +100,7 @@ fun JommaScreens(
     onHeartbeat: () -> Unit,
     onTestCapture: () -> Unit,
     onReprovision: () -> Unit,
+    onCaptureChange: (CaptureSettings) -> Unit,
 ) {
     var destination by remember { mutableIntStateOf(0) }
 
@@ -142,6 +148,7 @@ fun JommaScreens(
                     onRequestSms,
                     onOpenBatterySettings,
                     onScan,
+                    onCaptureChange,
                 )
             }
         }
@@ -225,7 +232,8 @@ private fun StatusScreen(
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Set this device up", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Open Accounts in the Jomma dashboard, add a device, and scan the code it shows.",
+                        "Open Accounts in the Jomma dashboard, add a device, and scan the code it " +
+                            "shows. Any QR scanner will do — it opens straight back here.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     FilledTonalButton(onClick = onScan, enabled = !state.busy) {
@@ -323,6 +331,26 @@ private fun LogScreen(captures: List<Capture>) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(captures, key = { it.localId }) { capture ->
+            /*
+             * "sent" is not the whole truth once capture settings exist. A
+             * filtered message was delivered and then deliberately discarded, so
+             * saying "sent" would send someone hunting a delivery bug for a row
+             * that is missing from the dashboard exactly as they asked.
+             */
+            val label = when {
+                !capture.sent -> "queued"
+                capture.outcome == "filtered" -> "filtered out"
+                capture.outcome == "duplicate" -> "duplicate"
+                capture.outcome == "unparsed" -> "could not be read"
+                else -> "sent"
+            }
+            val tint = when {
+                !capture.sent -> status.degraded
+                capture.outcome == "unparsed" -> status.down
+                capture.outcome == "filtered" -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> status.connected
+            }
+
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
@@ -333,12 +361,12 @@ private fun LogScreen(captures: List<Capture>) {
                             Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(if (capture.sent) status.connected else status.degraded),
+                                .background(tint),
                         )
                         Text(
-                            if (capture.sent) "sent" else "queued",
+                            label,
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (capture.sent) status.connected else status.degraded,
+                            color = tint,
                         )
                         Text(capture.source, style = MaterialTheme.typography.labelMedium)
                         Spacer(Modifier.weight(1f))
@@ -377,6 +405,7 @@ private fun SetupScreen(
     onRequestSms: () -> Unit,
     onOpenBatterySettings: () -> Unit,
     onScan: () -> Unit,
+    onCaptureChange: (CaptureSettings) -> Unit,
 ) {
     Column(
         Modifier
@@ -417,7 +446,116 @@ private fun SetupScreen(
             action = "Scan code",
             onAction = onScan,
         )
+
+        if (state.provisioned && !state.revoked) {
+            CaptureCard(state, onCaptureChange)
+        }
     }
+}
+
+/**
+ * What this number keeps, mirroring the dashboard's "What to capture".
+ *
+ * Genuinely the same setting and not a copy of it — both write the account row,
+ * and this screen re-reads it on every launch. It is here because the person
+ * holding the phone is usually the person who wants the noise gone, and making
+ * them find a laptop to stop it is the kind of friction that ends with the app
+ * being uninstalled.
+ *
+ * The phone does not act on these itself. It forwards raw text and never parses,
+ * so it cannot know what type a message is; the server drops what these exclude
+ * and answers `filtered` so the queue clears. That keeps one copy of the parser.
+ */
+@Composable
+private fun CaptureCard(state: UiState, onChange: (CaptureSettings) -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(Icons.Outlined.FilterAlt, contentDescription = null)
+                Text(
+                    "What to capture",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (state.captureSaving) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
+            }
+            Text(
+                "bKash shows this phone far more than payments. Anything switched off is dropped " +
+                    "when it reaches the server and never stored. The same switches are in the " +
+                    "dashboard.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            /*
+             * Fixed row, not a disabled switch. A greyed-out toggle reads as
+             * "coming soon"; this says the true thing, which is that incoming
+             * Send Money is the only type that can settle an order.
+             */
+            ListItem(
+                headlineContent = { Text("Incoming Send Money") },
+                supportingContent = { Text("Money buyers send you. The only type that pays an order.") },
+                trailingContent = {
+                    Text("always", style = MaterialTheme.typography.labelLarge)
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+            HorizontalDivider()
+            CaptureSwitch(
+                label = "Cash In",
+                detail = "Top-ups from an agent or your bank.",
+                checked = state.capture.cashIn,
+                enabled = !state.captureSaving,
+                onCheckedChange = { onChange(state.capture.copy(cashIn = it)) },
+            )
+            HorizontalDivider()
+            CaptureSwitch(
+                label = "Money you sent",
+                detail = "Send Money leaving this number. A ledger, never a payment.",
+                checked = state.capture.outgoing,
+                enabled = !state.captureSaving,
+                onCheckedChange = { onChange(state.capture.copy(outgoing = it)) },
+            )
+            HorizontalDivider()
+            CaptureSwitch(
+                label = "Everything else",
+                detail = "Promotions, balance notices, offers. Usually noise.",
+                checked = state.capture.other,
+                enabled = !state.captureSaving,
+                onCheckedChange = { onChange(state.capture.copy(other = it)) },
+            )
+
+            Text(
+                "A message the parser cannot read is kept whatever these say.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CaptureSwitch(
+    label: String,
+    detail: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(label) },
+        supportingContent = { Text(detail) },
+        trailingContent = {
+            Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.clickable(enabled = enabled) { onCheckedChange(!checked) },
+    )
 }
 
 @Composable

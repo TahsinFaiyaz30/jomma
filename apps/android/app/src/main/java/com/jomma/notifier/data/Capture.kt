@@ -37,4 +37,17 @@ data class Capture(
     val attempts: Int = 0,
     val lastError: String? = null,
     val sentAt: Long? = null,
+    /**
+     * What the server did with it: accepted | duplicate | unparsed | filtered.
+     *
+     * Kept because `sent` alone cannot answer the question the Log screen exists
+     * to answer. A message the account's capture settings excluded is
+     * acknowledged and dequeued exactly like an accepted one, and without this
+     * the log would show it as "sent" while it appears nowhere in the dashboard
+     * — which reads as a delivery bug and is not one.
+     *
+     * Null on rows written before this column existed, and on anything still
+     * queued.
+     */
+    val outcome: String? = null,
 )

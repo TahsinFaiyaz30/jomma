@@ -42,9 +42,14 @@ class CaptureRepository(context: Context) {
      * Steps 2 and 3. Sends the entire pending queue in one request, then marks
      * only what the server acknowledged.
      *
-     * `accepted`, `duplicate`, and `unparsed` all mean the same thing to the
-     * device: the server has the raw text and owns it now. Only a transport
-     * failure leaves an item queued.
+     * `accepted`, `duplicate`, `unparsed` and `filtered` all mean the same thing
+     * to the device: the server has answered and there is nothing left to
+     * retry. Only a transport failure leaves an item queued.
+     *
+     * The status is recorded rather than discarded because `filtered` — a
+     * message the account's capture settings excluded — is the one case where
+     * "delivered" and "stored" differ, and the Log screen has to be able to say
+     * so.
      */
     suspend fun flush(): FlushOutcome {
         if (!prefs.isProvisioned || prefs.revoked) return FlushOutcome.NotReady
@@ -67,7 +72,10 @@ class CaptureRepository(context: Context) {
         return when (val result = api.sendCaptures(batch)) {
             is JommaApi.Result.Ok -> {
                 val acknowledged = result.value.results.map { it.localId }
-                if (acknowledged.isNotEmpty()) dao.markSent(acknowledged)
+
+                for ((outcome, items) in result.value.results.groupBy { it.status }) {
+                    dao.markSent(items.map { it.localId }, outcome)
+                }
 
                 // Anything the server did not mention stays queued and goes
                 // again next time rather than being assumed delivered.

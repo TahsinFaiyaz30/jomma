@@ -15,8 +15,22 @@ room = "2.8.4"
 work = "2.11.0"
 okhttp = "4.12.0"
 securityCrypto = "1.1.0"
-zxing = "4.3.0"
+camera = "1.6.2"
+# The *bundled* barcode model. It is not small — the native detector is around
+# 5 MB per ABI, and it dominates the APK — but it has no dependency on Google
+# Play Services at runtime.
+#
+# That matters here more than size does. This app is sideloaded onto whatever
+# phone is free to sit and watch a bKash number, and the unbundled variant would
+# make provisioning depend on Play Services being present, up to date, and
+# willing to fetch a model. A device that cannot scan its provisioning QR is a
+# device that cannot be set up at all.
+#
+# `abiFilters` in build.gradle.kts keeps the release build from carrying the x86
+# copies, which is most of what this would otherwise cost.
+mlkitBarcode = "17.3.0"
 serialization = "1.9.0"
+junit = "4.13.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -41,7 +55,14 @@ androidx-security-crypto = { group = "androidx.security", name = "security-crypt
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 
-zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxing" }
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camera" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camera" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camera" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camera" }
+
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

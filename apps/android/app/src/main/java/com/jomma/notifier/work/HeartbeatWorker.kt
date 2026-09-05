@@ -91,6 +91,11 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
             if (result is JommaApi.Result.Ok) {
                 prefs.lastHeartbeatAt = System.currentTimeMillis()
 
+                // Null when talking to a server too old to send them. Leaving the
+                // cache alone is right: overwriting it with defaults would flip
+                // the settings screen to "keep nothing" on a downgrade.
+                result.value.capture?.let { prefs.capture = it }
+
                 for (command in result.value.commands) {
                     when (command.type) {
                         "flush_queue", "resend_since" -> FlushWorker.enqueueNow(context)
