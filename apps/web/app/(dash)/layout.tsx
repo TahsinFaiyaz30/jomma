@@ -1,10 +1,11 @@
 import { redirect } from 'next/navigation'
 import { AppSidebar } from '@/components/dash/app-sidebar'
 import { CommandPalette } from '@/components/dash/command-palette'
+import { NotPayableBanner } from '@/components/dash/not-payable-banner'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { requireAdmin } from '@/lib/auth/session'
 import { getAccountFooter, getSidebarCounts } from '@/lib/services/dashboard'
-import { isSetupComplete } from '@/lib/services/onboarding'
+import { canTakePayments, hasCompletedSetup } from '@/lib/services/onboarding'
 
 /**
  * The dashboard shell.
@@ -19,20 +20,25 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const admin = await requireAdmin()
 
   /*
-   * An instance that cannot take a payment gets sent to set itself up.
+   * A deployment that has never been set up gets sent to set itself up. One
+   * that *has* been, and is currently broken, gets told so and left alone.
    *
-   * Not a dismissible banner. Until there is a routable account with a phone
-   * behind it and a live API key, every screen under here is an empty table
-   * whose empty state is indistinguishable from a quiet day — and the one thing
-   * worth doing is not on any of them.
+   * The distinction matters because they look identical to a capability check
+   * and are nothing alike to the person on the other side. Disabling an account
+   * is a one-click action on the Accounts page — the documented way to take a
+   * number out of rotation while a phone is away — and doing it to your only
+   * account should not hide your payment history behind a first-run wizard.
    *
-   * The check is computed from the database rather than a flag, so it comes
-   * back if the last account is disabled or the last key revoked. Nobody can
-   * dismiss their way into a broken instance.
+   * So the gate reads a stamp that is never cleared, and the live capability
+   * check downgrades to a banner once that stamp exists.
    */
-  if (!(await isSetupComplete())) redirect('/setup')
+  if (!(await hasCompletedSetup())) redirect('/setup')
 
-  const [counts, accounts] = await Promise.all([getSidebarCounts(), getAccountFooter()])
+  const [counts, accounts, payable] = await Promise.all([
+    getSidebarCounts(),
+    getAccountFooter(),
+    canTakePayments(),
+  ])
 
   return (
     <SidebarProvider>
@@ -54,7 +60,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
           openAlerts: account.openAlerts,
         }))}
       />
-      <SidebarInset className="min-w-0">{children}</SidebarInset>
+      <SidebarInset className="min-w-0">
+        {payable ? null : <NotPayableBanner />}
+        {children}
+      </SidebarInset>
       <CommandPalette />
     </SidebarProvider>
   )

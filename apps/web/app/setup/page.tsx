@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { SetupWizard } from '@/components/setup/setup-wizard'
 import { requireAdmin } from '@/lib/auth/session'
-import { getSetupState } from '@/lib/services/onboarding'
+import { getSetupState, markSetupComplete } from '@/lib/services/onboarding'
 
 /**
  * First-run setup, outside the dashboard shell on purpose.
@@ -22,9 +22,17 @@ export default async function SetupPage() {
   await requireAdmin()
   const state = await getSetupState()
 
-  // Finished instances have no business here. Reachable again the moment
-  // something required is removed, because the state is computed, not stored.
-  if (state.complete && state.currentStepId === null) redirect('/')
+  /*
+   * Stamp the moment every required step is satisfied.
+   *
+   * Doing it here rather than only in the actions also migrates an instance
+   * that was already working before the stamp existed: it gets sent here once,
+   * finds nothing to do, records that fact, and is never sent again.
+   */
+  if (state.complete) await markSetupComplete()
+
+  // Nothing left at all, not even the optional step: there is no page to show.
+  if (state.currentStepId === null) redirect('/')
 
   return <SetupWizard initial={state} />
 }

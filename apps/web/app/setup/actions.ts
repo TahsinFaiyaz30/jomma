@@ -5,7 +5,7 @@ import { requireAdmin } from '@/lib/auth/session'
 import { createReceivingAccount, setAccountStatus } from '@/lib/services/account-admin'
 import { createApiKey, createApp, createWebhookEndpoint } from '@/lib/services/app-admin'
 import { createDeviceWithProvisioning } from '@/lib/services/devices'
-import { getSetupState, type SetupState } from '@/lib/services/onboarding'
+import { getSetupState, markSetupComplete, type SetupState } from '@/lib/services/onboarding'
 
 /**
  * The wizard's actions.
@@ -36,7 +36,13 @@ async function reply(
   revalidatePath('/accounts')
   revalidatePath('/apps')
   revalidatePath('/')
-  return { ok, message, state: await getSetupState(), secret }
+
+  const state = await getSetupState()
+  // The moment the last required step lands, record it — so a later disable or
+  // revoke shows a banner rather than throwing the operator back in here.
+  if (state.complete) await markSetupComplete()
+
+  return { ok, message, state, secret }
 }
 
 export async function refreshSetupAction(): Promise<SetupResult> {

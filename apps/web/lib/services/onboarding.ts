@@ -2,7 +2,14 @@ import 'server-only'
 
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { apiKeys, apps, devices, receivingAccounts, webhookEndpoints } from '@/lib/db/schema'
+import {
+  apiKeys,
+  apps,
+  devices,
+  instanceSetup,
+  receivingAccounts,
+  webhookEndpoints,
+} from '@/lib/db/schema'
 
 /**
  * Whether this instance can actually take a payment yet.
@@ -138,12 +145,47 @@ export async function getSetupState(): Promise<SetupState> {
 }
 
 /**
- * Cheap enough to run in the dashboard layout on every request.
+ * Has this instance ever finished setting up?
  *
- * Counts only, no joins — the layout already makes two queries and this must
- * not turn navigation into a survey of the whole database.
+ * The question the wizard is gated on, and deliberately not the same as "can it
+ * take a payment right now". Disabling an account is a one-click action on the
+ * Accounts page — the documented way to take a number out of rotation when a
+ * phone is away for the day — and doing that to your only account should not
+ * throw an operator back into a first-run wizard, locking them out of their own
+ * payment history to re-tick boxes they ticked weeks ago.
+ *
+ * Deleting a row does not un-happen the past. So this reads a stamp, not the
+ * live tables.
  */
-export async function isSetupComplete(): Promise<boolean> {
+export async function hasCompletedSetup(): Promise<boolean> {
+  const [row] = await db
+    .select({ completedAt: instanceSetup.completedAt })
+    .from(instanceSetup)
+    .limit(1)
+
+  return row?.completedAt != null
+}
+
+/**
+ * Stamped once, the first time every required step is satisfied, and never
+ * cleared. Safe to call repeatedly — the singleton primary key makes a second
+ * call a no-op rather than a second row.
+ */
+export async function markSetupComplete(): Promise<void> {
+  await db
+    .insert(instanceSetup)
+    .values({ id: true, completedAt: new Date(), completedBy: 'setup-wizard' })
+    .onConflictDoNothing({ target: instanceSetup.id })
+}
+
+/**
+ * Whether a payment could be taken *this second*.
+ *
+ * Separate from the question above on purpose. A `false` here on an instance
+ * that has completed setup is an operational problem worth a banner, not a
+ * reason to hide the dashboard.
+ */
+export async function canTakePayments(): Promise<boolean> {
   const [account] = await db
     .select({ id: receivingAccounts.id })
     .from(receivingAccounts)
