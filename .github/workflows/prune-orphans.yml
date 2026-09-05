@@ -48,7 +48,13 @@ jobs:
           REPO: ${{ github.repository }}
           THIS_RUN: ${{ github.run_id }}
         run: |
-          set -euo pipefail
+          # `set -u` only, deliberately. This is best-effort cleanup over
+          # hundreds of independent records: a run that has just been cancelled,
+          # a deployment in a protected environment, a 422 on something already
+          # gone. Aborting the whole job on the first of those would leave the
+          # rest of the orphans in place, which is exactly the failure this
+          # workflow exists to fix. Every call is checked individually instead.
+          set -u
 
           git rev-list --all > /tmp/reachable.txt
           echo "reachable commits: $(wc -l < /tmp/reachable.txt)"
@@ -108,6 +114,27 @@ jobs:
           echo "deployments: $ddeleted deleted, $dkept kept"
           echo "::endgroup::"
 
+          # Whether anything orphaned is still standing, which is the only
+          # question that matters. Printed rather than failed on: a second run
+          # picks up whatever a rate limit or a race left behind.
+          echo "::group::Remaining orphans"
+          left=0
+          gh api --paginate "/repos/$REPO/actions/runs?per_page=100" \
+            --jq '.workflow_runs[] | "\(.id) \(.head_sha)"' > /tmp/runs2.txt || true
+          while read -r id sha; do
+            [ -z "${id:-}" ] && continue
+            [ "$id" = "$THIS_RUN" ] && continue
+            reachable "$sha" || { left=$((left + 1)); echo "run $id still on ${sha:0:7}"; }
+          done < /tmp/runs2.txt
+          gh api --paginate "/repos/$REPO/deployments?per_page=100" \
+            --jq '.[] | "\(.id) \(.sha)"' > /tmp/deps2.txt || true
+          while read -r id sha; do
+            [ -z "${id:-}" ] && continue
+            reachable "$sha" || { left=$((left + 1)); echo "deployment $id still on ${sha:0:7}"; }
+          done < /tmp/deps2.txt
+          echo "orphaned references remaining: $left"
+          echo "::endgroup::"
+
           {
             echo "### Pruned orphaned references"
             echo
@@ -116,7 +143,9 @@ jobs:
             echo "| Workflow runs | $deleted | $kept |"
             echo "| Deployments | $ddeleted | $dkept |"
             echo
+            echo "**Orphaned references still standing: $left**"
+            echo
             echo "Anything kept is pinned to a commit still reachable from a branch or tag."
-            echo "GitHub can now garbage-collect the orphaned commits, after which the"
-            echo "contributors list is rebuilt from the surviving history alone."
+            echo "Once nothing references them, GitHub can garbage-collect the orphaned"
+            echo "commits and the contributors list is rebuilt from the surviving history."
           } >> "$GITHUB_STEP_SUMMARY"
