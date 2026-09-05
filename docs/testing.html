@@ -69,7 +69,7 @@
   <p>These need nothing running but a database:</p>
   <div class="code" data-lang="bash"><pre>pnpm lint              # Biome, across the whole workspace
 pnpm typecheck         # all five packages
-pnpm test              # 109 unit tests
+pnpm test              # 139 unit tests, no database or .env needed
 pnpm test:integration  # needs a live database
 pnpm build             # production build</pre></div>
 
@@ -83,7 +83,7 @@ pnpm smoke:stress &lt;api_key&gt;</pre></div>
   <div class="tw"><table>
     <thead><tr><th>Suite</th><th>Checks</th><th>What it covers</th></tr></thead>
     <tbody>
-      <tr><td><code>test</code></td><td>109</td><td>The matcher, every parser, CSV import, webhook signatures, the QR service, id encoding.</td></tr>
+      <tr><td><code>test</code></td><td>139</td><td>The matcher, every parser, capture filtering, pairing-link parsing, CSV import, webhook signatures, the QR service, id encoding.</td></tr>
       <tr><td><code>test:integration</code></td><td>9</td><td>Statement import, device commands, submission account scoping &mdash; against real Postgres.</td></tr>
       <tr><td><code>smoke</code></td><td>54</td><td>Intent lifecycle, idempotent replay, auth, validation, device capture, automatic matching, every submission outcome, underpayment, two-account failover, balance drift.</td></tr>
       <tr><td><code>smoke:checkout</code></td><td>51</td><td>The buyer's flow end to end: method choice, declaring a payer, split payments, refunds, overpayment, the QR route decoded and verified.</td></tr>
@@ -130,8 +130,18 @@ pnpm smoke:stress &lt;api_key&gt;</pre></div>
     The third doubles as the guard against the worst failure available: it is an
     <em>outgoing</em> message. If the watched phone ever sends money, it receives
     one of those, and it carries a TrxID, a reference, an amount and a balance
-    &mdash; everything the matcher reads. The parser refuses it, and there is a
-    fixture pinning that it must keep refusing it.
+    &mdash; everything the matcher reads. Reading one as income would credit an
+    order with money that went the other way.
+  </p>
+  <p>
+    What stops that is the <strong>transaction type</strong>, not a failure to
+    parse. Matching admits <code>send_money</code> and nothing else, so an
+    outgoing row is inert however completely it reads. It used to be stopped by
+    failing to parse instead, and that cost three kinds of noise: a
+    high-severity parse alert on every transfer the operator made, a permanent
+    manual-queue entry, and immunity from the capture settings, since an
+    unreadable message is always kept. Fixtures pin both the type and the fact
+    that the sender field stays empty.
   </p>
   <div class="note ok"><p>
     The live captures also pinned the timestamp handling: <code>04/09/2026
@@ -149,8 +159,8 @@ pnpm smoke:stress &lt;api_key&gt;</pre></div>
       <p>The message format is unknown, so the parser is a deliberate stub that fails loudly rather than guessing. Nagad captures store their raw text and wait for a human; checkout lists Nagad as unavailable. One real message closes this.</p>
     </div>
     <div class="card">
-      <h3>Android is emulator-only</h3>
-      <p>No emulator has a SIM, a wallet app, or a camera for the provisioning QR, so real capture and reboot survival are unproven on hardware.</p>
+      <h3>Android capture is emulator-only</h3>
+      <p>Pairing <em>is</em> proven on an emulator against the production server &mdash; App Links verify, the QR decodes from a screenshot, a device provisions end to end. But no emulator has a SIM or a wallet app, so <strong>capture itself and reboot survival are unproven on hardware</strong>. That is the gap that matters: forwarding messages is the app's whole job.</p>
     </div>
     <div class="card">
       <h3>Rate limiting is per-instance</h3>

@@ -535,13 +535,49 @@ and the pay page polls every 2.5 seconds.
 ## The Android notifier
 
 `apps/android/` — a Kotlin app that forwards bKash notifications and SMS to your
-server. Provisioned by scanning a QR from the dashboard, which it exchanges once
-for a long-lived device token.
+server. **[Download the APK](https://github.com/TahsinFaiyaz30/jomma/releases/latest)**
+— take the `-release` one; the `-debug` build is for development and is signed
+with a different key.
 
 Captures are written to a local Room database **first** and only marked sent on a
 2xx, so a flat battery, a dead network or a sleeping server delays a payment
 rather than losing it. Two capture paths — notification and SMS — fail
 independently; run both.
+
+### Pairing a phone
+
+Accounts → Add device shows a QR. It contains one thing, a URL:
+
+```
+https://<your-host>/pair/<one-time-code>
+```
+
+**Scan it with anything.** The phone's camera app, whatever scanner is already
+installed, or the notifier's own scanner — which will also read the code out of
+a screenshot, because the QR is often something that was sent to you rather than
+something on a screen in front of you.
+
+Any scanner works because a URL is the one payload every scanner can act on, and
+Android App Links then route it into the notifier with no chooser and no
+browser. That routing is also the security boundary: since Android 12 an app
+that cannot prove the domain endorses it cannot receive the link *or* register
+for it, so no other app can intercept a provisioning code.
+
+Nothing readable is in the QR — no token, no device id, no phone number. The
+code is still a bearer credential for fifteen minutes and one use, so a
+screenshot of a live QR is worth guarding; the narrower claim is that a scanner
+which displays what it read shows a host and an opaque string.
+
+### What it keeps
+
+bKash shows the phone far more than payments. **Accounts → What to capture** has
+three switches — cash in, money you sent, everything else — and the same three
+are in the app, writing to the same row. Incoming Send Money has no switch,
+because it is the only type that can settle an order.
+
+Anything switched off is dropped when it reaches the server, so it never fills
+the feed. A message the parser cannot read is kept regardless, as long as it
+looks like a transaction at all.
 
 Setup and permissions: **[docs/android.md](docs/android.md)**.
 
@@ -597,7 +633,7 @@ around rather than blocking checkout.
 ```bash
 pnpm lint              # Biome
 pnpm typecheck         # all five workspaces
-pnpm test              # 109 unit tests — matcher, parsers, CSV, signatures, QR
+pnpm test              # 139 unit tests — no database or .env needed
 pnpm test:integration  # needs a live database
 pnpm build             # production build
 ```
@@ -622,6 +658,69 @@ an afternoon:
 - **`pnpm smoke` deliberately degrades an account** to exercise drift detection.
   Re-run `pnpm db:seed` afterwards.
 
+The unit suites need no configuration — no database, no `.env`. That is enforced
+rather than hoped for: `vitest.config.ts` supplies a fake environment and stubs
+the database client so a test that reaches for a real connection fails loudly.
+Integration tests want both and are separate (`pnpm test:integration`).
+
+---
+
+## Versioning and releases
+
+One version for the whole product, in `VERSION` at the repository root. Every
+`package.json` and the Android build read from it, because they ship together —
+a phone reporting one version to a server running another is a support
+conversation nobody can win.
+
+```bash
+pnpm version:print         # what is it now
+pnpm version:set 1.2.0     # set it everywhere
+pnpm version:set minor     # or bump it
+```
+
+Never edit the file by hand. Android needs a version code derived from it
+(`1.4.2 → 10402`) that can never decrease for an installed app, so the script
+refuses a version that would break the arithmetic — at `1.100.0` the minor field
+carries and updates start failing on phones nobody is looking at.
+
+Two workflows in `.github/workflows/`:
+
+| Workflow | Runs on | Does |
+|---|---|---|
+| **CI** | every push to `main`, every PR, or on demand | types, lint, tests, Android unit tests, debug APK |
+| **Release** | a `v*` tag, or on demand | both APKs, signed, published as a GitHub Release |
+
+A normal push does **not** cut a release. To cut one:
+
+```bash
+pnpm version:set 1.2.0
+git commit -am "Release 1.2.0" && git push
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+The workflow refuses a tag that disagrees with `VERSION`, so `v1.2.0` cannot
+publish a build of `1.1.0`, and it runs the full suite before publishing
+anything.
+
+> A tag runs the workflow **as it existed at that tag's commit**. If you change
+> the workflow and re-tag, move the tag onto the new commit or you will re-run
+> the old one.
+
+### Forks
+
+Both workflows offer *Run workflow* in the Actions tab, because a fork inherits
+the workflows but not the tags and should still be able to produce an
+installable APK from its own build.
+
+Signing comes from four repository secrets — `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` — plus
+an optional `JOMMA_HOST` variable so App Links target your own domain. Without
+them the release still publishes, debug APK only, and says why: an unsigned
+release APK cannot be installed, so shipping one would be shipping nothing.
+
+Full detail, including what a fork must do about App Links:
+**[docs/versioning.md](docs/versioning.md)**.
+
 ---
 
 ## Status
@@ -637,9 +736,12 @@ Known gaps, stated plainly:
   `lib/parsers/nagad.ts` is a deliberate stub that fails loudly rather than
   guessing. Nagad captures store their raw text and wait for a human; checkout
   lists Nagad as unavailable. One real Nagad message closes this.
-- **The Android app has only run on an emulator** — no emulator has a SIM, a
-  bKash app, or a camera for the provisioning QR, so real capture and reboot
-  survival are unproven on hardware.
+- **The Android app has only run on an emulator.** Pairing is proven there
+  against the production server — App Links verify, the QR decodes from a
+  screenshot, and a device provisions end to end — but no emulator has a SIM or
+  the bKash app, so **capture itself and reboot survival are unproven on real
+  hardware.** That is the gap that matters: forwarding messages is the app's
+  entire job.
 - **Rate limiting is in-process**, therefore per-instance. Fine on one instance;
   the per-intent submission limit is database-backed either way.
 - **The Messages bridge has never held a real pairing.** It is off by default and
@@ -662,4 +764,5 @@ than one payment.
 | [docs/matching.md](docs/matching.md) | Why the rules are what they are |
 | [docs/design.md](docs/design.md) | Design system and the dashboard's information architecture |
 | [docs/deploy.md](docs/deploy.md) | Hosting, free-tier trade-offs, backups |
-| [docs/android.md](docs/android.md) | Notifier setup, permissions, provisioning |
+| [docs/android.md](docs/android.md) | Notifier setup, permissions, pairing, App Links |
+| [docs/versioning.md](docs/versioning.md) | One version, the release workflows, signing a fork |

@@ -50,6 +50,7 @@
     <a class="sub" href="#env">Configuration</a>
     <a class="sub" href="#dashboard">The dashboard</a>
     <a class="sub" href="#phone">The phone app</a>
+    <a class="sub" href="#releases">Versions &amp; releases</a>
     <a class="sub" href="#deploy">Deploying</a>
     <a class="sub" href="#free">The free tier</a>
     <a class="sub" href="#ops">Backups & upgrades</a>
@@ -167,24 +168,155 @@ pnpm dev:worker   # the scheduler</pre></div>
   </p>
   <h3>Setting one up</h3>
   <ol>
-    <li>Build and install the APK on a phone holding your receiving SIM.</li>
+    <li>Install the APK on a phone holding your receiving SIM &mdash; <a href="https://github.com/TahsinFaiyaz30/jomma/releases/latest">from the releases page</a>, taking the <code>-release</code> build. The <code>-debug</code> one is for development and is signed with a different key.</li>
     <li>In the dashboard, go to <b>Accounts</b>, pick the receiving number, and add a device. A provisioning QR appears and is valid for fifteen minutes.</li>
-    <li>Scan it from the app. It exchanges the one-time code for a long-lived device token, and the one-time value is burned.</li>
+    <li><b>Scan it with anything.</b> The phone's camera app, any scanner you already have, or the notifier's own scanner &mdash; which will also read the code out of a screenshot.</li>
     <li>Grant notification-listener and SMS-read permission. Run both paths &mdash; they fail independently.</li>
     <li>Send a small transfer and watch it appear on the <b>Feed</b>.</li>
   </ol>
+
+  <h3>Why any scanner works</h3>
+  <p>
+    The QR contains one thing &mdash; a URL,
+    <code>https://your-host/pair/&lt;one-time-code&gt;</code> &mdash; because a URL
+    is the one payload every scanner app can act on. Android
+    <b>App Links</b> then route it into the notifier with no chooser and no
+    browser.
+  </p>
+  <p>
+    That routing is also the security boundary. Since Android&nbsp;12 an app that
+    cannot prove the domain endorses it does not receive the link
+    <em>and cannot register for it</em>, so no other app can intercept a
+    provisioning code. A custom <code>jomma://</code> scheme would have been
+    simpler and had the opposite property: any app may claim one.
+  </p>
+  <p>
+    Verification depends on your instance serving the APK's signing fingerprint
+    at <code>/.well-known/assetlinks.json</code>. That works out of the box for
+    builds of this repository; a fork signing its own APK sets
+    <code>ANDROID_CERT_SHA256</code>. Until Android has verified &mdash; it asks
+    Google's asset-links service, which caches for an hour &mdash; the link opens
+    a browser, and that page hands off to the app with an
+    <code>intent://</code> URL naming the package, so scanning still reaches the
+    notifier either way.
+  </p>
+  <div class="note"><p>
+    <strong>Nothing readable is in the QR</strong> &mdash; no token, no device id,
+    no phone number. It used to be JSON carrying all three, which any scanner
+    would happily display. The code is still a bearer credential for fifteen
+    minutes and one use, so a screenshot of a <em>live</em> QR is worth guarding;
+    the narrower claim is that a scanner showing what it read shows a host and an
+    opaque string.
+  </p></div>
   <div class="note"><p>
     <strong>Tokens are hashed at rest</strong>, scoped to one receiving account,
-    and individually revocable. A screenshot of a provisioning QR left in a chat
-    is not a way into the capture endpoint, and a lost phone costs one device
-    rather than the integration.
+    and individually revocable. A lost phone costs one device rather than the
+    integration.
   </p></div>
+
+  <h3>What it keeps</h3>
+  <p>
+    bKash shows the phone far more than payments. <b>Accounts &rarr; What to
+    capture</b> has three switches &mdash; cash in, money you sent, everything
+    else &mdash; and the same three are in the app, writing to the same row, so
+    whichever screen is closer to hand wins.
+  </p>
+  <p>
+    Incoming Send Money has no switch, because it is the only type that can
+    settle an order. Anything switched off is dropped when it reaches the server
+    and never stored. A message the parser cannot read is kept regardless, as
+    long as it looks like a transaction at all &mdash; that is the evidence
+    needed to fix the parser.
+  </p>
   <h3>Keeping it alive</h3>
   <ul>
     <li>Turn off battery optimisation for the app, or Android will eventually stop it.</li>
     <li>Leave it charging. The app survives reboot, but a dead phone captures nothing.</li>
     <li>Watch for <code>account.degraded</code> &mdash; a silent phone raises it, and that is your early warning that payments may be arriving unseen.</li>
   </ul>
+</section>
+
+<section id="releases">
+  <h2>Versions &amp; releases</h2>
+  <p>
+    One version for the whole product, in <code>VERSION</code> at the repository
+    root. Every <code>package.json</code> and the Android build read from it,
+    because they ship together &mdash; a phone reporting one version to a server
+    running another is a support conversation nobody can win.
+  </p>
+
+  <div class="code" data-lang="bash"><pre>pnpm version:print         # what is it now
+pnpm version:set 1.2.0     # set it everywhere
+pnpm version:set minor     # or bump it</pre></div>
+
+  <p>
+    Never edit the file by hand. Android needs a version code derived from it
+    (<code>1.4.2 &rarr; 10402</code>) that can never decrease for an installed
+    app, so the script refuses a version that would break the arithmetic. At
+    <code>1.100.0</code> the minor field carries into the next and updates start
+    failing on phones nobody is looking at.
+  </p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Workflow</th><th>Runs on</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td>CI</td><td>every push to <code>main</code>, every PR, or on demand</td><td>types, lint, tests, Android unit tests, debug APK</td></tr>
+      <tr><td>Release</td><td>a <code>v*</code> tag, or on demand</td><td>both APKs, signed, published as a GitHub Release</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>A normal push does <strong>not</strong> cut a release. To cut one:</p>
+  <div class="code" data-lang="bash"><pre>pnpm version:set 1.2.0
+git commit -am "Release 1.2.0" &amp;&amp; git push
+git tag v1.2.0 &amp;&amp; git push origin v1.2.0</pre></div>
+
+  <p>
+    The workflow refuses a tag that disagrees with <code>VERSION</code>, so
+    <code>v1.2.0</code> cannot publish a build of <code>1.1.0</code>, and it runs
+    the full suite before publishing anything.
+  </p>
+
+  <div class="note warn"><p>
+    A tag runs the workflow <strong>as it existed at that tag's commit</strong>.
+    Change the workflow and re-tag without moving the tag onto the new commit and
+    you will re-run the old one, which is a confusing way to lose an afternoon.
+  </p></div>
+
+  <h3>Forking</h3>
+  <p>
+    Both workflows offer <em>Run workflow</em> in the Actions tab, because a fork
+    inherits the workflows but not the tags and should still be able to produce
+    an installable APK from its own build.
+  </p>
+  <p>Signing comes from four repository secrets:</p>
+  <div class="tw"><table>
+    <thead><tr><th>Secret</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td><code>ANDROID_KEYSTORE_BASE64</code></td><td><code>base64 -w0 your.jks</code></td></tr>
+      <tr><td><code>ANDROID_KEYSTORE_PASSWORD</code></td><td>store password</td></tr>
+      <tr><td><code>ANDROID_KEY_ALIAS</code></td><td>key alias</td></tr>
+      <tr><td><code>ANDROID_KEY_PASSWORD</code></td><td>key password</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Plus an optional <code>JOMMA_HOST</code> repository <em>variable</em>, so the
+    APK's App Links target your domain rather than this one's. Without the
+    secrets the release still publishes &mdash; debug APK only, saying why. An
+    unsigned release APK cannot be installed, so shipping one would be shipping
+    nothing.
+  </p>
+  <div class="note warn"><p>
+    A fork signing with its own key <strong>must publish its own fingerprint</strong>
+    in <code>ANDROID_CERT_SHA256</code>, or provisioning QRs open a browser
+    instead of the app. <code>./gradlew :app:printSigningFingerprint</code>
+    prints it, and the release workflow prints it too from the APK it just built.
+  </p></div>
+  <div class="note"><p>
+    <strong>Keep the keystore.</strong> Losing it means no future build can
+    update an installed copy &mdash; Android refuses an update signed by a
+    different key, and the only way out is uninstalling every phone and
+    provisioning it again.
+  </p></div>
 </section>
 
 <section id="deploy">
