@@ -18,10 +18,10 @@ name: Prune orphaned history
 # anything whose SHA `git rev-list` cannot reach is orphaned, and only those are
 # touched.
 on:
+  # Manual only. It deletes records, so it should run when somebody decides it
+  # should, not as a side effect of editing this file — which is how it first
+  # ran, twice, while being debugged.
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/prune-orphans.yml']
 
 permissions:
   actions: write
@@ -149,3 +149,9 @@ jobs:
             echo "Once nothing references them, GitHub can garbage-collect the orphaned"
             echo "commits and the contributors list is rebuilt from the surviving history."
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # Succeed as long as the work was attempted. "Some record refused to
+          # delete" is information, printed above and in the summary — not a
+          # reason to show a red cross that implies nothing was cleaned. Run it
+          # again and it picks up whatever was left.
+          exit 0
