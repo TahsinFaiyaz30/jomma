@@ -1,0 +1,122 @@
+name: Prune orphaned history
+
+# Deletes workflow runs and deployments that pin commits no longer reachable
+# from `main`.
+#
+# Why this has to exist: force-pushing a rewritten history does not delete the
+# old commits. Every Actions run and every deployment records the SHA it ran
+# against, and those references keep the objects alive — browsable, and still
+# counted by the contributors index. So a rewrite that removed a `Co-Authored-By`
+# trailer from every commit left the co-author listed anyway, because the
+# pre-rewrite commits were still there behind 25 workflow runs and 31
+# deployments.
+#
+# It authenticates with the automatic `GITHUB_TOKEN`, which is scoped to this
+# repository and issued per run. No personal access token, and nothing to store.
+#
+# Reachability is computed from the real history, not from dates or guesses:
+# anything whose SHA `git rev-list` cannot reach is orphaned, and only those are
+# touched.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/prune-orphans.yml']
+
+permissions:
+  actions: write
+  deployments: write
+  contents: read
+
+concurrency:
+  group: prune-orphans
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history — a shallow clone would report almost every SHA as
+          # unreachable and delete records that are perfectly fine.
+          fetch-depth: 0
+
+      - name: Delete records pinned to unreachable commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          THIS_RUN: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          git rev-list --all > /tmp/reachable.txt
+          echo "reachable commits: $(wc -l < /tmp/reachable.txt)"
+
+          reachable() { grep -qx "$1" /tmp/reachable.txt; }
+
+          echo "::group::Workflow runs"
+          deleted=0
+          kept=0
+          # `--paginate` because there are more runs than one page, and missing
+          # one leaves a reference behind that defeats the whole exercise.
+          gh api --paginate "/repos/$REPO/actions/runs?per_page=100" \
+            --jq '.workflow_runs[] | "\(.id) \(.head_sha)"' > /tmp/runs.txt || true
+
+          while read -r id sha; do
+            [ -z "${id:-}" ] && continue
+            # Never delete the run doing the deleting; it would cancel itself.
+            if [ "$id" = "$THIS_RUN" ]; then continue; fi
+            if reachable "$sha"; then
+              kept=$((kept + 1))
+            else
+              if gh api -X DELETE "/repos/$REPO/actions/runs/$id" >/dev/null 2>&1; then
+                deleted=$((deleted + 1))
+                echo "deleted run $id (${sha:0:7})"
+              else
+                echo "could not delete run $id"
+              fi
+            fi
+          done < /tmp/runs.txt
+          echo "runs: $deleted deleted, $kept kept"
+          echo "::endgroup::"
+
+          echo "::group::Deployments"
+          ddeleted=0
+          dkept=0
+          gh api --paginate "/repos/$REPO/deployments?per_page=100" \
+            --jq '.[] | "\(.id) \(.sha)"' > /tmp/deps.txt || true
+
+          while read -r id sha; do
+            [ -z "${id:-}" ] && continue
+            if reachable "$sha"; then
+              dkept=$((dkept + 1))
+              continue
+            fi
+            # An *active* deployment cannot be deleted. Retiring it first is
+            # also what keeps Pages serving: the live deployment is on a
+            # reachable commit, so it is never in this branch.
+            gh api -X POST "/repos/$REPO/deployments/$id/statuses" \
+              -f state=inactive >/dev/null 2>&1 || true
+            if gh api -X DELETE "/repos/$REPO/deployments/$id" >/dev/null 2>&1; then
+              ddeleted=$((ddeleted + 1))
+              echo "deleted deployment $id (${sha:0:7})"
+            else
+              echo "could not delete deployment $id"
+            fi
+          done < /tmp/deps.txt
+          echo "deployments: $ddeleted deleted, $dkept kept"
+          echo "::endgroup::"
+
+          {
+            echo "### Pruned orphaned references"
+            echo
+            echo "| | Deleted | Kept |"
+            echo "| --- | --- | --- |"
+            echo "| Workflow runs | $deleted | $kept |"
+            echo "| Deployments | $ddeleted | $dkept |"
+            echo
+            echo "Anything kept is pinned to a commit still reachable from a branch or tag."
+            echo "GitHub can now garbage-collect the orphaned commits, after which the"
+            echo "contributors list is rebuilt from the surviving history alone."
+          } >> "$GITHUB_STEP_SUMMARY"
