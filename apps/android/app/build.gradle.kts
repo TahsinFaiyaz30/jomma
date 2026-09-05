@@ -5,9 +5,41 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+/*
+ * Release signing.
+ *
+ * Read from Gradle properties so a keystore path and its passwords never enter
+ * the repository. Put them in `~/.gradle/gradle.properties`, which is outside
+ * the project and outside any sync folder:
+ *
+ *     jommaKeystore=C:/keys/jomma.jks
+ *     jommaKeystorePassword=…
+ *     jommaKeyAlias=jomma
+ *     jommaKeyPassword=…
+ *
+ * Absent, `assembleRelease` still runs and produces an *unsigned* APK, which
+ * Android will refuse to install. That used to be the silent end of the road:
+ * the only build you could actually put on a phone was the debug one, and its
+ * certificate is not the one you would publish in assetlinks.json. The check in
+ * `printSigningFingerprint` below says so out loud instead.
+ */
+val keystorePath = project.findProperty("jommaKeystore") as String?
+val keystoreFile = keystorePath?.let(::file)?.takeIf { it.exists() }
+
 android {
     namespace = "com.jomma.notifier"
     compileSdk = 37
+
+    signingConfigs {
+        if (keystoreFile != null) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = project.findProperty("jommaKeystorePassword") as String?
+                keyAlias = project.findProperty("jommaKeyAlias") as String?
+                keyPassword = project.findProperty("jommaKeyPassword") as String?
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.jomma.notifier"
@@ -36,6 +68,8 @@ android {
 
     buildTypes {
         release {
+            if (keystoreFile != null) signingConfig = signingConfigs.getByName("release")
+
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
 
@@ -134,4 +168,81 @@ dependencies {
     // Plain JVM tests. `PairingLink` is pure Kotlin on purpose so the rules
     // about what counts as a provisioning link can be tested without a device.
     testImplementation(libs.junit)
+}
+
+/**
+ * Prints the SHA-256 fingerprint to put in `ANDROID_CERT_SHA256`.
+ *
+ *     ./gradlew :app:printSigningFingerprint
+ *
+ * This exists because the App Link half of provisioning fails *silently*
+ * otherwise. Nothing errors: the server publishes an empty statement list,
+ * Android declines to verify the domain, and a QR scanned with the camera app
+ * opens a browser instead of the notifier. Working out that the cause was an
+ * unset environment variable — and then that the value came from a keytool
+ * invocation nobody remembers — is not a debugging session anyone should have.
+ *
+ * Prints the release certificate when a keystore is configured, and the debug
+ * one otherwise, saying which. They are different keys: publishing the debug
+ * fingerprint authorises only APKs built on this machine, which is fine while
+ * testing and wrong for anything you hand to someone else.
+ */
+tasks.register("printSigningFingerprint") {
+    group = "jomma"
+    description = "SHA-256 of the signing certificate, for ANDROID_CERT_SHA256."
+
+    val release = keystoreFile
+    val releaseAlias = project.findProperty("jommaKeyAlias") as String?
+    val releasePassword = project.findProperty("jommaKeystorePassword") as String?
+    val debug = File(System.getProperty("user.home"), ".android/debug.keystore")
+    val host = (project.findProperty("jommaHost") as String?) ?: "jomma-web.onrender.com"
+    val javaHome = System.getProperty("java.home")
+
+    doLast {
+        val (store, alias, password, kind) =
+            if (release != null) {
+                listOf(release.absolutePath, releaseAlias ?: "", releasePassword ?: "", "release")
+            } else {
+                listOf(debug.absolutePath, "androiddebugkey", "android", "debug")
+            }
+
+        if (!File(store).exists()) {
+            throw GradleException(
+                "No keystore at $store. Set jommaKeystore in ~/.gradle/gradle.properties, " +
+                    "or build a debug APK once to have Android create a debug keystore.",
+            )
+        }
+
+        val output = providers.exec {
+            commandLine(
+                "$javaHome/bin/keytool", "-list", "-v",
+                "-keystore", store, "-alias", alias,
+                "-storepass", password, "-keypass", password,
+            )
+        }.standardOutput.asText.get()
+
+        val fingerprint = output.lineSequence()
+            .firstOrNull { it.trim().startsWith("SHA256:") }
+            ?.substringAfter("SHA256:")
+            ?.trim()
+            ?: throw GradleException("keytool did not report a SHA-256 for alias '$alias'.")
+
+        logger.lifecycle(
+            """
+
+            $kind signing certificate
+            ────────────────────────────────────────────────────────────────
+            ANDROID_CERT_SHA256=$fingerprint
+
+            Set that on the server, then confirm it is being served:
+              curl https://$host/.well-known/assetlinks.json
+
+            The APK must be built for the same host:
+              ./gradlew assembleRelease -PjommaHost=$host
+
+            On the phone, `adb shell pm get-app-links com.jomma.notifier`
+            should then report `verified` rather than `none`.
+            """.trimIndent(),
+        )
+    }
 }

@@ -162,7 +162,9 @@ function AccountCard({ account }: { account: AccountView }) {
   const [pending, startTransition] = useTransition()
   const [deviceName, setDeviceName] = useState('')
   const [reveal, setReveal] = useState<
-    { kind: 'qr'; dataUrl: string; expiresAt: string } | { kind: 'token'; value: string } | null
+    | { kind: 'qr'; dataUrl: string; expiresAt: string; appLinksReady: boolean }
+    | { kind: 'token'; value: string }
+    | null
   >(null)
 
   const tone = !account.routable
@@ -534,7 +536,9 @@ function RevealPanel({
   reveal,
   onDismiss,
 }: {
-  reveal: { kind: 'qr'; dataUrl: string; expiresAt: string } | { kind: 'token'; value: string }
+  reveal:
+    | { kind: 'qr'; dataUrl: string; expiresAt: string; appLinksReady: boolean }
+    | { kind: 'token'; value: string }
   onDismiss: () => void
 }) {
   return (
@@ -555,10 +559,26 @@ function RevealPanel({
                 height={220}
                 className="rounded-md bg-white p-2"
               />
-              <p className="max-w-56 text-micro text-muted-foreground">
-                Any QR scanner works — the phone's camera app will offer to open it in Jomma. Or use
-                the app's own scanner, which can also read it from a screenshot.
-              </p>
+              {reveal.appLinksReady ? (
+                <p className="max-w-56 text-micro text-muted-foreground">
+                  Any QR scanner works — the phone's camera app will offer to open it in Jomma. Or
+                  use the app's own scanner, which can also read it from a screenshot.
+                </p>
+              ) : (
+                /*
+                 * The failure this warning exists for is silent. The QR is
+                 * valid and the app is installed; the link just opens a browser,
+                 * because Android will not verify a domain that does not name
+                 * the app's certificate. Nothing errors anywhere.
+                 */
+                <p className="max-w-56 text-micro text-ambiguous-subtle-foreground">
+                  <strong>Use the app's own scanner for now.</strong> Another scanner will open a
+                  browser instead, because <code className="figure">ANDROID_CERT_SHA256</code> is
+                  not set on this instance. Run{' '}
+                  <code className="figure">gradlew :app:printSigningFingerprint</code> and set what
+                  it prints.
+                </p>
+              )}
               <p className="text-micro text-muted-foreground">
                 Expires {new Date(reveal.expiresAt).toLocaleTimeString()}. One scan only.
               </p>

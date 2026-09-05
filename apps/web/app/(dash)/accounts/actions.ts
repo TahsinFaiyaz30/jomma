@@ -1,6 +1,7 @@
 'use server'
 
 import type { CaptureSettings } from '@jomma/shared'
+import { env } from '@jomma/shared/env'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/session'
 import {
@@ -19,7 +20,9 @@ export interface DeviceActionResult {
   ok: boolean
   message: string
   /** Shown once and never again — the QR image, or a rotated token. */
-  secret?: { kind: 'qr'; dataUrl: string; expiresAt: string } | { kind: 'token'; value: string }
+  secret?:
+    | { kind: 'qr'; dataUrl: string; expiresAt: string; appLinksReady: boolean }
+    | { kind: 'token'; value: string }
 }
 
 export async function addAccountAction(
@@ -67,7 +70,21 @@ export async function addDeviceAction(
     return {
       ok: true,
       message: 'Scan this with the phone — any QR scanner works. It expires in 15 minutes.',
-      secret: { kind: 'qr', dataUrl: qrDataUrl, expiresAt: payload.expires_at },
+      secret: {
+        kind: 'qr',
+        dataUrl: qrDataUrl,
+        expiresAt: payload.expires_at,
+        /*
+         * Whether this instance publishes the app's signing fingerprint.
+         *
+         * Without it, Android will not verify the domain, and a QR scanned with
+         * the phone's camera app opens a browser instead of the notifier. That
+         * failure is completely silent — the QR is valid, the app is installed,
+         * the link just goes to the wrong place — so the panel has to say so
+         * where somebody is actually looking at the QR.
+         */
+        appLinksReady: env().ANDROID_CERT_SHA256.trim().length > 0,
+      },
     }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Could not add device.' }
