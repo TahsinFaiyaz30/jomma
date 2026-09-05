@@ -172,6 +172,18 @@ carries a stable `event_id`.
 **No PINs, no credentials, no money movement.** If a feature request requires
 holding a user's MFS PIN or initiating a transfer, it does not belong in Jomma.
 
+**The version lives in `VERSION` and nowhere else.** Web, packages and app share
+one number because they ship together. Change it with `pnpm version:set`, never
+by editing a file — the script refuses versions that would break the Android
+version code, and CI (`pnpm version:check`) fails on drift.
+
+Bump it in the same change that earns it: patch for an invisible fix, minor for
+a new capability, major for anything that stops working the way it did. If you
+make a breaking change without a major bump, say in the commit message why it
+does not count. `docs/versioning.md` has the rest, including the rule that minor
+and patch must stay below 100 or updates start failing on phones nobody is
+looking at.
+
 ---
 
 ## Ingestion adapters

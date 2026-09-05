@@ -1,6 +1,6 @@
 {
   "name": "jomma",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.34.5",
@@ -31,7 +31,10 @@
     "test:integration": "pnpm --filter @jomma/web test:integration",
     "smoke:checkout": "node scripts/smoke-checkout.mjs",
     "smoke:audit": "node scripts/audit.mjs",
-    "smoke:stress": "node scripts/stress.mjs"
+    "smoke:stress": "node scripts/stress.mjs",
+    "version:print": "node scripts/version.mjs",
+    "version:check": "node scripts/version.mjs --check",
+    "version:set": "node scripts/version.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.4",

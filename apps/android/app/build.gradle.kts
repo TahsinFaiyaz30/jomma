@@ -26,6 +26,46 @@ plugins {
 val keystorePath = project.findProperty("jommaKeystore") as String?
 val keystoreFile = keystorePath?.let(::file)?.takeIf { it.exists() }
 
+/*
+ * The version, from the repository root `VERSION` file.
+ *
+ * One number for the whole product — web, packages and app — because they ship
+ * together and a phone reporting a different version from the server it talks
+ * to is a support conversation nobody can win. `docs/versioning.md` has the
+ * rules; `pnpm version:set` is how it changes.
+ *
+ * Read rather than duplicated. This used to say `1.0.0` while every
+ * package.json said `0.1.0`, and neither was right.
+ */
+val jommaVersion: String = rootProject.projectDir
+    .resolveSibling("..")
+    .let { generateSequence(rootProject.projectDir) { it.parentFile }.take(5) }
+    .map { File(it, "VERSION") }
+    .firstOrNull { it.isFile }
+    ?.readText()
+    ?.trim()
+    ?: error("No VERSION file found above ${rootProject.projectDir}.")
+
+/**
+ * `1.4.2` becomes `10402`.
+ *
+ * Android needs a monotonically increasing integer, and it can never go
+ * backwards for an installed app — a lower one is refused as a downgrade. This
+ * mapping keeps ordering identical to semver ordering as long as minor and
+ * patch stay below 100, which `scripts/version.mjs` enforces when it writes the
+ * VERSION file.
+ */
+fun versionCodeOf(version: String): Int {
+    // `substringBefore('-')` drops a pre-release suffix like `1.4.2-rc1`, which
+    // shares a version code with the release it precedes. Splitting on '-' and
+    // '.' together instead would leave only the major number.
+    val parts = version.substringBefore('-').split('.').map { it.trim().toIntOrNull() ?: 0 }
+    val major = parts.getOrElse(0) { 0 }
+    val minor = parts.getOrElse(1) { 0 }
+    val patch = parts.getOrElse(2) { 0 }
+    return major * 10_000 + minor * 100 + patch
+}
+
 android {
     namespace = "com.jomma.notifier"
     compileSdk = 37
@@ -45,8 +85,8 @@ android {
         applicationId = "com.jomma.notifier"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = versionCodeOf(jommaVersion)
+        versionName = jommaVersion
 
         /*
          * The host whose `/pair/…` links this build is allowed to open.

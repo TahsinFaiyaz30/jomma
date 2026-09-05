@@ -1,0 +1,74 @@
+name: CI
+
+# Everything that must be true before a commit is trusted. Runs on the default
+# branch, on pull requests, and on demand — `workflow_dispatch` so a fork can
+# prove its own copy builds without opening a pull request first.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push makes the previous run's answer irrelevant. Cancelling keeps the
+# free runner minutes for the commit somebody is actually waiting on.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Web — types, lint, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # First, and on its own, because a version mismatch is the one failure
+      # that produces a *working* build that lies about what it is.
+      - name: Version is consistent
+        run: pnpm version:check
+
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  android:
+    name: Android — tests, debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        working-directory: apps/android
+        run: ./gradlew testDebugUnitTest
+
+      # Assembling is the real check on the Compose and manifest work — most of
+      # this app is UI and resources, which unit tests never touch.
+      - name: Build debug APK
+        working-directory: apps/android
+        run: ./gradlew assembleDebug
+
+      - name: Keep the APK for this commit
+        uses: actions/upload-artifact@v4
+        with:
+          name: jomma-notifier-debug
+          path: apps/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

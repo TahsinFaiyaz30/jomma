@@ -1,0 +1,202 @@
+name: Release
+
+# Publishes the APKs for one commit.
+#
+# Two ways in:
+#   - push a tag: `git tag v1.1.0 && git push origin v1.1.0`
+#   - run it by hand from the Actions tab, which is what a fork will use
+#
+# `workflow_dispatch` matters for forks specifically. A fork gets the workflow
+# but not the tags, and its owner should be able to produce an installable APK
+# from their own build without pushing a tag or opening a pull request.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release. Defaults to the VERSION file.'
+        required: false
+        type: string
+      publish:
+        description: 'Create a GitHub Release. Off = build the APKs only.'
+        required: false
+        default: true
+        type: boolean
+      prerelease:
+        description: 'Mark the release as a pre-release.'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: pnpm install --frozen-lockfile
+
+      # Nothing is published from a commit that does not pass. A release is the
+      # one artefact people install without looking, so the gate belongs here
+      # too and not only on the CI workflow.
+      - name: Verify
+        run: |
+          pnpm version:check
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Tag drives it, so `v1.1.0` and VERSION cannot disagree in what
+            # gets published under that name.
+            version="${GITHUB_REF_NAME#v}"
+            file_version="$(cat VERSION)"
+            if [ "$version" != "$file_version" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match VERSION ($file_version). Run 'pnpm version:set $version' and commit before tagging."
+              exit 1
+            fi
+          else
+            version="${{ inputs.version }}"
+            [ -z "$version" ] && version="$(cat VERSION)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version"
+
+      # Absent on a fork, and that is expected rather than an error. Without it
+      # the release APK cannot be signed, so only the debug APK — which Android
+      # signs with its own well-known key — is installable.
+      - name: Restore signing key
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret — publishing the debug APK only."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/jomma-release.jks"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build debug APK
+        working-directory: apps/android
+        run: ./gradlew assembleDebug
+
+      - name: Build signed release APK
+        if: steps.signing.outputs.available == 'true'
+        working-directory: apps/android
+        # Passed on the command line rather than written to gradle.properties so
+        # the passwords are never on disk in the workspace.
+        run: |
+          ./gradlew assembleRelease \
+            -PjommaKeystore="$RUNNER_TEMP/jomma-release.jks" \
+            -PjommaKeystorePassword="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -PjommaKeyAlias="${{ secrets.ANDROID_KEY_ALIAS }}" \
+            -PjommaKeyPassword="${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            ${JOMMA_HOST:+-PjommaHost="$JOMMA_HOST"}
+        env:
+          # Lets a fork build for its own domain. Unset, the default in
+          # build.gradle.kts applies.
+          JOMMA_HOST: ${{ vars.JOMMA_HOST }}
+
+      - name: Collect APKs
+        id: apks
+        run: |
+          mkdir -p dist
+          v="${{ steps.version.outputs.version }}"
+          cp apps/android/app/build/outputs/apk/debug/app-debug.apk "dist/jomma-notifier-$v-debug.apk"
+          if [ -f apps/android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp apps/android/app/build/outputs/apk/release/app-release.apk "dist/jomma-notifier-$v-release.apk"
+          fi
+          ls -la dist
+          # Published alongside the APKs. An APK downloaded from the internet
+          # should be checkable against something the build itself recorded.
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
+      - name: Fingerprint the release APK
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          apk="dist/jomma-notifier-$v-release.apk"
+          tools="$(ls -d "$ANDROID_HOME"/build-tools/* | tail -1)"
+          # The value that has to appear in /.well-known/assetlinks.json for
+          # provisioning QRs to open in the app rather than a browser. Printing
+          # it here means a fork never has to go looking for it.
+          "$tools/apksigner" verify --print-certs "$apk" | grep -i "SHA-256 digest" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jomma-notifier-${{ steps.version.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ steps.signing.outputs.available }}
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          tag="${{ steps.version.outputs.tag }}"
+
+          {
+            echo "Built from \`${GITHUB_SHA:0:7}\`."
+            echo
+            echo "| File | What it is |"
+            echo "| --- | --- |"
+            echo "| \`jomma-notifier-$v-debug.apk\` | Debug build. Installable on any phone, signed with Android's debug key. |"
+            if [ "$SIGNED" = "true" ]; then
+              echo "| \`jomma-notifier-$v-release.apk\` | Release build. Minified, arm-only, signed with this project's key. **Install this one.** |"
+            fi
+            echo "| \`SHA256SUMS.txt\` | Checksums for the above. |"
+            echo
+            if [ "$SIGNED" != "true" ]; then
+              echo "> No signing key was configured, so there is no release APK."
+              echo "> Add \`ANDROID_KEYSTORE_BASE64\`, \`ANDROID_KEYSTORE_PASSWORD\`,"
+              echo "> \`ANDROID_KEY_ALIAS\` and \`ANDROID_KEY_PASSWORD\` as repository"
+              echo "> secrets — see docs/versioning.md."
+              echo
+            fi
+            echo "Provisioning QRs only open straight in the app when the server"
+            echo "publishes this APK's signing fingerprint. See docs/android.md."
+          } > notes.md
+
+          # Idempotent on purpose: re-running a release should replace its
+          # assets rather than fail on the second attempt.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+            gh release edit "$tag" --notes-file notes.md
+          else
+            gh release create "$tag" dist/* \
+              --title "Jomma $v" \
+              --notes-file notes.md \
+              ${{ (github.event_name == 'workflow_dispatch' && inputs.prerelease) && '--prerelease' || '' }}
+          fi

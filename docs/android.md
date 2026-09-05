@@ -210,8 +210,11 @@ security property; it is enforced by the OS, not by obscurity.
 
 Two halves, and both must agree:
 
-- **Server.** `ANDROID_CERT_SHA256` is the APK's signing fingerprint, published
-  at `/.well-known/assetlinks.json`.
+- **Server.** The fingerprint published at `/.well-known/assetlinks.json`. This
+  repository's own release key is the committed default in
+  `lib/services/app-links.ts`; `ANDROID_CERT_SHA256` overrides it for a fork
+  signing its own APK. A fingerprint is not a secret — being published at that
+  URL is its entire purpose.
 - **App.** The host is baked into the manifest, because App Links verify against
   a literal host that cannot be discovered at runtime:
 
@@ -219,12 +222,33 @@ Two halves, and both must agree:
   ./gradlew assembleRelease -PjommaHost=pay.yourshop.com
   ```
 
+  `./gradlew :app:printSigningFingerprint` prints the value to publish, and the
+  commands to confirm it took.
+
 Check it landed with `adb shell pm get-app-links com.jomma.notifier`, which
 should report `verified` for your host.
 
-Unverified, nothing breaks: the link opens in a browser and lands on a page
-explaining what to install, and the app's own scanner still works. It upgrades
-itself once both halves are set.
+### Verification lags, so there is a second path
+
+Android does not verify at install time by itself — it asks Google's Digital
+Asset Links service, which **caches for an hour**. Change a fingerprint and
+`pm get-app-links` will keep reporting failure long after the file is correct.
+Confirm what Google currently believes rather than guessing:
+
+```
+curl "https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://<your-host>&relation=delegate_permission/common.handle_all_urls"
+```
+
+An empty `{"maxAge": "3600s"}` is a cached negative, not a broken file.
+
+During that window a scanned QR opens a browser. So `/pair/<code>` hands off to
+the app itself with an `intent://` URL naming `package=com.jomma.notifier` —
+Android delivers that to the notifier or to nothing, with no chooser and no
+dependence on verification. Scanning with another app therefore reaches the
+notifier either way: directly once verified, via a browser bounce until then.
+
+Not a `jomma://` scheme, deliberately. Any app can claim a custom scheme; an
+explicit package cannot be claimed by anyone else.
 
 What the QR does *not* contain: a token, a device id, an account number, or a
 label. All of that used to be in it as plain JSON, which any scanner would
