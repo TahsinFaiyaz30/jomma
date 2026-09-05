@@ -1,7 +1,6 @@
 'use server'
 
 import type { CaptureSettings } from '@jomma/shared'
-import { env } from '@jomma/shared/env'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/session'
 import {
@@ -10,6 +9,7 @@ import {
   setAccountStatus,
   setCaptureSettings,
 } from '@/lib/services/account-admin'
+import { appLinksConfigured } from '@/lib/services/app-links'
 import {
   createDeviceWithProvisioning,
   requestTokenRotation,
@@ -75,15 +75,15 @@ export async function addDeviceAction(
         dataUrl: qrDataUrl,
         expiresAt: payload.expires_at,
         /*
-         * Whether this instance publishes the app's signing fingerprint.
+         * Whether this instance publishes a usable signing fingerprint.
          *
-         * Without it, Android will not verify the domain, and a QR scanned with
-         * the phone's camera app opens a browser instead of the notifier. That
-         * failure is completely silent — the QR is valid, the app is installed,
-         * the link just goes to the wrong place — so the panel has to say so
-         * where somebody is actually looking at the QR.
+         * Without one, Android will not verify the domain, and a QR scanned
+         * with the phone's camera app opens a browser instead of the notifier.
+         * That failure is completely silent — the QR is valid, the app is
+         * installed, the link just goes to the wrong place — so the panel says
+         * so where somebody is actually looking at the QR.
          */
-        appLinksReady: env().ANDROID_CERT_SHA256.trim().length > 0,
+        appLinksReady: appLinksConfigured(),
       },
     }
   } catch (error) {

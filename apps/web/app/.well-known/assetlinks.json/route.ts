@@ -1,4 +1,4 @@
-import { env } from '@jomma/shared/env'
+import { appLinkFingerprints } from '@/lib/services/app-links'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -17,23 +17,11 @@ export const dynamic = 'force-dynamic'
  * malicious app can still register a custom `jomma://` scheme, which is exactly
  * why the QR does not use one.
  *
- * Served from a route rather than a static file because the fingerprint belongs
- * to whoever built the APK. This is self-hosted software — there is no single
- * signing key to check in, and hardcoding one would authorise a build the
- * operator does not control.
- *
- * With `ANDROID_CERT_SHA256` unset this returns `[]`. That is a valid statement
- * list meaning "this domain authorises no app", which is the right default:
- * links then open in a browser and land on the `/pair` page, instead of the
- * domain silently endorsing whatever was installed.
+ * The fingerprints come from `lib/services/app-links.ts`, shared with the
+ * dashboard so its warning cannot disagree with what is actually served.
  */
 export function GET() {
-  const fingerprints = env()
-    .ANDROID_CERT_SHA256.split(',')
-    .map((value) => value.trim().toUpperCase())
-    // Tolerate lowercase and stray whitespace from a copy-paste out of keytool,
-    // but not a value that is not a fingerprint at all.
-    .filter((value) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(value))
+  const fingerprints = appLinkFingerprints()
 
   const statements =
     fingerprints.length === 0
