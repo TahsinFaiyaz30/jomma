@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { OpenInApp } from '@/components/pair/open-in-app'
 import { isPairingCodeLive } from '@/lib/services/devices'
 
 export const dynamic = 'force-dynamic'
@@ -44,19 +45,22 @@ export default async function PairPage({ params }: { params: Promise<{ code: str
       </div>
 
       {live ? (
-        <ol className="space-y-3 text-small">
-          <li className="flex gap-3">
-            <span className="figure text-muted-foreground">1</span>
-            <span>Install the Jomma notifier app on this phone.</span>
-          </li>
-          <li className="flex gap-3">
-            <span className="figure text-muted-foreground">2</span>
-            <span>
-              Open it and tap <strong>Scan provisioning code</strong>, then point the camera at the
-              same QR. You can also pick a screenshot of it.
-            </span>
-          </li>
-        </ol>
+        <>
+          <OpenInApp code={code} />
+          <ol className="space-y-3 text-small">
+            <li className="flex gap-3">
+              <span className="figure text-muted-foreground">1</span>
+              <span>Install the Jomma notifier app on this phone.</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="figure text-muted-foreground">2</span>
+              <span>
+                Open it and tap <strong>Scan provisioning code</strong>, then point the camera at
+                the same QR. You can also pick a screenshot of it.
+              </span>
+            </li>
+          </ol>
+        </>
       ) : (
         <p className="text-small">
           Go back to <strong>Accounts</strong> in the dashboard, add a device, and scan the new code
