@@ -191,9 +191,15 @@ jobs:
 
           # Idempotent on purpose: re-running a release should replace its
           # assets rather than fail on the second attempt.
+          #
+          # `--draft=false` is not redundant. Deleting a tag turns its release
+          # into a draft rather than removing it, so the obvious way to re-run
+          # a release — delete the tag, push it again — leaves a draft that the
+          # upload path would happily fill with assets and never publish. Every
+          # step goes green and nothing is released.
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" dist/* --clobber
-            gh release edit "$tag" --notes-file notes.md
+            gh release edit "$tag" --notes-file notes.md --draft=false
           else
             gh release create "$tag" dist/* \
               --title "Jomma $v" \
