@@ -1,13 +1,25 @@
-# Render blueprint.
+# Render blueprint — one free web service.
 #
-# Two services and a cron entry. The cron is what replaces the worker: every job
-# is implemented in the web app under lib/jobs, so a cron POST to
-# /api/internal/sweep runs the same code a background worker would.
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │ YOU MUST SET UP AN EXTERNAL CRON. Nothing here schedules anything.        │
+# │                                                                           │
+# │   POST https://<your-service>.onrender.com/api/internal/sweep?group=all   │
+# │   Authorization: Bearer <AUTH_SECRET>                                     │
+# │                                                                           │
+# │ Every scheduled job lives in the web app under lib/jobs and is reached    │
+# │ through that one endpoint. Without a caller: no intent ever expires, no   │
+# │ health alert ever fires, and — the one that matters — NO WEBHOOK IS EVER  │
+# │ DELIVERED, so your store is never told it has been paid.                  │
+# │                                                                           │
+# │ Render's own cron is not on the free tier, so use cron-job.org or GitHub  │
+# │ Actions. docs/deploy.md covers the interval trade-off against Neon's free │
+# │ compute allowance.                                                        │
+# └───────────────────────────────────────────────────────────────────────────┘
 #
-# Read docs/deploy.md before pushing this. In particular: a free web service
-# sleeps after 15 minutes of inactivity, and a sleeping web service cannot
-# receive a payment capture. That is a real limitation of the free tier, not a
-# configuration mistake.
+# The other free-tier property worth knowing: this service sleeps after 15
+# minutes of inactivity, and a sleeping service cannot receive a payment
+# capture. Nothing is lost — the phone retries from its own queue — but the
+# buyer waits out the cold start. That is the tier, not a misconfiguration.
 
 services:
   # ── Web: API + dashboard ───────────────────────────────────────────────────
@@ -15,7 +27,12 @@ services:
     name: jomma-web
     runtime: node
     region: singapore # Closest Render region to Bangladesh.
-    plan: starter # `free` works, but it sleeps. See docs/deploy.md.
+    # Free. It sleeps after 15 minutes and takes 30-60 seconds to wake, so a
+    # buyer arriving at a cold checkout waits that long. Nothing is lost — the
+    # phone retries captures from its own queue — and the keep-alive ping in
+    # docs/deploy.md mostly sidesteps it. Upgrade to `starter` ($7/mo) when the
+    # wait starts costing more than the plan.
+    plan: free
     branch: main
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @jomma/web build
     startCommand: pnpm --filter @jomma/web start
@@ -38,8 +55,9 @@ services:
       - key: DATABASE_POOL_MAX
         value: '5'
 
-      # Generated once by Render, then shared with the cron job below. This is
-      # also the credential for /api/internal/sweep.
+      # Generated once by Render. AUTH_SECRET is also the bearer token your
+      # external cron presents to /api/internal/sweep, so copy it out of the
+      # dashboard after the first deploy.
       - key: AUTH_SECRET
         generateValue: true
       - key: WEBHOOK_SIGNING_SECRET
@@ -63,47 +81,3 @@ services:
         value: info
       - key: FEATURE_MESSAGES_BRIDGE
         value: 'false'
-
-  # ── Scheduler ──────────────────────────────────────────────────────────────
-  #
-  # Render's cron floor is one minute, so this calls `group=all` every minute
-  # rather than running the four cadences separately. Slightly more work than a
-  # persistent worker does, and identical in behaviour.
-  #
-  # Cron jobs are not on the free tier. If you are staying free, use an external
-  # pinger instead — docs/deploy.md has the details.
-  # `cron`, not `cronjob`. Render's blueprint schema names this type `cron`, and
-  # the wrong spelling fails the whole sync with no indication of which line —
-  # the notification email just says a sync failed.
-  - type: cron
-    name: jomma-jobs
-    runtime: node
-    region: singapore
-    plan: starter
-    branch: main
-    schedule: '* * * * *'
-    buildCommand: corepack enable && pnpm install --frozen-lockfile
-    startCommand: node scripts/run-jobs.mjs
-    envVars:
-      - key: NODE_VERSION
-        value: '22'
-      # Same value as the web service's APP_URL, and for the same reason —
-      # this job builds `${APP_URL}/api/internal/sweep`.
-      - key: APP_URL
-        sync: false
-      - key: AUTH_SECRET
-        fromService:
-          name: jomma-web
-          type: web
-          envVarKey: AUTH_SECRET
-
-# Render's own free Postgres expires after 30 days, which is not a database you
-# put payments in. Use Neon or Supabase and set DATABASE_URL by hand. If you do
-# want Render Postgres on a paid plan, uncomment this and wire DATABASE_URL to
-# it with `fromDatabase`.
-#
-# databases:
-#   - name: jomma-postgres
-#     plan: basic-256mb
-#     region: singapore
-#     postgresMajorVersion: '18'

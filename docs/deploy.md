@@ -141,11 +141,13 @@ Set the same value on the cron service.
 
 ## 3. Scheduler
 
-`render.yaml` includes a cron service that runs `scripts/run-jobs.mjs` every
-minute. Render cron jobs are not on the free tier.
+**`render.yaml` no longer defines a cron service**, because Render's cron is not
+on the free tier. Nothing in the blueprint schedules anything, so this step is
+mandatory rather than optional — without a caller, no intent expires, no health
+alert fires, and no webhook is ever delivered.
 
-Free alternative: any external pinger. [cron-job.org](https://cron-job.org) is
-free and does one-minute intervals. Point it at:
+[cron-job.org](https://cron-job.org) is free and does one-minute intervals.
+Point it at:
 
 ```
 POST https://your-app.onrender.com/api/internal/sweep?group=all
