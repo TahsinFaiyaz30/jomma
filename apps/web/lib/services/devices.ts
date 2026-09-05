@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { env } from '@jomma/shared/env'
 import { and, desc, eq, gt } from 'drizzle-orm'
 import QRCode from 'qrcode'
@@ -14,24 +14,55 @@ import { secondsFromNow } from './time'
  * Device provisioning, per docs/android.md.
  *
  *   1. Dashboard mints a pending device and shows a QR.
- *   2. The app scans it and exchanges the one-time token for a long-lived one.
+ *   2. The app reads it and exchanges the one-time code for a long-lived token.
  *   3. The one-time value is burned; the device goes active.
  *
- * The provisioning token is hashed at rest like every other credential. A QR
- * screenshot left in a chat should not be a way into the capture endpoint, and
- * it expires quickly regardless.
+ * ── Why the QR is a bare URL ──────────────────────────────────────────────────
+ *
+ * It used to be JSON: `{"url":…,"token":"jmp_…","device_id":…,"account":{…}}`.
+ * That had two problems, and they pull in opposite directions.
+ *
+ * A general-purpose QR scanner — the camera app, any of the dozens of scanner
+ * apps — cannot do anything with JSON except display it. So the only way in was
+ * the notifier app's own scanner, and pointing the wrong scanner at the code
+ * showed the operator a wall of JSON with a live credential and the account's
+ * phone number sitting in it.
+ *
+ * A URL fixes both at once:
+ *
+ *   - **Any** scanner offers to open it, and Android App Links routes it
+ *     straight into this app with no chooser and no browser, because the domain
+ *     vouches for the app's signing certificate in `/.well-known/assetlinks.json`.
+ *     Since Android 12 an app cannot claim a verified domain it does not own, so
+ *     "no other app can process it" is enforced by the OS rather than hoped for.
+ *   - A scanner that displays the target now shows a URL. The host, and an
+ *     opaque code. No token, no msisdn, no account label.
+ *
+ * The code is still a bearer credential — anyone holding it can redeem it once,
+ * within fifteen minutes — so this is not a claim that a leaked QR is harmless.
+ * It is narrower than that: nothing *legible* leaks, and the payload is useless
+ * without this server.
  */
 
 /** Long enough to walk a phone over and scan it, short enough to be useless later. */
 export const PROVISIONING_TTL_SECONDS = 15 * 60
 
 export interface ProvisioningPayload {
-  /** Where the app should POST. */
-  url: string
-  token: string
+  /** The whole QR. `https://<host>/pair/<code>`. */
+  pair_url: string
   device_id: string
-  account: { msisdn: string; provider: string; label: string }
   expires_at: string
+}
+
+/**
+ * The URL a scanner sees.
+ *
+ * Path segment rather than a query parameter, deliberately. Query strings end up
+ * in browser history, in `Referer` headers and in access logs far more readily
+ * than paths do, and this one is a credential.
+ */
+export function pairUrl(code: string, origin: string = env().APP_URL): string {
+  return `${origin.replace(/\/+$/, '')}/pair/${code}`
 }
 
 export async function createDeviceWithProvisioning(options: {
@@ -44,8 +75,15 @@ export async function createDeviceWithProvisioning(options: {
   })
   if (!account) throw new Error('Unknown receiving account')
 
-  // Not a device token — a short-lived bearer for one exchange only.
-  const plaintext = `jmp_${randomBytes(24).toString('base64url')}`
+  /*
+   * 32 bytes, url-safe, no prefix.
+   *
+   * Unprefixed because this one travels in a URL that strangers' scanner apps
+   * will render: `jmp_` announced "this is a credential" to anyone who glanced
+   * at it. The entropy is what protects it, and 256 bits of it means the
+   * sha256 lookup below has nothing to grind against.
+   */
+  const plaintext = randomBytes(32).toString('base64url')
   const hash = await hashProvisioning(plaintext)
   const expiresAt = secondsFromNow(PROVISIONING_TTL_SECONDS)
 
@@ -57,6 +95,7 @@ export async function createDeviceWithProvisioning(options: {
       platform: 'android',
       status: 'pending',
       provisioningHash: hash,
+      pairingLookup: pairingLookup(plaintext),
       provisioningExpiresAt: expiresAt,
     })
     .returning()
@@ -72,15 +111,19 @@ export async function createDeviceWithProvisioning(options: {
   })
 
   const payload: ProvisioningPayload = {
-    url: env().APP_URL,
-    token: plaintext,
+    pair_url: pairUrl(plaintext),
     device_id: device.id,
-    account: { msisdn: account.msisdn, provider: account.provider, label: account.label },
     expires_at: expiresAt.toISOString(),
   }
 
-  const qrDataUrl = await QRCode.toDataURL(JSON.stringify(payload), {
-    errorCorrectionLevel: 'M',
+  const qrDataUrl = await QRCode.toDataURL(payload.pair_url, {
+    /*
+     * Q, up from M. The code is read off a laptop screen by a phone camera at
+     * an angle, and a URL is a shorter payload than the old JSON, so the extra
+     * redundancy is close to free — the symbol stays about the same size while
+     * tolerating a good deal more glare and skew.
+     */
+    errorCorrectionLevel: 'Q',
     margin: 1,
     width: 320,
   })
@@ -89,10 +132,69 @@ export async function createDeviceWithProvisioning(options: {
 }
 
 /**
- * The exchange. Called by the app, unauthenticated except for the one-time
- * token itself — the device has no credential yet, which is the whole point.
+ * Redeems a pairing code — the App Links path, and now the scanner path too.
+ *
+ * Unauthenticated by necessity: the device has no credential yet, and the code
+ * is the credential. Everything that makes that safe is here — single row,
+ * verified hash, conditional burn, short TTL — plus IP rate limiting at the
+ * route.
  */
-export async function claimProvisioning(options: {
+export async function claimPairingCode(options: { code: string; ip: string | null }): Promise<{
+  deviceToken: string
+  deviceId: string
+  account: { msisdn: string; provider: string }
+}> {
+  const device = await db.query.devices.findFirst({
+    where: and(
+      eq(devices.pairingLookup, pairingLookup(options.code)),
+      eq(devices.status, 'pending'),
+      gt(devices.provisioningExpiresAt, new Date()),
+    ),
+  })
+
+  if (!device) throw new Error('provisioning_invalid')
+
+  return claimProvisioning({
+    deviceId: device.id,
+    provisioningToken: options.code,
+    ip: options.ip,
+  })
+}
+
+/**
+ * Whether a code could still be redeemed, without redeeming it.
+ *
+ * The `/pair/<code>` web page needs this — someone landed there in a browser,
+ * which means the app is not installed — and it must not consume the code on
+ * the way to saying so. Returns a bare boolean for the same reason the
+ * provisioning route returns one error for every failure: "expired" and "wrong"
+ * are not distinctions worth handing out.
+ */
+export async function isPairingCodeLive(code: string): Promise<boolean> {
+  const device = await db.query.devices.findFirst({
+    columns: { id: true },
+    where: and(
+      eq(devices.pairingLookup, pairingLookup(code)),
+      eq(devices.status, 'pending'),
+      gt(devices.provisioningExpiresAt, new Date()),
+    ),
+  })
+  return device !== undefined
+}
+
+/** Finds the row. `provisioning_hash` is what actually verifies the code. */
+function pairingLookup(code: string): string {
+  return createHash('sha256').update(code).digest('hex')
+}
+
+/**
+ * The exchange itself, once a code has been resolved to a device.
+ *
+ * Internal now — `claimPairingCode` is the only caller, because the QR no
+ * longer carries a device id for anything to pass in. Kept separate from the
+ * lookup so the burn stays one transaction with one conditional update.
+ */
+async function claimProvisioning(options: {
   deviceId: string
   provisioningToken: string
   ip: string | null
@@ -127,6 +229,10 @@ export async function claimProvisioning(options: {
         tokenHash: issued.hash,
         status: 'active',
         provisioningHash: null,
+        // Cleared together. Leaving the lookup behind would keep a burned code
+        // resolving to a row, and the unique index would then reject the next
+        // QR issued for this device.
+        pairingLookup: null,
         provisioningExpiresAt: null,
         provisionedAt: new Date(),
         tokenIssuedAt: new Date(),

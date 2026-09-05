@@ -1,9 +1,10 @@
-import type { Provider } from '@jomma/shared'
+import type { CaptureSettings, ParseStatus, Provider, TransactionType } from '@jomma/shared'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { incomingPayments, notifierEvents, receivingAccounts } from '@/lib/db/schema'
 import { logger, redactMsisdn } from '@/lib/logger'
 import { parseMessage } from '@/lib/parsers'
+import { getCaptureSettings } from './account-admin'
 import { audit } from './audit'
 import { checkBalanceContinuity } from './balance'
 import { runMatcher } from './match-runner'
@@ -28,7 +29,60 @@ import { runMatcher } from './match-runner'
  * on `trx_id` cannot deduplicate a row that does not have one yet.
  */
 
-export type CaptureStatus = 'accepted' | 'duplicate' | 'unparsed'
+export type CaptureStatus = 'accepted' | 'duplicate' | 'unparsed' | 'filtered'
+
+/**
+ * Whether this account wants a message of this type stored at all.
+ *
+ * Rules that are not negotiable, hence a named function rather than a condition
+ * inline in the loop:
+ *
+ *   - `send_money` is always kept. It is the only type `matching/resolve.ts`
+ *     will match, so filtering it would silently stop payments settling.
+ *   - A message that failed to parse but *looks like a transaction* is always
+ *     kept, whatever the settings say. Its type is unknown precisely because
+ *     something about the format changed, and the raw text is the only evidence
+ *     available for fixing the parser.
+ *
+ * "Looks like a transaction" means it carried a TrxID or an amount. That is the
+ * line between the two things `failed` conflates: a payment confirmation the
+ * parser could not read, and a promotion that was never a payment at all.
+ *
+ * The distinction has to be drawn somewhere, because promotional messages are
+ * both the largest source of noise and — having no TrxID and no amount — the
+ * ones that always fail to parse. Without it, `other` would be a switch that
+ * does nothing, since everything it is meant to exclude arrives as `failed`.
+ *
+ * bKash puts a TrxID on every transaction confirmation on every channel, so a
+ * format change that matters still lands on the kept side of this line. One
+ * that does not carry a TrxID is a different product.
+ */
+export function shouldCapture(
+  parsed: {
+    /** Null when the parser produced nothing at all; treated as `other`. */
+    transactionType: TransactionType | null
+    parseStatus: ParseStatus
+    trxId: string | null
+    amountCents: number | null
+  },
+  settings: CaptureSettings,
+): boolean {
+  if (parsed.parseStatus === 'failed') {
+    const looksTransactional = parsed.trxId !== null || parsed.amountCents !== null
+    return looksTransactional || settings.other
+  }
+
+  switch (parsed.transactionType) {
+    case 'send_money':
+      return true
+    case 'cash_in':
+      return settings.cash_in
+    case 'outgoing':
+      return settings.outgoing
+    default:
+      return settings.other
+  }
+}
 
 export interface CaptureInput {
   localId: string
@@ -54,8 +108,30 @@ export async function ingestCaptures(options: {
   const results: CaptureOutcome[] = []
   const matchable: string[] = []
 
+  /*
+   * What this number wants kept.
+   *
+   * Read once per batch rather than per message. Applied on the server as well
+   * as on the phone because the phone's copy can be stale — a setting changed
+   * in the dashboard takes effect on the next capture either way, and an older
+   * app build that has never heard of these fields still gets filtered.
+   */
+  const settings = await getCaptureSettings(options.receivingAccountId)
+
   for (const capture of options.captures) {
     const parsed = parseMessage(options.provider, capture.raw, capture.packageName)
+
+    /*
+     * Dropped before it is written, not hidden afterwards.
+     *
+     * `filtered` is reported back so the phone can mark the item done and stop
+     * resending it — a silent drop would leave it retrying forever.
+     */
+    if (!shouldCapture(parsed, settings)) {
+      results.push({ local_id: capture.localId, status: 'filtered', trx_id: parsed.trxId })
+      continue
+    }
+
     const receivedAt = new Date()
 
     const inserted = await db.transaction(async (tx) => {
@@ -175,7 +251,16 @@ export async function ingestCaptures(options: {
       status: 'accepted',
       trx_id: parsed.trxId,
     })
-    matchable.push(inserted.id)
+
+    /*
+     * Only run the matcher on money that could actually settle an order.
+     *
+     * `resolve.ts` gates hard on `send_money`, so the others can only come back
+     * `ambiguous: wrong_transaction_type` — a manual-queue entry asking a human
+     * to adjudicate a cash-in against an order it was never going to pay. The
+     * operator switched these on to keep a record, not to be asked about them.
+     */
+    if (parsed.transactionType === 'send_money') matchable.push(inserted.id)
   }
 
   /*

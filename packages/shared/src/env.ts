@@ -70,6 +70,26 @@ const schema = z.object({
    */
   APP_URL: z.string().default('http://localhost:3000'),
 
+  /**
+   * SHA-256 fingerprints of the notifier app's signing certificates, colon-
+   * separated hex, comma-separated for more than one.
+   *
+   * This is what `/.well-known/assetlinks.json` publishes, and publishing it is
+   * what lets Android open a `/pair/…` link straight in the app instead of a
+   * browser. Since Android 12 an app cannot claim a verified domain unless the
+   * domain names its certificate here, so this is also the thing that stops any
+   * other app registering to handle provisioning links.
+   *
+   * Empty by default, and an empty statement list is the honest answer: no app
+   * is authorised until an operator says which one is theirs. Get it with
+   *
+   *   keytool -list -v -keystore <your.keystore> -alias <alias>
+   *
+   * List the debug certificate too if you want App Links working on a
+   * development build — they are signed with a different key.
+   */
+  ANDROID_CERT_SHA256: z.string().default(''),
+
   AUTH_SECRET: z.string().min(32, 'AUTH_SECRET must be at least 32 characters'),
   WEBHOOK_SIGNING_SECRET: z
     .string()

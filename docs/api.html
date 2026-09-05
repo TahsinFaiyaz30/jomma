@@ -355,6 +355,8 @@ const event = constructEvent(
       <tr><td><code>GET /v1/intents/:id</code></td><td>600 / min per key</td></tr>
       <tr><td><code>POST /v1/submissions</code></td><td>20 / min per key, 5 / hour per intent</td></tr>
       <tr><td><code>POST /device/v1/capture</code></td><td>120 / min per device</td></tr>
+      <tr><td><code>POST /device/v1/heartbeat</code></td><td>20 / min per device</td></tr>
+      <tr><td><code>GET</code>/<code>POST /device/v1/settings</code></td><td>20 / min per device</td></tr>
       <tr><td><code>POST /ingest/v1/webhook</code></td><td>120 / min per IP</td></tr>
     </tbody>
   </table></div>

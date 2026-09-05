@@ -145,3 +145,57 @@ describe('parseMessage', () => {
     expect(() => parseMessage('nagad', 'anything at all', null)).not.toThrow()
   })
 })
+
+describe('transaction types', () => {
+  /*
+   * Only `send_money` can settle an order (see matching/resolve.ts), but the
+   * other three decide what an operator's feed is buried in. `outgoing` exists
+   * separately from `other` so somebody can keep a record of money they sent
+   * without also keeping every promotional message bKash pushes.
+   */
+  const type = (raw: string) => parseBkash(raw).transactionType
+
+  it('reads an incoming send money', () => {
+    expect(type(fixture('LIVE — send money with a reference').raw)).toBe('send_money')
+  })
+
+  it('reads the real outgoing confirmation as outgoing, not other', () => {
+    expect(type(fixture('an OUTGOING send money').raw)).toBe('outgoing')
+  })
+
+  /*
+   * The direction guarantee, asserted at the parser rather than left to the
+   * matcher. An outgoing message now parses cleanly, so the only thing standing
+   * between "Send Money Tk 10.00 to 015…" and a credited order is the type — and
+   * a stray alternation in the amount pattern would be enough to lose it.
+   */
+  it('never reads money leaving the account as an amount received from someone', () => {
+    const outgoing = parseBkash(fixture('an OUTGOING send money').raw)
+
+    expect(outgoing.transactionType).toBe('outgoing')
+    expect(outgoing.amountCents).toBe(1_000)
+    // 01518920430 is who the money went to. Reading it as the sender would put a
+    // real number on a row the matcher scores by sender.
+    expect(outgoing.senderMsisdn).toBeNull()
+  })
+
+  it('does not degrade an outgoing message for having no sender', () => {
+    // It never has one. Flagging that as a partial parse would mark every
+    // transfer the operator makes as a problem to look into.
+    const outgoing = parseBkash(fixture('an OUTGOING send money').raw)
+    expect(outgoing.parseStatus).toBe('ok')
+    expect(outgoing.error).toBeNull()
+  })
+
+  it('reads a cash in', () => {
+    expect(
+      type('Cash In Tk 500.00 from Agent 01712345678 successful. Balance Tk 1,940.62. TrxID CI1'),
+    ).toBe('cash_in')
+  })
+
+  it('leaves marketing as other', () => {
+    expect(
+      type('Get 10% cashback on your next bKash payment! Offer valid till 30 September.'),
+    ).toBe('other')
+  })
+})

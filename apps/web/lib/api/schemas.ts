@@ -114,6 +114,20 @@ export const heartbeatSchema = z.object({
   app_version: z.string().trim().max(32).optional().nullable(),
 })
 
+/**
+ * The phone changing what its account keeps.
+ *
+ * All three are required rather than optional. A partial update would race the
+ * dashboard — two screens editing three booleans, each sending only what it
+ * thinks changed, is how one of them ends up silently reverting the other. The
+ * app always sends the full set it is displaying.
+ */
+export const captureSettingsSchema = z.object({
+  cash_in: z.boolean(),
+  outgoing: z.boolean(),
+  other: z.boolean(),
+})
+
 export const deviceEventSchema = z.object({
   kind: z.enum(DEVICE_REPORTABLE_EVENT_KINDS),
   detail: z.string().trim().max(500).optional().nullable(),

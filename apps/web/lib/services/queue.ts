@@ -1,6 +1,7 @@
 import 'server-only'
 
-import { and, asc, eq, ne, or } from 'drizzle-orm'
+import type { TransactionType } from '@jomma/shared'
+import { and, asc, eq, isNull, ne, or } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { incomingPayments, paymentIntents, paymentRefs, receivingAccounts } from '@/lib/db/schema'
 import type { CandidateIntent, ObservedPayment } from '@/lib/matching'
@@ -41,7 +42,7 @@ export interface QueueItem {
   rawMessage: string
   parseStatus: 'ok' | 'partial' | 'failed'
   parseError: string | null
-  transactionType: 'send_money' | 'cash_in' | 'other' | null
+  transactionType: TransactionType | null
   source: string
   accountLabel: string
   accountProvider: 'bkash' | 'nagad'
@@ -77,10 +78,28 @@ export async function getQueue(limit = 100): Promise<QueueItem[]> {
     .from(incomingPayments)
     .innerJoin(receivingAccounts, eq(incomingPayments.receivingAccountId, receivingAccounts.id))
     .where(
-      or(
-        eq(incomingPayments.status, 'unmatched'),
-        eq(incomingPayments.status, 'orphaned'),
-        eq(incomingPayments.parseStatus, 'failed'),
+      and(
+        or(
+          eq(incomingPayments.status, 'unmatched'),
+          eq(incomingPayments.status, 'orphaned'),
+          eq(incomingPayments.parseStatus, 'failed'),
+        ),
+        /*
+         * A cash-in or an outgoing transfer is stored because the operator
+         * switched it on to keep a record, and it is permanently `unmatched`
+         * because nothing else is possible — `resolve.ts` admits `send_money`
+         * alone. Listing it here would put a row in the review queue that can
+         * never be worked, on every single one, for as long as the setting is
+         * on.
+         *
+         * A failed parse is still listed whatever its apparent type, because
+         * "apparent type" is exactly what is not trustworthy about it.
+         */
+        or(
+          eq(incomingPayments.parseStatus, 'failed'),
+          isNull(incomingPayments.transactionType),
+          eq(incomingPayments.transactionType, 'send_money'),
+        ),
       ),
     )
     // Oldest first. The queue is worked from the top.

@@ -192,16 +192,79 @@ ones without an app update.
 
 ## Provisioning
 
-1. Dashboard → Accounts → Add device. Shows a QR code containing server URL, a
-   one-time provisioning token, and the receiving account id.
-2. App scans it, exchanges the one-time token for a long-lived device token.
-3. Device token stored in `EncryptedSharedPreferences`.
+1. Dashboard → Accounts → Add device. Shows a QR containing one thing: the URL
+   `https://<host>/pair/<code>`.
+2. The phone opens it — by the app's own scanner, or by *any* QR scanner, which
+   Android routes into the app as a verified App Link.
+3. The app exchanges the one-time code for a long-lived device token, stored in
+   `EncryptedSharedPreferences`.
 4. Server marks the device active; the dashboard shows it awaiting first
    heartbeat.
+
+### Opening the QR from any scanner
+
+The QR is a bare URL so that a general-purpose scanner can act on it. Android
+App Links then send it to this app rather than a browser, and — since Android
+12 — refuse to let any other app claim the same link. That refusal is the
+security property; it is enforced by the OS, not by obscurity.
+
+Two halves, and both must agree:
+
+- **Server.** `ANDROID_CERT_SHA256` is the APK's signing fingerprint, published
+  at `/.well-known/assetlinks.json`.
+- **App.** The host is baked into the manifest, because App Links verify against
+  a literal host that cannot be discovered at runtime:
+
+  ```
+  ./gradlew assembleRelease -PjommaHost=pay.yourshop.com
+  ```
+
+Check it landed with `adb shell pm get-app-links com.jomma.notifier`, which
+should report `verified` for your host.
+
+Unverified, nothing breaks: the link opens in a browser and lands on a page
+explaining what to install, and the app's own scanner still works. It upgrades
+itself once both halves are set.
+
+What the QR does *not* contain: a token, a device id, an account number, or a
+label. All of that used to be in it as plain JSON, which any scanner would
+happily display. The code is still redeemable by whoever holds it for fifteen
+minutes — the improvement is that nothing legible leaks, and the payload is
+inert without the server.
 
 Rotation: the server can issue `rotate_token` on a heartbeat. The app swaps and
 acknowledges. Revocation from the dashboard is immediate and the app then shows a
 "revoked, re-provision me" screen rather than failing silently.
+
+### Scanning
+
+CameraX for the preview, ML Kit for the decode, both in a Compose screen inside
+`MainActivity` — see `ui/ScannerScreen.kt` and `capture/QrDecoder.kt`.
+
+Two ways in, because the code is not always in front of the camera:
+
+- **Point the phone at it.** The usual case: the dashboard is open on a laptop
+  next to the phone.
+- **Pick a saved image.** Often the QR arrives as a screenshot someone was sent,
+  and there was previously no way to use one short of displaying it on a second
+  screen. Both paths become an ML Kit `InputImage` and go through one decoder.
+
+The image path uses the **Photo Picker**, not `READ_MEDIA_IMAGES`. The user hands
+over one image and the app never gets to see the gallery — a much smaller
+permission than the job needs, on a device that already holds customer data.
+
+Declining the camera is not a dead end. Reading a saved image needs no camera at
+all, so the screen says so and keeps working.
+
+A successful scan is delivered **once**. The camera keeps producing frames while
+the code is still in view, and provisioning burns a one-time token — a second
+call would come back "already used" and report a failure for a scan that worked.
+
+> This replaced `zxing-android-embedded`, which could not read a QR out of a
+> picked image, decoded angled and low-light codes far less reliably, and shipped
+> an Activity pinned to `screenOrientation="sensorLandscape"` in its own
+> manifest. That last one rotated the phone into landscape to scan and no runtime
+> option could override it.
 
 ---
 

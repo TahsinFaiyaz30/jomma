@@ -401,9 +401,15 @@ function toneFor(row: FeedRow): { tone: StatusTone; label: string } {
   if (row.status === 'matched') return { tone: 'matched', label: 'Matched' }
   if (row.status === 'refunded') return { tone: 'neutral', label: 'Refunded' }
   if (row.status === 'orphaned') return { tone: 'ambiguous', label: 'Orphaned' }
-  if (row.transactionType && row.transactionType !== 'send_money') {
-    return { tone: 'ambiguous', label: 'Wrong type' }
-  }
+  /*
+   * These are here because someone switched them on under "What to capture".
+   * Amber would be wrong: nothing needs attention, and flagging a row the
+   * operator deliberately asked to keep is exactly the alarm fatigue that makes
+   * a real alert easy to miss. Named, neutral, and not matchable.
+   */
+  if (row.transactionType === 'cash_in') return { tone: 'neutral', label: 'Cash In' }
+  if (row.transactionType === 'outgoing') return { tone: 'neutral', label: 'Sent' }
+  if (row.transactionType === 'other') return { tone: 'neutral', label: 'Not a payment' }
   // Unmatched is normal and expected. Amber, never red.
   return { tone: 'pending', label: 'Unmatched' }
 }

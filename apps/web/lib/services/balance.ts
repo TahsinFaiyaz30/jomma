@@ -17,8 +17,10 @@ import { incomingPayments, notifierEvents, receivingAccounts } from '@/lib/db/sc
  * statement import.
  *
  * ── Known gap ────────────────────────────────────────────────────────────────
- * There is no outgoing-transaction table in the schema, so a refund or payout
- * sent from the account has nothing to net against and will register as drift.
+ * A payout sent from the account only nets out if it was captured, which means
+ * the account has "Money you sent" switched on under capture settings. With it
+ * off — the default — an outgoing transfer has nothing to net against and shows
+ * up as drift.
  *
  * Rather than let that produce a false critical alert every time the shop sends
  * money — which is exactly how alarm fatigue starts, and docs/design.md calls
@@ -32,7 +34,9 @@ import { incomingPayments, notifierEvents, receivingAccounts } from '@/lib/db/sc
  *                                 dangerous case and the whole reason the check
  *                                 exists. Critical, stops routing.
  *
- * Add an `outgoing_payments` table and the alert can become symmetric.
+ * That asymmetry stays whatever the settings say, because captures can be
+ * missed. Switching outgoing capture on just makes the medium alert rare enough
+ * to be worth reading.
  */
 
 export interface DriftResult {
@@ -97,10 +101,23 @@ export async function checkBalanceContinuity(
     }
   }
 
-  // Everything observed since the anchor, including the capture being processed.
+  /*
+   * Everything observed since the anchor, netted by direction.
+   *
+   * Summing every row regardless of type would count a transfer the operator
+   * sent as money arriving, and then report the balance as short by twice the
+   * amount. `send_money` and `cash_in` are the two types that add to the
+   * balance; `outgoing` subtracts from it; `other` is a promotion with no
+   * amount and contributes nothing.
+   */
   const [sums] = await tx
     .select({
-      total: sql<string>`coalesce(sum(${incomingPayments.amountCents}), 0)`,
+      incoming: sql<string>`coalesce(sum(${incomingPayments.amountCents}) filter (
+        where ${incomingPayments.transactionType} in ('send_money', 'cash_in')
+      ), 0)`,
+      outgoing: sql<string>`coalesce(sum(${incomingPayments.amountCents}) filter (
+        where ${incomingPayments.transactionType} = 'outgoing'
+      ), 0)`,
     })
     .from(incomingPayments)
     .where(
@@ -110,7 +127,7 @@ export async function checkBalanceContinuity(
       ),
     )
 
-  const incomingSince = Number(sums?.total ?? 0)
+  const incomingSince = Number(sums?.incoming ?? 0) - Number(sums?.outgoing ?? 0)
   const expectedCents = account.lastKnownBalanceCents + incomingSince
   const driftCents = options.reportedBalanceCents - expectedCents
 

@@ -43,8 +43,36 @@ export type LockStatus = (typeof LOCK_STATUSES)[number]
 export const PAYMENT_STATUSES = ['unmatched', 'matched', 'orphaned', 'refunded'] as const
 export type PaymentRecordStatus = (typeof PAYMENT_STATUSES)[number]
 
-export const TRANSACTION_TYPES = ['send_money', 'cash_in', 'other'] as const
+export const TRANSACTION_TYPES = ['send_money', 'cash_in', 'outgoing', 'other'] as const
 export type TransactionType = (typeof TRANSACTION_TYPES)[number]
+
+/**
+ * What a watched number keeps besides incoming Send Money.
+ *
+ * A provider app emits far more than payments — promotions, balance notices,
+ * cash-in confirmations, the operator's own outgoing transfers. Storing all of
+ * it buries the one type that settles an order in noise nobody reads.
+ *
+ * Incoming Send Money has no switch here, and that omission is the design.
+ * `matching/resolve.ts` will only match `send_money`, so a toggle for it would
+ * be a toggle that turns the product off.
+ *
+ * Keyed in wire form because this shape crosses the device API verbatim.
+ */
+export interface CaptureSettings {
+  /** Agent and app cash-in landing on this number. */
+  cash_in: boolean
+  /** Money this number *sent*. Useful as a ledger, never matchable. */
+  outgoing: boolean
+  /** Everything else the provider pushes, promotions included. */
+  other: boolean
+}
+
+export const DEFAULT_CAPTURE_SETTINGS: CaptureSettings = {
+  cash_in: false,
+  outgoing: false,
+  other: false,
+}
 
 export const PARSE_STATUSES = ['ok', 'partial', 'failed'] as const
 export type ParseStatus = (typeof PARSE_STATUSES)[number]
@@ -186,6 +214,7 @@ export const AUDIT_ACTIONS = [
   'account.created',
   'account.degraded',
   'account.recovered',
+  'account.updated',
   'balance.drift',
   'apikey.created',
   'apikey.revoked',

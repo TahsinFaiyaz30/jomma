@@ -6,6 +6,7 @@ import { enforceRateLimit, parseBody, route } from '@/lib/api/handler'
 import { heartbeatSchema } from '@/lib/api/schemas'
 import { db } from '@/lib/db/client'
 import { devices, notifierEvents, receivingAccounts } from '@/lib/db/schema'
+import { getCaptureSettings } from '@/lib/services/account-admin'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -99,11 +100,23 @@ export const POST = route(async (request, context) => {
     return (current?.pending ?? []) as DeviceCommand[]
   })
 
+  /*
+   * Ride the beat rather than having the app poll for it.
+   *
+   * Capture settings change rarely and matter within minutes, not seconds, so a
+   * separate endpoint the phone would have to remember to call is strictly worse
+   * — it is one more thing that can be missed after an outage. The app applies
+   * whatever comes back here, which also means a phone that has been offline
+   * comes back in step without any reconciliation logic.
+   */
+  const capture = await getCaptureSettings(device.receivingAccountId)
+
   return {
     status: 200,
     body: {
       ok: true,
       commands,
+      capture,
       server_time: now.toISOString(),
       request_id: context.requestId,
     },

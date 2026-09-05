@@ -1,5 +1,6 @@
 import 'server-only'
 
+import type { TransactionType } from '@jomma/shared'
 import { and, count, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
@@ -25,7 +26,7 @@ export interface FeedRow {
   trxId: string | null
   status: 'unmatched' | 'matched' | 'orphaned' | 'refunded'
   parseStatus: 'ok' | 'partial' | 'failed'
-  transactionType: 'send_money' | 'cash_in' | 'other' | null
+  transactionType: TransactionType | null
   accountLabel: string
   accountProvider: 'bkash' | 'nagad'
   source: string

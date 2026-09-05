@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import type { CaptureSettings } from '@jomma/shared'
+import { useId, useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import {
   acknowledgeAlertAction,
@@ -9,12 +10,14 @@ import {
   revokeDeviceAction,
   rotateTokenAction,
   setAccountStatusAction,
+  setCaptureSettingsAction,
 } from '@/app/(dash)/accounts/actions'
 import { StatusDot } from '@/components/status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Spinner } from '@/components/ui/spinner'
+import { Switch } from '@/components/ui/switch'
 import { formatMsisdn } from '@/lib/i18n/format'
 import { useI18n } from '@/lib/i18n/provider'
 import type { DeviceRow } from '@/lib/services/devices'
@@ -40,6 +43,7 @@ export interface AccountView {
   monthlyUsedCents: number
   monthlyLimitCents: number
   utilization: number
+  capture: CaptureSettings
   devices: DeviceRow[]
   alerts: Array<{
     id: string
@@ -288,6 +292,10 @@ function AccountCard({ account }: { account: AccountView }) {
 
       <Separator />
 
+      <CapturePanel accountId={account.id} saved={account.capture} />
+
+      <Separator />
+
       <div className="space-y-2 px-4 py-3">
         <div className="text-small font-medium">Devices</div>
 
@@ -335,6 +343,118 @@ function AccountCard({ account }: { account: AccountView }) {
 
       {reveal ? <RevealPanel reveal={reveal} onDismiss={() => setReveal(null)} /> : null}
     </section>
+  )
+}
+
+/**
+ * What to keep out of this number's feed.
+ *
+ * The same three switches are in the notifier app and write to the same row, so
+ * whichever screen is closer to hand wins. The phone picks a dashboard change up
+ * on its next heartbeat.
+ *
+ * Incoming Send Money is shown as a fixed row rather than a disabled switch. A
+ * greyed-out toggle reads as "not available yet"; a line of text saying it is
+ * always kept says the true thing, which is that it is the only type that can
+ * settle an order and turning it off would be turning Jomma off.
+ */
+function CapturePanel({ accountId, saved }: { accountId: string; saved: CaptureSettings }) {
+  const [pending, startTransition] = useTransition()
+  // Optimistic, so a switch moves under the finger rather than after a
+  // round-trip. Reverted from `saved` if the write fails.
+  const [draft, setDraft] = useState(saved)
+
+  const toggle = (key: keyof CaptureSettings) => {
+    const next = { ...draft, [key]: !draft[key] }
+    setDraft(next)
+    startTransition(async () => {
+      const result = await setCaptureSettingsAction(accountId, next)
+      if (!result.ok) {
+        setDraft(saved)
+        toast.error(result.message)
+      }
+    })
+  }
+
+  return (
+    <div className="space-y-2 px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="text-small font-medium">What to capture</span>
+        {pending ? <Spinner className="size-3 text-muted-foreground" /> : null}
+      </div>
+      <p className="max-w-prose text-micro text-muted-foreground">
+        The phone forwards everything bKash shows it. Anything switched off here is dropped on
+        arrival and never stored. These switches are also in the app — they are the same setting.
+      </p>
+
+      <div className="pt-1">
+        <div className="flex items-center gap-3 border-border border-b py-2">
+          <div className="min-w-0 flex-1">
+            <div className="text-small">Incoming Send Money</div>
+            <div className="text-micro text-muted-foreground">
+              Money buyers send you. The only type that can settle an order.
+            </div>
+          </div>
+          <span className="text-micro text-muted-foreground">always</span>
+        </div>
+
+        <CaptureToggle
+          label="Cash In"
+          hint="Top-ups from an agent or your own bank. Never matched to an order."
+          checked={draft.cash_in}
+          disabled={pending}
+          onChange={() => toggle('cash_in')}
+        />
+        <CaptureToggle
+          label="Money you sent"
+          hint="Send Money leaving this number. Keeps a ledger; cannot pay an order."
+          checked={draft.outgoing}
+          disabled={pending}
+          onChange={() => toggle('outgoing')}
+        />
+        <CaptureToggle
+          label="Everything else"
+          hint="Promotions, balance notices, offers. Usually noise."
+          checked={draft.other}
+          disabled={pending}
+          onChange={() => toggle('other')}
+          last
+        />
+      </div>
+
+      <p className="text-micro text-muted-foreground">
+        A message the parser cannot read is kept whatever these say — it is the evidence needed to
+        fix the parser, and its type is unknown precisely because something changed.
+      </p>
+    </div>
+  )
+}
+
+function CaptureToggle({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+  last = false,
+}: {
+  label: string
+  hint: string
+  checked: boolean
+  disabled: boolean
+  onChange: () => void
+  last?: boolean
+}) {
+  const id = useId()
+
+  return (
+    <div className={cn('flex items-center gap-3 py-2', !last && 'border-border border-b')}>
+      <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
+        <div className="text-small">{label}</div>
+        <div className="text-micro text-muted-foreground">{hint}</div>
+      </label>
+      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onChange} />
+    </div>
   )
 }
 
@@ -422,7 +542,7 @@ function RevealPanel({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 space-y-2">
           <div className="text-small font-medium">
-            {reveal.kind === 'qr' ? 'Scan this from the notifier app' : 'New device token'}
+            {reveal.kind === 'qr' ? 'Scan this with the phone' : 'New device token'}
           </div>
           {reveal.kind === 'qr' ? (
             <>
@@ -435,6 +555,10 @@ function RevealPanel({
                 height={220}
                 className="rounded-md bg-white p-2"
               />
+              <p className="max-w-56 text-micro text-muted-foreground">
+                Any QR scanner works — the phone's camera app will offer to open it in Jomma. Or use
+                the app's own scanner, which can also read it from a screenshot.
+              </p>
               <p className="text-micro text-muted-foreground">
                 Expires {new Date(reveal.expiresAt).toLocaleTimeString()}. One scan only.
               </p>

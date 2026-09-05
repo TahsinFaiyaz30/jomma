@@ -4,26 +4,41 @@ import { failed, type MessageParser, type ParsedMessage, takaToPoisha, toE164 } 
 /**
  * bKash message parser.
  *
- * ⚠ Written against the single documented sample in docs/api.md:
+ * Verified against real captures. `./fixtures/bkash.ts` holds three marked
+ * `source: 'live'` — a received send-money with a reference, the same without
+ * one, and a `*247#` outgoing confirmation — which between them settled
+ * AGENTS.md open decision #3: the reference the sender types does survive into
+ * the recipient's message, on both the app and the USSD channel. The remaining
+ * fixtures are synthetic and exist to pin degradation behaviour, not to assert
+ * what bKash sends.
  *
- *   "You have received Tk 1,200.00 from 01712345678. Ref K7M2. Fee Tk 0.00.
- *    Balance Tk 45,320.00. TrxID BK7X2M9QP1 at 03/09/2026 14:35"
- *
- * That is not a real capture. AGENTS.md open decision #3 — whether the reference
- * the sender typed appears in the recipient's message on every channel (app vs
- * `*247#`) — is still unverified, and the fixtures in ./fixtures are synthetic
- * until a real ৳10 transfer is captured on both channels.
- *
- * The parser is built so this matters as little as possible: each field is
+ * Still built so a format change matters as little as possible: each field is
  * extracted independently, a missing one degrades to `partial` rather than
  * `failed`, and `raw_message` is stored before any of this runs. A format change
  * costs an alert and a re-parse, never a lost payment.
+ *
+ * The direction rule is the one thing here that is not forgiving. Money leaving
+ * the account carries a TrxID, a reference and an amount — everything the
+ * matcher looks at — so reading one as income would credit an order with money
+ * that went the other way. `classify` decides direction first, and it decides
+ * which pattern is even allowed to read the amount.
  */
 
 const PACKAGES = ['com.bKash.customerapp'] as const
 
 const AMOUNT_RE = /(?:received|receive[d]?)\s*Tk\s*([\d,]+(?:\.\d{1,2})?)/i
 const CASH_IN_AMOUNT_RE = /Cash\s*In\s*Tk\s*([\d,]+(?:\.\d{1,2})?)/i
+/**
+ * The outgoing amount, matched only once `classify` has already said the
+ * message is outgoing.
+ *
+ * Kept as a separate pattern rather than folded into `AMOUNT_RE` on purpose.
+ * The incoming grammar is "You have received Tk X from …", and the one thing
+ * this parser must never do is read money leaving the account as money arriving
+ * on it. Two patterns that cannot match each other's text is a stronger
+ * guarantee than one pattern with an alternation in it.
+ */
+const OUTGOING_AMOUNT_RE = /Send\s*Money\s*Tk\s*([\d,]+(?:\.\d{1,2})?)/i
 // The optional word absorbs "from Agent 019…" on a cash-in, where the number
 // does not follow "from" directly.
 const SENDER_RE = /from\s+(?:[A-Za-z]+\s+)?(?:\+?88)?(0?1[3-9]\d{8})/i
@@ -40,6 +55,22 @@ const BST_OFFSET_MS = 6 * 60 * 60 * 1000
 function classify(raw: string): TransactionType {
   if (/cash\s*in/i.test(raw)) return 'cash_in'
   if (/you\s+have\s+received|received\s+Tk/i.test(raw)) return 'send_money'
+
+  /*
+   * Money leaving the account.
+   *
+   * Tested after the incoming pattern, not before: the watched phone's own
+   * outgoing confirmation reads "Send Money Tk 10.00 to 015… successful", and
+   * an incoming one never says "to <number> successful". Separating this from
+   * `other` is what lets an operator keep their outgoing record without also
+   * keeping every promotional message bKash sends.
+   *
+   * It still cannot settle an order — resolve.ts admits `send_money` only.
+   */
+  if (/send\s*money\s+tk\b|\bto\s+0?1[3-9]\d{8}\s+successful/i.test(raw)) {
+    return 'outgoing'
+  }
+
   return 'other'
 }
 
@@ -57,7 +88,19 @@ export function parseBkash(raw: string): ParsedMessage {
   try {
     const transactionType = classify(raw)
 
-    const amountMatch = AMOUNT_RE.exec(raw) ?? CASH_IN_AMOUNT_RE.exec(raw)
+    /*
+     * The direction decides which pattern is allowed to read the amount.
+     *
+     * An outgoing confirmation carries a TrxID, a reference and an amount —
+     * everything the matcher looks at — so this branch is the one place where a
+     * mistake credits an order with money that went the other way. Gating it on
+     * `classify` means the incoming pattern is never even offered the text of an
+     * outgoing message.
+     */
+    const amountMatch =
+      transactionType === 'outgoing'
+        ? OUTGOING_AMOUNT_RE.exec(raw)
+        : (AMOUNT_RE.exec(raw) ?? CASH_IN_AMOUNT_RE.exec(raw))
     const amountCents = amountMatch?.[1] ? takaToPoisha(amountMatch[1]) : null
 
     const trxId = TRX_RE.exec(raw)?.[1]?.toUpperCase() ?? null
@@ -88,7 +131,9 @@ export function parseBkash(raw: string): ParsedMessage {
 
     const softMissing: string[] = []
     if (!balanceMatch) softMissing.push('balance')
-    if (!senderMsisdn) softMissing.push('sender')
+    // An outgoing message names a recipient, not a sender. Reporting the absence
+    // as a degraded parse would flag every one of them as a problem.
+    if (!senderMsisdn && transactionType !== 'outgoing') softMissing.push('sender')
 
     return {
       trxId,

@@ -31,6 +31,7 @@ export default async function AccountsPage() {
       monthlyUsedCents: account.monthlyUsedCents,
       monthlyLimitCents: account.monthlyLimitCents,
       utilization: account.utilization,
+      capture: account.capture,
       devices: await listDevices(account.id),
       alerts: await listAccountAlerts(account.id),
     })),

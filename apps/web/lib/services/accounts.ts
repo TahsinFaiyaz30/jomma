@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto'
-import type { AccountStatus, Provider, ProviderPreference } from '@jomma/shared'
+import type { AccountStatus, CaptureSettings, Provider, ProviderPreference } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
 import { and, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm'
 import type { Database, Tx } from '@/lib/db/client'
@@ -28,6 +28,7 @@ export interface AccountHealth {
   /** Derived, not stored: healthy enough to route a new intent to. */
   routable: boolean
   heartbeatStale: boolean
+  capture: CaptureSettings
 }
 
 // Re-exported so server callers can keep importing them from here; the values
@@ -94,6 +95,11 @@ export async function listAccountHealth(client: Database | Tx = db): Promise<Acc
       monthlyLimitCents: account.monthlyLimitCents,
       utilization,
       heartbeatStale,
+      capture: {
+        cash_in: account.captureCashIn,
+        outgoing: account.captureOutgoing,
+        other: account.captureOther,
+      },
       routable:
         account.status === 'active' &&
         !heartbeatStale &&

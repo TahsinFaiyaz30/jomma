@@ -1,0 +1,2 @@
+ALTER TABLE "devices" ADD COLUMN "pairing_lookup" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "ux_devices_pairing_lookup" ON "devices" USING btree ("pairing_lookup") WHERE pairing_lookup is not null;

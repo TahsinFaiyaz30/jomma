@@ -242,9 +242,12 @@ Server behaviour, in order:
 2. **Store `raw` immediately**, before any parsing.
 3. Parse. On failure, store with `parse_status: 'failed'` and raise an alert.
    Never drop.
-4. Dedupe on `trx_id`. Duplicates return `duplicate`, not an error.
-5. Run balance continuity check.
-6. Enqueue matching.
+4. Apply the account's capture settings. A type the account does not keep is
+   dropped here, before step 5, and returns `filtered`.
+5. Dedupe on `trx_id`. Duplicates return `duplicate`, not an error.
+6. Run balance continuity check.
+7. Enqueue matching — only for `send_money`, the one type that can settle an
+   intent.
 
 ```jsonc
 // 200
@@ -256,9 +259,25 @@ Server behaviour, in order:
 }
 ```
 
-`status` is `accepted`, `duplicate`, or `unparsed`. All three mean the device can
-mark it sent and remove it from the local queue — the server has the raw text and
-owns it now.
+`status` is `accepted`, `duplicate`, `unparsed`, or `filtered`. All four mean the
+device can mark it sent and remove it from the local queue — the server has
+answered and there is nothing left to retry.
+
+`filtered` is the one where delivered and stored differ: the message reached the
+server and was deliberately discarded because the account's capture settings
+exclude its type. It is reported rather than silently dropped so the device stops
+resending it.
+
+Two things are never filtered, whatever the settings say:
+
+- **Incoming Send Money**, because it is the only type matching will settle an
+  order with.
+- **A message that failed to parse but carried a TrxID or an amount**, because
+  its type is unknown precisely because the format changed, and the raw text is
+  the only evidence available for fixing the parser.
+
+A failed parse with neither a TrxID nor an amount is not a transaction at all —
+it is a promotion — and follows the `other` setting.
 
 Batching matters: after a network outage the device flushes its whole queue in
 one request rather than hammering the endpoint.
@@ -278,12 +297,14 @@ Every 5 minutes.
 }
 ```
 
-Response can carry commands back:
+Response carries back any queued commands, and the account's current capture
+settings:
 
 ```jsonc
 {
   "ok": true,
-  "commands": [ { "type": "flush_queue" } ]
+  "commands": [ { "type": "flush_queue" } ],
+  "capture": { "cash_in": false, "outgoing": false, "other": false }
 }
 ```
 
@@ -297,18 +318,54 @@ correctness. Each one is a hint the server can repeat by re-queueing.
 Unknown command types must be ignored rather than treated as an error, so new
 ones can be added without an app update.
 
-### `POST /device/v1/provision`
+Capture settings ride the heartbeat rather than having their own poll, so a phone
+that has been offline comes back in step with no reconciliation. `capture` is
+absent when talking to an older server; treat that as "leave the cached copy
+alone", not as "reset to defaults".
+
+### `GET` / `POST /device/v1/settings`
+
+What this account keeps besides incoming Send Money. The same setting the
+dashboard edits, on the same row — having it in both places is a convenience,
+not two systems.
+
+```jsonc
+// POST body, and the `capture` object in every response
+{
+  "cash_in": false,   // agent and app cash-in landing on this number
+  "outgoing": false,  // money this number sent — a ledger, never matchable
+  "other": false      // everything else, promotions included
+}
+```
+
+All three fields are required on write. A partial update would race the
+dashboard: two screens editing three booleans, each sending only what it thinks
+changed, is how one silently reverts the other. Send the full set being
+displayed.
+
+There is deliberately **no switch for incoming Send Money**. It is the only type
+`resolve.ts` will match, so a toggle for it would be a toggle that stops payments
+being recognised.
+
+Scoped to the device's own account, which is why the body carries no account id.
+A phone can only ever change the number it was provisioned for.
+
+Last write wins. Nothing here is destructive — the worst a stale phone can do is
+send a message the server then drops.
+
+### `POST /device/v1/pair`
 
 The one device endpoint reachable without a device token, because the device does
-not have one yet. The dashboard mints a pending device and shows a QR containing
-the server URL, a one-time token, and the device id.
+not have one yet. The dashboard mints a pending device and shows a QR. The QR is
+a bare URL and nothing else:
+
+```
+https://<your-host>/pair/<code>
+```
 
 ```jsonc
 // Request
-{
-  "device_id": "01a068a8-7499-7c13-85cb-7936ca348533",
-  "provisioning_token": "jmp_..."
-}
+{ "code": "gRbbEeuA1eFl0NTepZUxd2EqDmOE_o6sU06YutTy97s" }
 
 // 200
 {
@@ -318,11 +375,53 @@ the server URL, a one-time token, and the device id.
 }
 ```
 
-The one-time token is Argon2-hashed at rest, expires after 15 minutes, and is
-burned on use by a conditional update — two phones scanning the same code cannot
+The code is 32 random bytes, Argon2-hashed at rest, expires after 15 minutes, and
+is burned on use by a conditional update — two phones scanning the same QR cannot
 both end up holding a valid token. Expired, already-claimed, and simply wrong all
 return the same `401`; anything more specific tells a holder of a stale QR which
-part to change.
+part to change. Rate limited by IP, since there is no device identity yet.
+
+**Why a URL and not JSON.** The QR used to carry
+`{"url":…,"token":"jmp_…","account":{…}}`, which meant only the notifier app's
+own scanner could do anything with it — and pointing any other scanner at it
+displayed a live credential and the account's phone number to whoever was
+looking. A URL fixes both: every scanner offers to open it, and a scanner that
+shows the target now shows a host and an opaque code.
+
+The code is still a bearer credential for one exchange, so a leaked QR is not
+harmless. The narrower claim is what holds: nothing legible leaks, and the
+payload is useless without your server.
+
+> Replaces `POST /device/v1/provision`, which took a `device_id` alongside its
+> token. That shape cannot work here — a third-party scanner needs a bare URL, so
+> the code has to locate its own device row.
+
+#### App Links
+
+Set `ANDROID_CERT_SHA256` to the notifier APK's signing fingerprint and the
+instance serves it at `/.well-known/assetlinks.json`. Android then routes
+`https://<your-host>/pair/…` straight into the app: no chooser, no browser.
+
+Since Android 12 this is also the security boundary. An app that cannot prove the
+domain endorses it does not receive the link and cannot register for it, so no
+other app can intercept a provisioning code. A custom `jomma://` scheme would
+have been simpler and would have had the opposite property — any app may claim
+one.
+
+Two halves have to agree, or Android declines to verify and links open in a
+browser:
+
+1. The server publishes the fingerprint (`ANDROID_CERT_SHA256`).
+2. The APK is built for that host: `./gradlew assembleRelease -PjommaHost=your-host.com`.
+
+App Links verify against a literal host in the manifest, which cannot be
+discovered at runtime — so for self-hosted software the host is a build input.
+
+Unset, `/.well-known/assetlinks.json` returns `[]`. That is a valid statement
+list meaning "this domain authorises no app", which is the right default: links
+open in a browser and land on `/pair/<code>`, a page that explains what to
+install. **That page never redeems the code** — burning it there would mean
+scanning correctly a moment later fails.
 
 ### `POST /device/v1/rotate`
 
@@ -611,6 +710,7 @@ return it.
 | `POST /v1/submissions` | 20 / min per key, 5 / hour per intent |
 | `POST /device/v1/capture` | 120 / min per device |
 | `POST /device/v1/heartbeat` | 20 / min per device |
+| `GET`/`POST /device/v1/settings` | 20 / min per device (shares the heartbeat bucket) |
 | `POST /ingest/v1/webhook` | 120 / min per IP (no device identity to key on) |
 
 Return `X-RateLimit-Remaining` and `X-RateLimit-Reset` on every response.

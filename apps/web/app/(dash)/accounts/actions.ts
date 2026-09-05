@@ -1,11 +1,13 @@
 'use server'
 
+import type { CaptureSettings } from '@jomma/shared'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/session'
 import {
   acknowledgeAlert,
   createReceivingAccount,
   setAccountStatus,
+  setCaptureSettings,
 } from '@/lib/services/account-admin'
 import {
   createDeviceWithProvisioning,
@@ -64,7 +66,7 @@ export async function addDeviceAction(
     revalidatePath('/accounts')
     return {
       ok: true,
-      message: 'Scan this from the notifier app. It expires in 15 minutes.',
+      message: 'Scan this with the phone — any QR scanner works. It expires in 15 minutes.',
       secret: { kind: 'qr', dataUrl: qrDataUrl, expiresAt: payload.expires_at },
     }
   } catch (error) {
@@ -126,6 +128,30 @@ export async function setAccountStatusAction(
     }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Could not update.' }
+  }
+}
+
+/**
+ * Which message types this number keeps.
+ *
+ * The identical switches exist in the notifier app, writing to this same row
+ * over `/device/v1/settings`. Neither side owns the value: whichever wrote last
+ * wins, and the other picks the change up on its next heartbeat. That is enough
+ * because nothing here is destructive — the worst a stale phone can do is send
+ * a message the server then drops.
+ */
+export async function setCaptureSettingsAction(
+  accountId: string,
+  settings: CaptureSettings,
+): Promise<DeviceActionResult> {
+  const admin = await requireAdmin()
+
+  try {
+    await setCaptureSettings({ accountId, settings, actorId: admin.id, actorType: 'admin' })
+    revalidatePath('/accounts')
+    return { ok: true, message: 'Capture settings saved.' }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not save.' }
   }
 }
 

@@ -30,7 +30,7 @@ export interface Fixture {
     senderMsisdn: string | null
     referenceRaw: string | null
     balanceAfterCents: number | null
-    transactionType: 'send_money' | 'cash_in' | 'other'
+    transactionType: 'send_money' | 'cash_in' | 'outgoing' | 'other'
     parseStatus: 'ok' | 'partial' | 'failed'
   }
   source: 'docs' | 'synthetic' | 'live'
@@ -80,26 +80,38 @@ export const BKASH_FIXTURES: Fixture[] = [
      * The *sender's* confirmation, captured over `*247#`. Money leaving the
      * account, not arriving on it.
      *
-     * The one that must fail. The watched phone can send money too, and this
-     * message carries a TrxID, a reference and an amount — everything the
-     * matcher looks at. Reading it as income would credit an order with money
-     * that went the other way, which is the worst bug this repo could have.
+     * The one that must never be read as income. The watched phone can send
+     * money too, and this message carries a TrxID, a reference and an amount —
+     * everything the matcher looks at. Crediting an order with money that went
+     * the other way is the worst bug this repo could have.
      *
-     * It fails on the amount: the incoming grammar is "You have received Tk X
-     * from …", and there is no "received … from" here to anchor on. `admits()`
-     * then refuses it as `unparsed` before any other check runs.
+     * What stops it is the *type*, not a failure to parse. `resolve.ts` admits
+     * `send_money` and nothing else, so an outgoing row is inert however
+     * completely it reads.
+     *
+     * It used to be stopped by failing instead: the incoming grammar is "You
+     * have received Tk X from …", so there was nothing here for the amount
+     * pattern to anchor on. That worked, and cost too much — every transfer the
+     * operator made raised a high-severity parse-failure alert, sat in the
+     * manual queue as a mystery, and could not be filtered by the capture
+     * settings, since an unreadable message is always kept. Three kinds of noise
+     * to re-derive a guarantee the type gate already gives for free.
+     *
+     * So it parses, and `senderMsisdn` stays null because there is no sender —
+     * 01518920430 is the recipient, and there is nowhere in the schema to say
+     * so.
      */
-    name: 'LIVE — an OUTGOING send money must never parse',
+    name: 'LIVE — an OUTGOING send money must never be read as income',
     source: 'live',
     raw: 'Send Money Tk 10.00 to 01518920430 successful. Ref 12341234. Fee Tk 0.00. Balance Tk 320.00. TrxID DI426228H2 at 04/09/2026 20:31',
     expect: {
       trxId: 'DI426228H2',
-      amountCents: null,
+      amountCents: 1_000,
       senderMsisdn: null,
       referenceRaw: '12341234',
-      balanceAfterCents: null,
-      transactionType: 'other',
-      parseStatus: 'failed',
+      balanceAfterCents: 32_000,
+      transactionType: 'outgoing',
+      parseStatus: 'ok',
     },
   },
   {

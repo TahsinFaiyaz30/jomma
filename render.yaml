@@ -77,6 +77,17 @@ services:
       - key: APP_URL
         sync: false
 
+      # Signing fingerprint of the notifier APK, published at
+      # /.well-known/assetlinks.json. Without it a provisioning QR scanned by
+      # the phone's camera app opens a browser instead of the notifier; with it,
+      # Android routes the link straight into the app and refuses to let any
+      # other app claim it.
+      #
+      # Set it after building the APK:
+      #   keytool -list -v -keystore <your.keystore> -alias <alias>
+      - key: ANDROID_CERT_SHA256
+        sync: false
+
       - key: LOG_LEVEL
         value: info
       - key: FEATURE_MESSAGES_BRIDGE

@@ -322,8 +322,18 @@ be red.
    - A `*247#` session's own confirmation, which carries `Ref` too. So the
      reference survives the USSD path — the thing this decision was actually
      about. That capture doubles as the guard against the worst failure
-     available: it is an *outgoing* message, and the parser refuses it rather
-     than crediting money that left the account.
+     available: it is an *outgoing* message, and it must never be credited as
+     money arriving.
+
+     It used to be stopped by failing to parse, since the incoming grammar is
+     "You have received Tk X from …" and there was nothing to anchor on. That
+     was changed on 2026-09-05: it now parses cleanly as `transaction_type:
+     'outgoing'`, and what stops it is the type gate in `matching/resolve.ts`,
+     which admits `send_money` and nothing else. Failing was costing three kinds
+     of noise — a high-severity parse alert on every transfer the operator made,
+     a permanent manual-queue entry, and immunity from the capture settings,
+     since an unreadable message is always kept — to re-derive a guarantee the
+     type gate already gives.
 
    The live pair also pinned `DD/MM/YYYY HH:MM` read as Bangladesh time, which
    the payment window measures against and which fails silently when wrong.

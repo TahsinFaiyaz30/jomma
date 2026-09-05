@@ -1,7 +1,9 @@
 import 'server-only'
 
+import type { CaptureSettings } from '@jomma/shared'
 import { toPublicId } from '@jomma/shared'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import type { Database, Tx } from '@/lib/db/client'
 import { db } from '@/lib/db/client'
 import { apps, notifierEvents, receivingAccounts } from '@/lib/db/schema'
 import { audit } from './audit'
@@ -129,6 +131,73 @@ function normalizeMsisdn(input: string): string | null {
 
   if (!/^01[3-9]\d{8}$/.test(withZero)) return null
   return `880${withZero.slice(1)}`
+}
+
+/**
+ * What this number keeps besides incoming Send Money.
+ *
+ * Stored on the account and not on the device, which is what makes "the same
+ * settings on both sides" true rather than approximately true. Two phones
+ * watching one number cannot disagree, re-provisioning a phone cannot silently
+ * reset it, and the dashboard and the app are reading the same row.
+ *
+ * The phone is a remote control here, not a second source of truth. It does no
+ * parsing at all — `NotificationListener` forwards raw text — so classification
+ * only ever happens in `lib/parsers`, and there is no Kotlin copy of the
+ * grammar to drift out of step with it.
+ */
+export async function getCaptureSettings(
+  accountId: string,
+  client: Database | Tx = db,
+): Promise<CaptureSettings> {
+  const [account] = await client
+    .select({
+      cashIn: receivingAccounts.captureCashIn,
+      outgoing: receivingAccounts.captureOutgoing,
+      other: receivingAccounts.captureOther,
+    })
+    .from(receivingAccounts)
+    .where(eq(receivingAccounts.id, accountId))
+    .limit(1)
+
+  if (!account) throw new Error('Unknown account')
+
+  return { cash_in: account.cashIn, outgoing: account.outgoing, other: account.other }
+}
+
+export async function setCaptureSettings(options: {
+  accountId: string
+  settings: CaptureSettings
+  /** Null when the phone changed it — a device is not a user. */
+  actorId: string | null
+  actorType: 'admin' | 'device'
+}): Promise<CaptureSettings> {
+  return db.transaction(async (tx) => {
+    const [account] = await tx
+      .update(receivingAccounts)
+      .set({
+        captureCashIn: options.settings.cash_in,
+        captureOutgoing: options.settings.outgoing,
+        captureOther: options.settings.other,
+      })
+      .where(eq(receivingAccounts.id, options.accountId))
+      .returning()
+
+    if (!account) throw new Error('Unknown account')
+
+    await audit(tx, {
+      action: 'account.updated',
+      actorId: options.actorId ?? undefined,
+      actorType: options.actorType,
+      payload: { account_id: account.id, capture: options.settings },
+    })
+
+    return {
+      cash_in: account.captureCashIn,
+      outgoing: account.captureOutgoing,
+      other: account.captureOther,
+    }
+  })
 }
 
 export async function acknowledgeAlert(options: {

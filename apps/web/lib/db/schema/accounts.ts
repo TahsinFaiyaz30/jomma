@@ -35,6 +35,21 @@ export const receivingAccounts = pgTable(
     /** Why the account was degraded or disabled. Surfaced in the sidebar footer. */
     statusReason: text('status_reason'),
 
+    /*
+     * What to keep from this number's message stream.
+     *
+     * The phone forwards everything its provider app emits, which for bKash is
+     * promotions, balance notices, cash-in confirmations and the one message
+     * type that can actually settle an order. Storing all of it buries the feed
+     * in noise nobody reads.
+     *
+     * Incoming Send Money has no switch because turning it off would stop the
+     * product working — it is the only type `resolve.ts` will match.
+     */
+    captureCashIn: boolean('capture_cash_in').notNull().default(false),
+    captureOutgoing: boolean('capture_outgoing').notNull().default(false),
+    captureOther: boolean('capture_other').notNull().default(false),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -74,6 +89,19 @@ export const devices = pgTable(
      * a chat is not a way into the capture endpoint.
      */
     provisioningHash: text('provisioning_hash'),
+    /**
+     * SHA-256 of the pairing code, for finding this row.
+     *
+     * The code is the *only* thing in the QR — there is no device id beside it
+     * to look up by, because the QR has to be a bare URL that any scanner app
+     * will open. So the code has to locate its own row, and an argon2 hash
+     * cannot be searched.
+     *
+     * A plain digest is enough here and Argon2 would be theatre: the code is 32
+     * random bytes, so there is no dictionary to run against it. `provisioning_hash`
+     * still does the verifying — this only decides which row to verify against.
+     */
+    pairingLookup: text('pairing_lookup'),
     provisioningExpiresAt: timestampTz('provisioning_expires_at'),
     provisionedAt: timestampTz('provisioned_at'),
     /** Bumped on every rotation, so the dashboard can show token age. */
@@ -101,6 +129,11 @@ export const devices = pgTable(
     uniqueIndex('ux_devices_token_prefix')
       .on(table.tokenPrefix)
       .where(sql`token_prefix is not null`),
+    // The pairing lookup. Unique so a redemption is an exact single-row hit,
+    // and partial because it is cleared the moment the code is burned.
+    uniqueIndex('ux_devices_pairing_lookup')
+      .on(table.pairingLookup)
+      .where(sql`pairing_lookup is not null`),
     index('ix_devices_account').on(table.receivingAccountId, table.status),
   ],
 )
