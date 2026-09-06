@@ -102,7 +102,9 @@ fun JommaScreens(
     onAutoDownloadChange: (Boolean) -> Unit,
     onUnmeteredOnlyChange: (Boolean) -> Unit,
     onCheckForUpdates: () -> Unit,
+    onDownloadUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
+    onDeleteDownload: () -> Unit,
     onOpenGitHub: () -> Unit,
     onFlush: () -> Unit,
     onHeartbeat: () -> Unit,
@@ -161,7 +163,9 @@ fun JommaScreens(
                     onAutoDownloadChange = onAutoDownloadChange,
                     onUnmeteredOnlyChange = onUnmeteredOnlyChange,
                     onCheckForUpdates = onCheckForUpdates,
+                    onDownloadUpdate = onDownloadUpdate,
                     onInstallUpdate = onInstallUpdate,
+                    onDeleteDownload = onDeleteDownload,
                     onOpenGitHub = onOpenGitHub,
                 )
             }

@@ -21,11 +21,13 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FilterAlt
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Shield
@@ -97,7 +99,9 @@ fun SettingsScreen(
     onAutoDownloadChange: (Boolean) -> Unit,
     onUnmeteredOnlyChange: (Boolean) -> Unit,
     onCheckForUpdates: () -> Unit,
+    onDownloadUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
+    onDeleteDownload: () -> Unit,
     onOpenGitHub: () -> Unit,
 ) {
     Column(
@@ -206,7 +210,9 @@ fun SettingsScreen(
             onAutoDownloadChange = onAutoDownloadChange,
             onUnmeteredOnlyChange = onUnmeteredOnlyChange,
             onCheckForUpdates = onCheckForUpdates,
+            onDownloadUpdate = onDownloadUpdate,
             onInstallUpdate = onInstallUpdate,
+            onDeleteDownload = onDeleteDownload,
         )
 
         SectionHeader("About")
@@ -251,14 +257,24 @@ private fun UpdatesSection(
     onAutoDownloadChange: (Boolean) -> Unit,
     onUnmeteredOnlyChange: (Boolean) -> Unit,
     onCheckForUpdates: () -> Unit,
+    onDownloadUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
+    onDeleteDownload: () -> Unit,
 ) {
     var pickingInterval by remember { mutableStateOf(false) }
 
     SettingsCard {
-        // The offer, when there is one. Above the settings because somebody who
-        // has just been told an update exists wants to act on it, not configure
-        // how often they are told.
+        /*
+         * The offer first when there is one, then "Check now", then how it
+         * behaves.
+         *
+         * "Check now" used to be last, under two switches and an interval
+         * picker, which buried the one thing somebody opens this section to
+         * press. But it does not belong at the very top either: when there is an
+         * update waiting, *that* is what the section is about, and asking again
+         * is the lesser thing. So the order is: what is waiting, how to ask,
+         * how to behave.
+         */
         state.availableUpdate?.let { update ->
             ListItem(
                 leadingContent = {
@@ -283,8 +299,17 @@ private fun UpdatesSection(
                 trailingContent = {
                     if (state.updateDownloading) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
+                    } else if (state.updateDownloaded) {
                         TextButton(onClick = onInstallUpdate) { Text("Install") }
+                    } else {
+                        /*
+                         * Says what the press will actually do. The action behind
+                         * it always downloaded first when it had to, but it called
+                         * itself "Install" either way -- so the first press on a
+                         * fresh update spent twelve megabytes of somebody's data
+                         * and installed nothing, with no warning that it would.
+                         */
+                        TextButton(onClick = onDownloadUpdate) { Text("Download") }
                     }
                 },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -297,9 +322,52 @@ private fun UpdatesSection(
                         .padding(horizontal = 16.dp),
                 )
             }
+
+            // Only worth offering once there is a file to remove. Twelve
+            // megabytes held for an update somebody has decided not to take is
+            // otherwise unreachable without clearing the app's storage, which
+            // would take the pairings with it.
+            if (state.updateDownloaded && !state.updateDownloading) {
+                HorizontalDivider()
+                ListItem(
+                    leadingContent = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                    headlineContent = { Text("Delete download") },
+                    supportingContent = {
+                        Text("Frees the space. The update stays on offer.")
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable(onClick = onDeleteDownload),
+                )
+            }
             HorizontalDivider()
         }
 
+        /*
+         * A different icon and a different sentence from the offer above.
+         *
+         * Both rows used `SystemUpdate` and both printed the same status string,
+         * so they read as the same row twice — "Downloaded · ready to install"
+         * appeared under a button that does not install anything. This one is
+         * about *asking*: a refresh glyph, and the answer to the question.
+         */
+        ListItem(
+            leadingContent = { Icon(Icons.Outlined.Refresh, contentDescription = null) },
+            headlineContent = { Text("Check now") },
+            supportingContent = {
+                Text(state.checkStatus ?: "Currently on ${BuildConfig.VERSION_NAME}")
+            },
+            trailingContent = {
+                if (state.updateChecking) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clickable(
+                enabled = !state.updateChecking,
+                onClick = onCheckForUpdates,
+            ),
+        )
+        HorizontalDivider()
         ListItem(
             leadingContent = { Icon(Icons.Outlined.Schedule, contentDescription = null) },
             headlineContent = { Text("Check for updates") },
@@ -324,21 +392,6 @@ private fun UpdatesSection(
             enabled = true,
             onChange = onUnmeteredOnlyChange,
             icon = Icons.Outlined.Wifi,
-        )
-        HorizontalDivider()
-        ListItem(
-            headlineContent = { Text("Check now") },
-            supportingContent = {
-                Text(state.updateStatus ?: "Currently on ${BuildConfig.VERSION_NAME}")
-            },
-            trailingContent = {
-                if (state.updateChecking) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                }
-            },
-            leadingContent = { Icon(Icons.Outlined.SystemUpdate, contentDescription = null) },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable(enabled = !state.updateChecking, onClick = onCheckForUpdates),
         )
     }
 

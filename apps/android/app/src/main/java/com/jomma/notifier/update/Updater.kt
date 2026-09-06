@@ -147,6 +147,20 @@ object Updater {
      *
      * Old files are cleared first rather than accumulating: each is twelve
      * megabytes, and a build that was never installed has no reason to be kept.
+     * On a phone chosen for being cheap and left in a drawer, two of those is a
+     * real amount of the storage there is.
+     *
+     * The clearing cannot stop the download. A file Android will not let go of —
+     * something still holding a handle, a vendor filesystem being difficult — is
+     * a reason to be short of space later, not a reason to refuse the update
+     * somebody just asked for. So every delete is attempted, none is checked,
+     * and the target is written regardless; a stale sibling that survives is
+     * collected by the next `purgeInstalledDownloads` anyway.
+     *
+     * The target itself goes too, in case a previous attempt left it half
+     * written: `outputStream()` truncates, but only once it has opened, and a
+     * partial APK is worse than none — the installer rejects it with a parse
+     * error that reads like a corrupt release.
      */
     suspend fun download(
         context: Context,
@@ -154,7 +168,10 @@ object Updater {
         onProgress: (Int) -> Unit = {},
     ): File? = withContext(Dispatchers.IO) {
         val dir = downloadDir(context)
-        dir.listFiles()?.forEach { it.delete() }
+        dir.listFiles()?.forEach { stale ->
+            runCatching { stale.delete() }
+                .onFailure { Log.w(TAG, "could not clear ${stale.name}; downloading anyway", it) }
+        }
 
         val target = File(dir, "jomma-${update.version}-${update.variant}.apk")
 
@@ -197,9 +214,39 @@ object Updater {
         File(downloadDir(context), "jomma-${update.version}-${update.variant}.apk")
             .takeIf { it.isFile && it.length() > 0 }
 
-    /** Removes anything left in the update cache. */
-    fun clearDownloads(context: Context) {
-        downloadDir(context).listFiles()?.forEach { it.delete() }
+    /**
+     * Empties the update cache — everything in it, not just the current offer.
+     *
+     * Deliberately indiscriminate. The point of "Delete download" is to get the
+     * space back, and a sweep that only removed the file this session happens to
+     * know about would leave behind exactly the ones worth removing: an APK from
+     * a version that has since been superseded, one whose download was
+     * interrupted, one left by a build that named things differently. Those are
+     * unreferenced by anything, so nothing else will ever come looking for them
+     * and the user has no way to see they exist.
+     *
+     * Nothing else writes here, so there is nothing to be careful of. Each
+     * removal is attempted independently — one file the OS will not release must
+     * not stop the rest being freed — and directories go recursively, since a
+     * plain `delete` refuses a non-empty one and would silently leave the
+     * contents.
+     *
+     * @return how many bytes were actually freed.
+     */
+    fun clearDownloads(context: Context): Long {
+        var freed = 0L
+        downloadDir(context).listFiles()?.forEach { entry ->
+            val size = if (entry.isDirectory) entry.walkBottomUp().sumOf { it.length() } else entry.length()
+            val gone = runCatching {
+                if (entry.isDirectory) entry.deleteRecursively() else entry.delete()
+            }.getOrElse {
+                Log.w(TAG, "could not delete ${entry.name}", it)
+                false
+            }
+            if (gone) freed += size else Log.w(TAG, "left behind ${entry.name}")
+        }
+        if (freed > 0) Log.i(TAG, "cleared $freed bytes of cached updates")
+        return freed
     }
 
     /**
@@ -219,15 +266,39 @@ object Updater {
     fun purgeInstalledDownloads(context: Context) {
         val current = BuildConfig.VERSION_NAME
         downloadDir(context).listFiles()?.forEach { file ->
-            val version = file.name
-                .takeIf { it.startsWith("jomma-") && it.endsWith(".apk") }
-                ?.removePrefix("jomma-")
-                ?.substringBefore('-')
-
-            if (version.isNullOrBlank() || compareVersions(version, current) <= 0) {
-                file.delete()
+            if (isSpent(file.name, current)) {
+                runCatching { file.delete() }
+                    .onFailure { Log.w(TAG, "could not purge ${file.name}", it) }
             }
         }
+    }
+
+    /**
+     * Whether a cached APK has outlived its purpose, given what is now running.
+     *
+     * Split out from the loop so it can be tested without a `Context`, because
+     * it has to be right in both directions and the two are easy to confuse.
+     *
+     * Deleted when the running version has caught up: that build either
+     * installed — and twelve megabytes of it are dead weight — or was abandoned
+     * for a release that has since shipped anyway.
+     *
+     * **Kept when it is newer**, which is the half that would be silently
+     * expensive to get wrong. Someone downloads 1.5.0, does not install it yet,
+     * and reopens the app: this runs on every launch, so treating "not the
+     * running version" as spent would delete the update they are about to
+     * install and charge them for it twice.
+     */
+    fun isSpent(fileName: String, currentVersion: String): Boolean {
+        val version = fileName
+            .takeIf { it.startsWith("jomma-") && it.endsWith(".apk") }
+            ?.removePrefix("jomma-")
+            ?.substringBefore('-')
+
+        // Unrecognisable means it was not written by this code. Nothing else
+        // writes to that directory, so it is a leftover from a build that named
+        // things differently and there is nobody left to want it.
+        return version.isNullOrBlank() || compareVersions(version, currentVersion) <= 0
     }
 
     /** Whether Android will let this app start an install at all. */

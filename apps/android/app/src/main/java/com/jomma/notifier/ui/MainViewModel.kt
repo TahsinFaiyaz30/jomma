@@ -63,10 +63,30 @@ data class UiState(
     val autoDownloadUpdates: Boolean = false,
     val updatesOnUnmeteredOnly: Boolean = true,
     val availableUpdate: String? = null,
+
+    /**
+     * Whether the APK for `availableUpdate` is already on disk.
+     *
+     * Drives what the button says. The action behind it always did the right
+     * thing — it downloads first when it has to — but it called itself "Install"
+     * either way, so the first press on a fresh update silently spent twelve
+     * megabytes of somebody's mobile data instead of installing anything.
+     */
+    val updateDownloaded: Boolean = false,
     val updateChecking: Boolean = false,
     val updateDownloading: Boolean = false,
     val updateProgress: Int = 0,
+    /**
+     * The offer row's line: size, progress, or that it is ready to install.
+     *
+     * Kept apart from [checkStatus] because one string driving both rows made
+     * them read identically -- "Downloaded · ready to install" appeared twice,
+     * once under a button that does not install anything.
+     */
     val updateStatus: String? = null,
+
+    /** The "Check now" row's line: the result of asking, not of downloading. */
+    val checkStatus: String? = null,
     val busy: Boolean = false,
     val message: String? = null,
 
@@ -471,7 +491,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         prefs.autoDownloadUpdates = enabled
         _state.value = _state.value.copy(autoDownloadUpdates = enabled)
         // Turning it off should also reclaim the space, not just stop fetching.
-        if (!enabled) Updater.clearDownloads(getApplication())
+        // Same reset as `deleteDownload`, since it is the same deletion.
+        if (!enabled) deleteDownload()
     }
 
     fun setUpdatesOnUnmeteredOnly(enabled: Boolean) {
@@ -490,7 +511,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.updateChecking) return
         _state.value = _state.value.copy(
             updateChecking = true,
-            updateStatus = if (silent) _state.value.updateStatus else "Checking…",
+            checkStatus = if (silent) _state.value.checkStatus else "Checking…",
         )
 
         viewModelScope.launch {
@@ -503,6 +524,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     _state.value = _state.value.copy(
                         updateChecking = false,
                         availableUpdate = result.update.version,
+                        updateDownloaded = downloaded != null,
+                        checkStatus = "Version ${result.update.version} available",
                         updateStatus = if (downloaded != null) {
                             "Downloaded · ready to install"
                         } else {
@@ -523,21 +546,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     _state.value = _state.value.copy(
                         updateChecking = false,
                         availableUpdate = null,
-                        updateStatus = "Up to date · ${result.version}",
+                        updateDownloaded = false,
+                        checkStatus = "Up to date · ${result.version}",
+                        updateStatus = null,
                     )
                 }
 
                 is Updater.CheckResult.Failed ->
                     _state.value = _state.value.copy(
                         updateChecking = false,
-                        updateStatus = if (silent) null else "Could not check: ${result.message}",
+                        checkStatus = if (silent) {
+                            _state.value.checkStatus
+                        } else {
+                            "Could not check: ${result.message}"
+                        },
                     )
             }
         }
     }
 
-    private fun downloadUpdate() {
+    /** Fetches the APK. Public because the button now says "Download" and means it. */
+    fun downloadUpdate() {
         val update = pending ?: return
+        if (_state.value.updateDownloading) return
         val app = getApplication<Application>()
 
         if (!Updater.canDownloadNow(app)) {
@@ -555,9 +586,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             downloaded = file
             _state.value = _state.value.copy(
                 updateDownloading = false,
+                updateDownloaded = file != null,
                 updateStatus = if (file == null) "Download failed" else "Downloaded · ready to install",
             )
         }
+    }
+
+    /**
+     * Throws away a downloaded APK without installing it.
+     *
+     * Twelve megabytes on a phone that often has very little, held for an update
+     * somebody has decided not to take yet. Nothing else offered a way to get it
+     * back short of clearing the app's storage, which would take the pairings
+     * with it.
+     *
+     * The update itself stays on offer — this deletes the file, not the fact
+     * that a newer version exists, so the button simply returns to "Download".
+     */
+    fun deleteDownload() {
+        // Clears the whole cache, not only the file this session knows about —
+        // an interrupted download or one left by a superseded version is
+        // referenced by nothing and is exactly the space worth reclaiming.
+        val freed = Updater.clearDownloads(getApplication())
+        downloaded = null
+        _state.value = _state.value.copy(
+            updateDownloaded = false,
+            updateProgress = 0,
+            updateStatus = pending?.let { "${it.sizeLabel} · not downloaded yet" },
+            message = if (freed > 0) "Deleted ${freed / 1_000_000} MB" else "Nothing to delete",
+        )
     }
 
     /**
@@ -609,6 +666,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun purgeStaleDownloads() {
         Updater.purgeInstalledDownloads(getApplication())
         downloaded = downloaded?.takeIf { it.isFile }
+        // Keep the button honest: if the purge took the file, it says "Download"
+        // again rather than offering to install something no longer there.
+        _state.value = _state.value.copy(updateDownloaded = downloaded != null)
     }
 
     private fun startOfToday(): Long {
