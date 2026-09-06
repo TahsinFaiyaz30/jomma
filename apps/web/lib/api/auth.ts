@@ -4,6 +4,7 @@ import { apiKeyPrefix, bearerToken, deviceTokenPrefix, verifyCredential } from '
 import { db } from '@/lib/db/client'
 import { apiKeys, apps, businesses, devices, receivingAccounts } from '@/lib/db/schema'
 import { ApiError } from './errors'
+import { enforceRateLimit, type RequestContext } from './handler'
 
 /**
  * Two independent credential families.
@@ -42,7 +43,10 @@ export interface AuthenticatedDevice {
   rateKey: string
 }
 
-export async function authenticateApp(request: Request): Promise<AuthenticatedApp> {
+export async function authenticateApp(
+  request: Request,
+  context: RequestContext,
+): Promise<AuthenticatedApp> {
   const token = bearerToken(request.headers.get('authorization'))
   if (!token?.startsWith('jm_')) throw ApiError.unauthorized()
 
@@ -65,12 +69,38 @@ export async function authenticateApp(request: Request): Promise<AuthenticatedAp
     .limit(1)
     .then((rows) => rows[0])
 
-  // Same error for "no such prefix" and "wrong secret" — a caller must not be
-  // able to enumerate valid prefixes by watching which one takes longer.
-  if (!row) {
-    await verifyCredential(DUMMY_HASH, token)
-    throw ApiError.unauthorized()
-  }
+  /*
+   * An unknown prefix is refused here, before any hashing.
+   *
+   * This used to run Argon2 against a dummy hash first, so that "no such
+   * prefix" and "wrong secret" took the same time and prefixes could not be
+   * enumerated by timing. That defended nothing worth defending and paid for it
+   * with a denial of service.
+   *
+   * Nothing worth defending, because a prefix is not a secret: it is stored in
+   * clear, it is the first sixteen characters of a key whose remaining
+   * twenty-four are the actual credential, and confirming one exists gets an
+   * attacker no closer to guessing those. Enumerating the eight random
+   * characters in it means 62^8 requests to learn something that does not help.
+   *
+   * And an expensive way to pay, because it made every unauthenticated request
+   * cost an Argon2id verify -- 19 MiB and tens of milliseconds, by design --
+   * before any rate limit had been consulted, since routes rate limit on the
+   * authenticated principal and there isn't one yet. Measured on a dev machine:
+   * ~34 ms per garbage key, and thirty concurrent more than doubled the latency
+   * of an unrelated request. On a 512 MiB instance thirty of them is the whole
+   * machine. `Bearer jm_live_anything`, repeated, was enough.
+   */
+  if (!row) throw ApiError.unauthorized()
+
+  /*
+   * Now there is a real, non-secret identifier to count against, so the cost of
+   * verifying is bounded per key before it is paid. Someone who has seen a
+   * key's first sixteen characters can still make us hash, but only sixty times
+   * a minute for that one prefix, rather than without limit for any string
+   * beginning "jm_".
+   */
+  enforceRateLimit(context, 'auth:verify', `key:${row.keyId}`)
 
   const valid = await verifyCredential(row.keyHash, token)
   if (!valid) throw ApiError.unauthorized()
@@ -115,7 +145,10 @@ export async function authenticateApp(request: Request): Promise<AuthenticatedAp
  * header alone proves nothing, but requiring it means a token replayed from a
  * different device id is rejected before it can write a capture.
  */
-export async function authenticateDevice(request: Request): Promise<AuthenticatedDevice> {
+export async function authenticateDevice(
+  request: Request,
+  context: RequestContext,
+): Promise<AuthenticatedDevice> {
   const token = bearerToken(request.headers.get('authorization'))
   const deviceId = request.headers.get('x-device-id')?.trim()
 
@@ -138,12 +171,16 @@ export async function authenticateDevice(request: Request): Promise<Authenticate
     .limit(1)
     .then((rows) => rows[0])
 
-  // A `pending` device has no hash yet — it has a provisioning QR that nobody
-  // has scanned. Treat it exactly like an unknown prefix.
-  if (!row?.tokenHash) {
-    await verifyCredential(DUMMY_HASH, token)
-    throw ApiError.unauthorized()
-  }
+  /*
+   * A `pending` device has no hash yet — it has a provisioning QR that nobody
+   * has scanned. Treat it exactly like an unknown prefix: refused here, before
+   * any hashing, for the reasons in `authenticateApp`. A device token prefix is
+   * as public as an API key's and hashing on its behalf was a free way for
+   * anyone to spend the server's memory.
+   */
+  if (!row?.tokenHash) throw ApiError.unauthorized()
+
+  enforceRateLimit(context, 'auth:verify', `device:${row.deviceId}`)
 
   const valid = await verifyCredential(row.tokenHash, token)
   if (!valid) throw ApiError.unauthorized()
@@ -174,10 +211,12 @@ export async function authenticateDevice(request: Request): Promise<Authenticate
   }
 }
 
-/**
- * A real Argon2id hash of a value nothing will ever present. Verifying against
- * it on the miss path keeps the timing of "unknown prefix" and "wrong secret"
- * roughly equal.
+/*
+ * The dummy Argon2id hash that used to live here is gone.
+ *
+ * It existed to equalise the timing of "unknown prefix" and "wrong secret". A
+ * prefix is stored in clear and is not a secret, so learning that one exists is
+ * worth nothing without the twenty-four characters that follow it — and paying
+ * for that with an unmetered Argon2 verify on every unauthenticated request was
+ * a denial of service anyone could trigger. See `authenticateApp`.
  */
-const DUMMY_HASH =
-  '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHR2YWx1ZXg$8Z3EJdKQ5oCw9wIrLpQ8nHRk1lPHfEqXvJmZ0mQ3Vzg'

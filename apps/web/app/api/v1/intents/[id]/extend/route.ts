@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
  * if another intent has since claimed that amount on that account.
  */
 export const POST = route(async (request, context) => {
-  const app = await authenticateApp(request)
+  const app = await authenticateApp(request, context)
   enforceRateLimit(context, 'intents:mutate', app.rateKey)
 
   const intent = await requireIntent(idFromUrl(request.url), app.appId)

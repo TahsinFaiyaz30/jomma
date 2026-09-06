@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
  * supplies the figures.
  */
 export const POST = route(async (request, context) => {
-  const app = await authenticateApp(request)
+  const app = await authenticateApp(request, context)
   enforceRateLimit(context, 'submissions:create', app.rateKey)
 
   const input = await parseBody(request, createSubmissionSchema)

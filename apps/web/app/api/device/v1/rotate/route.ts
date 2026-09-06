@@ -24,7 +24,7 @@ export const dynamic = 'force-dynamic'
  */
 export const POST = route(async (request, context) => {
   requireDeviceIpAllowed(context)
-  const device = await authenticateDevice(request)
+  const device = await authenticateDevice(request, context)
   enforceRateLimit(context, 'device:heartbeat', device.rateKey)
 
   // Authenticated above, so this is the prefix of a token that just verified.

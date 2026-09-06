@@ -27,7 +27,7 @@ export const dynamic = 'force-dynamic'
  */
 export const POST = route(async (request, context) => {
   requireDeviceIpAllowed(context)
-  const device = await authenticateDevice(request)
+  const device = await authenticateDevice(request, context)
   enforceRateLimit(context, 'device:heartbeat', device.rateKey)
 
   const settings = await parseBody(request, captureSettingsSchema)
@@ -54,7 +54,7 @@ export const POST = route(async (request, context) => {
  */
 export const GET = route(async (request, context) => {
   requireDeviceIpAllowed(context)
-  const device = await authenticateDevice(request)
+  const device = await authenticateDevice(request, context)
   enforceRateLimit(context, 'device:heartbeat', device.rateKey)
 
   const capture = await getCaptureSettings(device.receivingAccountId)

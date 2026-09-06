@@ -19,6 +19,21 @@ export interface RateLimitRule {
 }
 
 export const RATE_LIMITS = {
+  /**
+   * Credential verification, keyed on the row a presented prefix resolved to.
+   *
+   * Argon2id is deliberately expensive — 19 MiB and tens of milliseconds — so
+   * "how many times can a stranger make us run it" is a capacity question, not
+   * only a security one. Every other limit here is keyed on the authenticated
+   * principal and therefore consulted *after* the verify, which left that
+   * question with the answer "as often as they like".
+   *
+   * Sixty a minute per key: far above what a wrong-but-real credential does by
+   * accident (a stale key in a deploy retries, it does not flood), and far
+   * below what it takes to matter. Unknown prefixes never reach here at all.
+   */
+  'auth:verify': { limit: 60, windowSeconds: 60 },
+
   'intents:create': { limit: 60, windowSeconds: 60 },
   'intents:get': { limit: 600, windowSeconds: 60 },
   'intents:mutate': { limit: 120, windowSeconds: 60 },

@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
  * codes, not by what they owe.
  */
 export const POST = route(async (request, context) => {
-  const app = await authenticateApp(request)
+  const app = await authenticateApp(request, context)
   enforceRateLimit(context, 'intents:create', app.rateKey)
 
   const input = await parseBody(request, createIntentSchema)

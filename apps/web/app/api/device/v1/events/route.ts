@@ -30,7 +30,7 @@ const SEVERITY: Record<DeviceReportableEventKind, AlertSeverity> = {
 
 export const POST = route(async (request, context) => {
   requireDeviceIpAllowed(context)
-  const device = await authenticateDevice(request)
+  const device = await authenticateDevice(request, context)
   enforceRateLimit(context, 'device:events', device.rateKey)
 
   const body = await parseBody(request, deviceEventSchema)

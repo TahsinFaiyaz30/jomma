@@ -161,11 +161,35 @@ export function parseQuery<S extends z.ZodType>(request: Request, schema: S): z.
 }
 
 /**
- * Best-effort client IP. Behind a reverse proxy this is whatever the proxy sets,
- * so it is only ever used for logging and coarse limiting, never for auth.
+ * Best-effort client IP, taken from the end of the forwarding chain.
+ *
+ * `X-Forwarded-For` is a list that each proxy *appends* to, so it reads
+ * `client, proxy1, proxy2` and the entry a caller cannot forge is the **last**
+ * one — written by the proxy directly in front of this server. Everything to
+ * the left of it was either written by an earlier hop or simply sent by the
+ * client, who may write whatever they like.
+ *
+ * This used to take the first entry, which is the one entry that is always
+ * attacker-controlled. Every limit keyed on an IP could therefore be stepped
+ * around by varying a header: the pay page's per-address throttles, the ingest
+ * limit, and the one on pairing, which exists precisely because a device being
+ * provisioned has no identity to key on yet. It also meant a bucket per forged
+ * value, so the limiter's own map could be filled from outside.
+ *
+ * Still not identity, and still never used for auth — a single proxy that
+ * passes the header through unchanged would hand back a forged value. It is a
+ * coarse key for limiting and a label for logs, and now the hardest of the
+ * available candidates rather than the softest.
  */
 export function clientIp(request: Request): string | null {
   const forwarded = request.headers.get('x-forwarded-for')
-  if (forwarded) return forwarded.split(',')[0]?.trim() ?? null
+  if (forwarded) {
+    const hops = forwarded
+      .split(',')
+      .map((hop) => hop.trim())
+      .filter(Boolean)
+    const nearest = hops.at(-1)
+    if (nearest) return nearest
+  }
   return request.headers.get('x-real-ip')
 }

@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic'
  * the shop's phone is doing.
  */
 export const GET = route(async (request, context) => {
-  const app = await authenticateApp(request)
+  const app = await authenticateApp(request, context)
   enforceRateLimit(context, 'accounts:list', app.rateKey)
 
   const accounts = await listAccountHealth(app.businessId)

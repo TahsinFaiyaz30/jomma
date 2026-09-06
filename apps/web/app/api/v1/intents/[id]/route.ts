@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
  * generous 600/min limit.
  */
 export const GET = route(async (request, context) => {
-  const app = await authenticateApp(request)
+  const app = await authenticateApp(request, context)
   enforceRateLimit(context, 'intents:get', app.rateKey)
 
   const publicId = idFromUrl(request.url)

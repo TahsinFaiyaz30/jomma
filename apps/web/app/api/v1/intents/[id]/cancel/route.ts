@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
  * client retrying a cancel after a timeout must not get an error.
  */
 export const POST = route(async (request, context) => {
-  const app = await authenticateApp(request)
+  const app = await authenticateApp(request, context)
   enforceRateLimit(context, 'intents:mutate', app.rateKey)
 
   const intent = await requireIntent(idFromUrl(request.url), app.appId)
