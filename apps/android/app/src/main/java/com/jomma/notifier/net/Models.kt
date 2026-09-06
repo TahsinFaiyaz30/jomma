@@ -58,6 +58,15 @@ data class HeartbeatRequest(
      * looked" call for different words on the screen.
      */
     val sims: List<SimReport>? = null,
+
+    /**
+     * Whether this phone is reporting for this business at all.
+     *
+     * Sent so the dashboard can say "the phone has paused this" instead of
+     * showing a merchant a device that has simply gone quiet — the two look
+     * identical from the server otherwise, and only one of them is a problem.
+     */
+    @SerialName("sending_enabled") val sendingEnabled: Boolean? = null,
 )
 
 /**

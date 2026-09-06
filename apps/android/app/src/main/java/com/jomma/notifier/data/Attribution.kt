@@ -61,7 +61,7 @@ object Attribution {
      */
     fun forNotification(pairings: List<Pairing>, pkg: String?): Pairing? {
         val provider = providerForPackage(pkg) ?: return null
-        val candidates = pairings.filter { it.live && it.provider == provider }
+        val candidates = pairings.filter { it.capturing && it.provider == provider }
         return candidates.singleOrNull()
     }
 
@@ -89,7 +89,9 @@ object Attribution {
          */
         sims: List<SimCard> = emptyList(),
     ): Pairing? {
-        val live = pairings.filter { it.live }
+        // `capturing`, not `live`: a business the phone has been switched off
+        // for is not a candidate, though its credential still works.
+        val live = pairings.filter { it.capturing }
 
         if (subscriptionId != null && subscriptionId >= 0) {
             val bound = live.firstOrNull { it.subscriptionId == subscriptionId }

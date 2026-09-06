@@ -1,0 +1,1 @@
+ALTER TABLE "devices" ADD COLUMN "sending_enabled" boolean DEFAULT true NOT NULL;

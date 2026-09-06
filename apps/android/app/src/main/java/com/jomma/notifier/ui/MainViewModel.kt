@@ -475,6 +475,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Only ever asked when two pairings share a provider and are otherwise
      * indistinguishable — see Attribution.
      */
+    /**
+     * Switches this phone's reporting for one business on or off.
+     *
+     * Local, and deliberately not a server call. The dashboard learns about it
+     * from the next heartbeat, which is soon enough for a state the merchant
+     * cannot change from their end anyway — and doing it this way means the
+     * switch still works on a phone with no signal, which is exactly when
+     * somebody is most likely to reach for it.
+     */
+    fun setSendingEnabled(deviceId: String, enabled: Boolean) {
+        prefs.updatePairing(deviceId) { it.copy(sendingEnabled = enabled) }
+        _state.value = _state.value.copy(
+            pairings = prefs.pairings,
+            message = if (enabled) "Reporting resumed" else "Reporting paused for this business",
+        )
+        // Tell the dashboard now rather than at the next scheduled beat, so the
+        // pause shows up while the person who caused it is still watching. The
+        // pairing still beats while paused -- that is how the dashboard knows
+        // the difference between paused and gone.
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            prefs.pairing(deviceId)?.takeIf { it.live }?.let { HeartbeatWorker.beat(app, it) }
+            refresh()
+        }
+    }
+
     fun setSubscriptionId(deviceId: String, subscriptionId: Int?) {
         prefs.updatePairing(deviceId) { it.copy(subscriptionId = subscriptionId) }
         _state.value = _state.value.copy(pairings = prefs.pairings)

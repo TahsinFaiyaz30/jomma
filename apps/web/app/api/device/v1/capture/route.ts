@@ -1,5 +1,6 @@
 import { authenticateDevice } from '@/lib/api/auth'
 import { requireDeviceIpAllowed } from '@/lib/api/device-guard'
+import { ApiError } from '@/lib/api/errors'
 import { enforceRateLimit, parseBody, route } from '@/lib/api/handler'
 import { captureBatchSchema } from '@/lib/api/schemas'
 import { ingestCaptures } from '@/lib/services/capture'
@@ -21,6 +22,17 @@ export const POST = route(async (request, context) => {
   requireDeviceIpAllowed(context)
   const device = await authenticateDevice(request, context)
   enforceRateLimit(context, 'device:capture', device.rateKey)
+
+  /*
+   * A phone that has paired but has no number bound to it yet.
+   *
+   * Authentication deliberately lets it through -- it has to, or it could never
+   * report the SIMs somebody chooses from -- so the endpoints that actually
+   * need a number say so here instead of relying on auth to have refused it.
+   */
+  if (!device.receivingAccountId || !device.provider) {
+    throw ApiError.forbidden('No number is set up on this phone yet.')
+  }
 
   const { captures } = await parseBody(request, captureBatchSchema)
 

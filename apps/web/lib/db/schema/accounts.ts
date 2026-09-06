@@ -190,6 +190,20 @@ export const devices = pgTable(
     sims: jsonb('sims').$type<SimCard[]>(),
     simsReportedAt: timestampTz('sims_reported_at'),
 
+    /**
+     * Whether the phone is choosing to report for this business at all.
+     *
+     * Set by the phone, never by the dashboard. Somebody helping two shops from
+     * one handset can stop helping one of them without unpairing, and this is
+     * how the other end finds out — otherwise a deliberately paused phone and a
+     * phone in a drawer with a flat battery look exactly alike, and only one of
+     * them is worth chasing.
+     *
+     * Defaults true so a device from an app that predates the switch reads as
+     * reporting, which it is.
+     */
+    sendingEnabled: boolean('sending_enabled').notNull().default(true),
+
     createdAt: createdAt(),
     revokedAt: timestampTz('revoked_at'),
   },

@@ -216,6 +216,14 @@ export const heartbeatSchema = z.object({
    * phone that genuinely has no SIM in it must be able to say so.
    */
   sims: z.array(simCardSchema).max(8).optional(),
+
+  /**
+   * Whether the phone is reporting for this business at all.
+   *
+   * Optional for the same reason `sims` is: absent means an older app that has
+   * no such switch, and must not be read as "paused".
+   */
+  sending_enabled: z.boolean().optional(),
 })
 
 /**

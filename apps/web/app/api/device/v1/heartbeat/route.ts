@@ -12,6 +12,39 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /**
+ * Records permissions the phone says it has lost.
+ *
+ * Lifted out of the transaction body, which had grown past the point where the
+ * shape of it could be taken in at a glance — the lint rule noticed before I
+ * did. It is also the one part of a heartbeat that is about something being
+ * *wrong*, so it reads better with a name on it.
+ *
+ * A permission silently revoked by an OS update is the classic way this system
+ * goes quiet without anybody noticing, which is why it is critical severity
+ * rather than a note.
+ */
+async function recordLostPermissions(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  device: { deviceId: string; receivingAccountId: string | null },
+  permissions: Record<string, boolean> | null,
+): Promise<void> {
+  const lost = Object.entries(permissions ?? {})
+    .filter(([, granted]) => granted === false)
+    .map(([name]) => name)
+
+  if (lost.length === 0) return
+
+  await tx.insert(notifierEvents).values({
+    receivingAccountId: device.receivingAccountId,
+    deviceId: device.deviceId,
+    kind: 'permission_lost',
+    severity: 'critical',
+    detail: lost.join(', '),
+    payload: { permissions },
+  })
+}
+
+/**
  * POST /device/v1/heartbeat — every 5 minutes.
  *
  * Alerting on the *gap* is the worker's job; this endpoint only records the
@@ -69,15 +102,26 @@ export const POST = route(async (request, context) => {
          * that one is stored.
          */
         ...(body.sims === undefined ? {} : { sims: body.sims, simsReportedAt: now }),
+        // Same rule: absent is an older app, not a pause.
+        ...(body.sending_enabled === undefined ? {} : { sendingEnabled: body.sending_enabled }),
 
         pendingCommands: [],
       })
       .where(eq(devices.id, device.deviceId))
 
-    await tx
-      .update(receivingAccounts)
-      .set({ lastHeartbeatAt: now })
-      .where(eq(receivingAccounts.id, device.receivingAccountId))
+    /*
+     * The account-scoped half, skipped when the phone has no number yet.
+     *
+     * Such a phone still beats -- that is how the dashboard learns its SIMs and
+     * that it is alive -- but there is no account for it to be the heartbeat
+     * *of*, and `notifier_events` hangs off an account.
+     */
+    if (device.receivingAccountId) {
+      await tx
+        .update(receivingAccounts)
+        .set({ lastHeartbeatAt: now })
+        .where(eq(receivingAccounts.id, device.receivingAccountId))
+    }
 
     await tx.insert(notifierEvents).values({
       receivingAccountId: device.receivingAccountId,
@@ -93,22 +137,7 @@ export const POST = route(async (request, context) => {
       },
     })
 
-    // A permission silently revoked by an OS update is the classic way this
-    // system goes quiet without anyone noticing.
-    const lostPermissions = Object.entries(body.permissions ?? {})
-      .filter(([, granted]) => granted === false)
-      .map(([name]) => name)
-
-    if (lostPermissions.length > 0) {
-      await tx.insert(notifierEvents).values({
-        receivingAccountId: device.receivingAccountId,
-        deviceId: device.deviceId,
-        kind: 'permission_lost',
-        severity: 'critical',
-        detail: lostPermissions.join(', '),
-        payload: { permissions: body.permissions },
-      })
-    }
+    await recordLostPermissions(tx, device, body.permissions ?? null)
 
     return (current?.pending ?? []) as DeviceCommand[]
   })
@@ -122,7 +151,9 @@ export const POST = route(async (request, context) => {
    * whatever comes back here, which also means a phone that has been offline
    * comes back in step without any reconciliation logic.
    */
-  const capture = await getCaptureSettings(device.receivingAccountId)
+  const capture = device.receivingAccountId
+    ? await getCaptureSettings(device.receivingAccountId)
+    : null
 
   return {
     status: 200,

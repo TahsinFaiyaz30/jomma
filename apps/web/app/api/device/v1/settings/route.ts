@@ -1,5 +1,6 @@
 import { authenticateDevice } from '@/lib/api/auth'
 import { requireDeviceIpAllowed } from '@/lib/api/device-guard'
+import { ApiError } from '@/lib/api/errors'
 import { enforceRateLimit, parseBody, route } from '@/lib/api/handler'
 import { captureSettingsSchema } from '@/lib/api/schemas'
 import { getCaptureSettings, setCaptureSettings } from '@/lib/services/account-admin'
@@ -30,6 +31,17 @@ export const POST = route(async (request, context) => {
   const device = await authenticateDevice(request, context)
   enforceRateLimit(context, 'device:heartbeat', device.rateKey)
 
+  /*
+   * A phone that has paired but has no number bound to it yet.
+   *
+   * Authentication deliberately lets it through -- it has to, or it could never
+   * report the SIMs somebody chooses from -- so the endpoints that actually
+   * need a number say so here instead of relying on auth to have refused it.
+   */
+  if (!device.receivingAccountId) {
+    throw ApiError.forbidden('No number is set up on this phone yet.')
+  }
+
   const settings = await parseBody(request, captureSettingsSchema)
 
   const saved = await setCaptureSettings({
@@ -56,6 +68,17 @@ export const GET = route(async (request, context) => {
   requireDeviceIpAllowed(context)
   const device = await authenticateDevice(request, context)
   enforceRateLimit(context, 'device:heartbeat', device.rateKey)
+
+  /*
+   * A phone that has paired but has no number bound to it yet.
+   *
+   * Authentication deliberately lets it through -- it has to, or it could never
+   * report the SIMs somebody chooses from -- so the endpoints that actually
+   * need a number say so here instead of relying on auth to have refused it.
+   */
+  if (!device.receivingAccountId) {
+    throw ApiError.forbidden('No number is set up on this phone yet.')
+  }
 
   const capture = await getCaptureSettings(device.receivingAccountId)
 

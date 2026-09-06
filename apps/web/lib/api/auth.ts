@@ -37,9 +37,19 @@ export interface AuthenticatedApp {
 export interface AuthenticatedDevice {
   deviceId: string
   deviceName: string
-  receivingAccountId: string
-  provider: 'bkash' | 'nagad'
-  msisdn: string
+  /** The merchant this phone helps. Always present — a phone pairs to one. */
+  businessId: string
+  /**
+   * The number it watches, or null before one has been chosen.
+   *
+   * Null is a phone that has paired and is reporting its SIMs with nothing
+   * bound yet. Endpoints that need a number say so themselves rather than
+   * relying on authentication to have refused it, because refusing there would
+   * stop the phone reporting the very SIMs the choice is made from.
+   */
+  receivingAccountId: string | null
+  provider: 'bkash' | 'nagad' | null
+  msisdn: string | null
   rateKey: string
 }
 
@@ -160,13 +170,24 @@ export async function authenticateDevice(
       deviceName: devices.name,
       tokenHash: devices.tokenHash,
       status: devices.status,
+      businessId: devices.businessId,
       accountId: receivingAccounts.id,
       provider: receivingAccounts.provider,
       msisdn: receivingAccounts.msisdn,
       accountStatus: receivingAccounts.status,
     })
     .from(devices)
-    .innerJoin(receivingAccounts, eq(devices.receivingAccountId, receivingAccounts.id))
+    /*
+     * Left, not inner.
+     *
+     * A phone paired to a business with no number bound to it yet is a real and
+     * necessary state — it has scanned the code and is reporting its SIMs so
+     * that somebody can choose one. An inner join made that phone fail to
+     * authenticate at all, which would have made the whole flow impossible: it
+     * could not heartbeat, so it could never report the SIMs that the choosing
+     * depends on.
+     */
+    .leftJoin(receivingAccounts, eq(devices.receivingAccountId, receivingAccounts.id))
     .where(eq(devices.tokenPrefix, deviceTokenPrefix(token)))
     .limit(1)
     .then((rows) => rows[0])
@@ -204,6 +225,7 @@ export async function authenticateDevice(
   return {
     deviceId: row.deviceId,
     deviceName: row.deviceName,
+    businessId: row.businessId,
     receivingAccountId: row.accountId,
     provider: row.provider,
     msisdn: row.msisdn,

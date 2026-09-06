@@ -75,11 +75,43 @@ data class Pairing(
      */
     val awaitingApproval: Boolean = true,
 
+    /**
+     * Whether this phone is currently reporting for this business at all.
+     *
+     * A switch on the phone, and only on the phone. Somebody helping two shops
+     * from one handset needs to be able to stop helping one of them for an
+     * afternoon without unpairing, without touching either dashboard, and
+     * without the other shop noticing anything.
+     *
+     * Off means nothing is captured for it — not queued and sent later, not
+     * held. Holding would build a backlog that arrives in a burst whenever the
+     * switch goes back on, which is a worse surprise than the gap it was meant
+     * to avoid.
+     *
+     * The heartbeat keeps running while it is off, and carries this flag, so
+     * the dashboard can say "the phone has paused this" rather than showing a
+     * merchant a phone that has silently gone quiet.
+     */
+    val sendingEnabled: Boolean = true,
+
     val pairedAt: Long = System.currentTimeMillis(),
     val lastHeartbeatAt: Long = 0,
 ) {
-    /** Reporting works only once the dashboard has said yes and not since revoked. */
+    /**
+     * Whether the credential works: approved by the dashboard, not since
+     * revoked. Says nothing about whether the phone is choosing to use it.
+     */
     val live: Boolean get() = !revoked && !awaitingApproval
+
+    /**
+     * Whether messages for this business should be captured right now.
+     *
+     * Distinct from [live] on purpose. A revoked pairing cannot report; a
+     * paused one could and is choosing not to, so it still heartbeats and still
+     * says so. Conflating them would make a phone that has been switched off
+     * for one shop indistinguishable from one that has been thrown away.
+     */
+    val capturing: Boolean get() = live && sendingEnabled
 
     /** What to show when there is no nicer label — the number itself will do. */
     val label: String get() = accountMsisdn

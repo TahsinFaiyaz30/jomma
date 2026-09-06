@@ -169,6 +169,13 @@
       "when": 1788725706146,
       "tag": "0023_jittery_killmonger",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788726017848,
+      "tag": "0024_complete_havok",
+      "breakpoints": true
     }
   ]
 }

@@ -97,6 +97,7 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                     appVersion = BuildConfig.VERSION_NAME,
                     // Null when the permission is missing, so the server does
                     // not read "could not look" as "there are none".
+                    sendingEnabled = pairing.sendingEnabled,
                     sims = if (SimInventory.hasPermission(context)) {
                         SimInventory.read(context).map { it.toReport() }
                     } else {
