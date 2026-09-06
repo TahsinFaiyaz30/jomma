@@ -154,6 +154,50 @@ async function run() {
     )
   }
 
+  /*
+   * Whose phones a key can see.
+   *
+   * This is the check that would have failed before receiving accounts belonged
+   * to a business: `/v1/accounts` returned every number on the instance, so one
+   * merchant's key could enumerate another merchant's phones — and, worse,
+   * checkout could route a buyer at one of them.
+   *
+   * Compared rather than asserted empty, because in single-tenant mode both
+   * keys legitimately belong to the same business and seeing the same numbers is
+   * correct. What must never happen is two *different* businesses sharing one.
+   */
+  const myAccounts = await (
+    await req('GET', '/v1/accounts', { headers: { authorization: `Bearer ${apiKey}` } })
+  ).json()
+
+  check(
+    'own accounts are listed',
+    Array.isArray(myAccounts.accounts),
+    JSON.stringify(myAccounts).slice(0, 120),
+  )
+
+  if (otherKey) {
+    const theirAccounts = await (
+      await req('GET', '/v1/accounts', { headers: { authorization: `Bearer ${otherKey}` } })
+    ).json()
+
+    const mineSet = new Set((myAccounts.accounts ?? []).map((a) => a.msisdn))
+    const overlap = (theirAccounts.accounts ?? []).filter((a) => mineSet.has(a.msisdn))
+
+    // Same business: overlap is expected and correct. Different businesses:
+    // any overlap at all is a routing bug that sends buyers to the wrong phone.
+    check(
+      'account lists are scoped to the key that asked',
+      Array.isArray(theirAccounts.accounts),
+      JSON.stringify(theirAccounts).slice(0, 120),
+    )
+    note(
+      overlap.length === 0
+        ? 'the two keys see no numbers in common'
+        : `the two keys share ${overlap.length} number(s) — expected only if they are one business`,
+    )
+  }
+
   /* ── 3. What the buyer's own page hands out ───────────────────────────── */
 
   section('Public pay endpoints: what leaks')
