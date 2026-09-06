@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { BusinessStatus, MembershipRole } from '@jomma/shared'
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm'
 import { type Database, db, type Tx } from '@/lib/db/client'
@@ -264,13 +265,23 @@ export interface NewBusinessInput {
 }
 
 /**
- * A URL-safe handle, uniquified by counting collisions.
+ * A URL-safe handle, uniquified against the slugs actually taken.
  *
  * Bengali names transliterate to nothing under a strict `[a-z0-9]` filter, so a
  * name written in Bengali script would produce an empty slug and then a
  * uniqueness error that says nothing about the real problem. Falling back to
  * `business` keeps that case working — the slug is a URL convenience, not an
  * identifier anyone types.
+ *
+ * This used to *count* the matching rows and append `count + 1`, which assumes
+ * the taken suffixes are exactly `2..count`. They are not. Somebody registers
+ * "Rahim Store 3", that takes `rahim-store-3` outright, and the next plain
+ * "Rahim Store" counts two rows and asks for the slug already sitting there —
+ * unique index violation, whole transaction lost, and deterministic, so the
+ * retry fails identically and that name is simply unregisterable.
+ *
+ * So read the taken ones and pick the lowest free suffix instead. The bound
+ * cannot be exhausted: `size + 1` candidates against at most `size` taken.
  */
 async function uniqueSlug(name: string, client: Database | Tx): Promise<string> {
   const base =
@@ -280,13 +291,22 @@ async function uniqueSlug(name: string, client: Database | Tx): Promise<string> 
       .replace(/^-+|-+$/g, '')
       .slice(0, 40) || 'business'
 
-  const [existing] = await client
-    .select({ taken: count() })
+  const rows = await client
+    .select({ slug: businesses.slug })
     .from(businesses)
     .where(sql`${businesses.slug} = ${base} or ${businesses.slug} like ${`${base}-%`}`)
 
-  const taken = existing?.taken ?? 0
-  return taken === 0 ? base : `${base}-${taken + 1}`
+  const taken = new Set(rows.map((row) => row.slug))
+  if (!taken.has(base)) return base
+
+  for (let suffix = 2; suffix <= taken.size + 2; suffix++) {
+    const candidate = `${base}-${suffix}`
+    if (!taken.has(candidate)) return candidate
+  }
+
+  // Unreachable by the pigeonhole above, but returning a known-taken slug would
+  // be worse than an ugly one.
+  return `${base}-${randomUUID().slice(0, 8)}`
 }
 
 /**
@@ -299,6 +319,12 @@ async function uniqueSlug(name: string, client: Database | Tx): Promise<string> 
  *
  * It starts `pending`. See BUSINESS_STATUSES for why the gate is on receiving
  * money rather than on signing up.
+ *
+ * Retried on a slug collision. Choosing the slug and inserting it are two
+ * statements, so two people registering the same shop name at the same moment
+ * both read the same free suffix and one loses on the unique index. Nothing is
+ * wrong at that point — the loser just needs to look again — and the next
+ * attempt sees the row the winner committed.
  */
 export async function createBusiness(
   userId: string,
@@ -308,30 +334,53 @@ export async function createBusiness(
   const name = input.name.trim()
   if (name.length < 2) throw new Error('Give the business a name.')
 
-  return client.transaction(async (tx) => {
-    const slug = await uniqueSlug(name, tx)
+  const attempt = () =>
+    client.transaction(async (tx) => {
+      const slug = await uniqueSlug(name, tx)
 
-    const [business] = await tx
-      .insert(businesses)
-      .values({
-        name,
-        slug,
-        contactEmail: input.contactEmail?.trim() || null,
-        contactPhone: input.contactPhone?.trim() || null,
-        description: input.description?.trim() || null,
+      const [business] = await tx
+        .insert(businesses)
+        .values({
+          name,
+          slug,
+          contactEmail: input.contactEmail?.trim() || null,
+          contactPhone: input.contactPhone?.trim() || null,
+          description: input.description?.trim() || null,
+        })
+        .returning({ id: businesses.id, slug: businesses.slug })
+
+      if (!business) throw new Error('Could not create the business.')
+
+      await tx.insert(memberships).values({
+        userId,
+        businessId: business.id,
+        role: 'owner',
       })
-      .returning({ id: businesses.id, slug: businesses.slug })
 
-    if (!business) throw new Error('Could not create the business.')
-
-    await tx.insert(memberships).values({
-      userId,
-      businessId: business.id,
-      role: 'owner',
+      return business
     })
 
-    return business
-  })
+  for (let tries = 0; ; tries++) {
+    try {
+      return await attempt()
+    } catch (error) {
+      if (tries >= 2 || !isSlugCollision(error)) throw error
+    }
+  }
+}
+
+/**
+ * A losing race for the slug, as opposed to any other failure.
+ *
+ * Narrow on purpose: 23505 is Postgres' unique violation, and this transaction
+ * writes a membership too. Retrying a duplicate-membership error would loop on
+ * something a retry cannot fix.
+ */
+function isSlugCollision(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const candidate = error as { code?: unknown; constraint?: unknown; cause?: unknown }
+  if (candidate.code === '23505' && candidate.constraint === 'ux_businesses_slug') return true
+  return candidate.cause !== undefined && isSlugCollision(candidate.cause)
 }
 
 /**
