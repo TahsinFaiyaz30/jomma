@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The one directory the installer is allowed to read from.
+
+    Scoped to `updates/` inside the cache rather than the whole cache: a
+    FileProvider grants read access to whatever it covers, and the installer is
+    another process. There is no reason for it to see anything but the APK it
+    was handed.
+-->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

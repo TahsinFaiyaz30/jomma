@@ -9,6 +9,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!--
+        Installing an update the app downloaded itself. There is no store here:
+        this is sideloaded onto a phone that sits in a drawer, so nothing else
+        will ever update it. Android still asks the user to allow it, and then
+        confirms the install separately.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- The second capture path. Fails independently of notifications. -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
@@ -107,6 +115,21 @@
         <receiver
             android:name=".service.RestartAlarm$Receiver"
             android:exported="false" />
+
+        <!--
+            Hands a downloaded APK to Android's installer. A file:// URI to
+            another process throws FileUriExposedException on anything modern,
+            and the installer is another process.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
 
         <receiver
             android:name=".capture.SmsReceiver"

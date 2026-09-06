@@ -147,12 +147,32 @@ if (queueDepth() > 0) attemptFlush()
 WorkManager survives process death and app updates, which is why the watchdog
 lives there rather than inside the service it's watching.
 
+### Restart alarm
+
+A ten-minute self-rearming alarm that starts the service if it is not running,
+via `setExactAndAllowWhileIdle` — inexact alarms are batched into Doze windows,
+which is precisely the state this is meant to climb out of.
+
+It overlaps the WorkManager watchdog on purpose. They fail differently: an OEM
+that has decided this app is misbehaving will often stop scheduling its jobs
+while still honouring exact alarms, and the reverse happens too. The service
+also declares `stopWithTask="false"` and re-arms from `onTaskRemoved`, so
+swiping the app out of Recents — which many people do daily, believing it
+tidies the phone — does not silently end the capture.
+
 ### Battery optimization
 
-On first run, walk the user through `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`. On
-Xiaomi, Oppo, Vivo, and Samsung, also point them at the OEM's own autostart
-settings — these override standard Android behaviour and are the most common
-cause of a silently dead notifier.
+`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, as a dialog naming the app rather than
+the system's battery list. The list version could not distinguish "I turned it
+off" from "it is off for this app", and those are frequently different. Falls
+back to the list on ROMs that refuse the direct request.
+
+On Honor, Huawei, Xiaomi, Oppo, Vivo, and Samsung, also offer the OEM's own
+background-app screen. It is separate from Android's battery settings and is
+the actual reason a foreground service dies overnight while every Android
+setting reads as correct — so on those ROMs the app says so by name instead of
+leaving someone to conclude the app is broken. Falls back to the app-info
+screen, from which every ROM's own settings are reachable.
 
 Re-check on every launch. If optimization has been re-enabled, show a blocking
 warning and report it to the server.
@@ -292,9 +312,62 @@ call would come back "already used" and report a failure for a scan that worked.
 
 ---
 
+## Keeping itself up to date
+
+There is no Play listing. This is a sideloaded APK on a phone in a drawer, so
+nothing updates it unless it updates itself — and the person who most needs a
+fix is the one least likely to be watching a releases page. The scanner crash
+in 1.1.1 is the case in point: it only reproduced in the release build, and
+without this the phones carrying it would still be carrying it.
+
+Releases come from the project's own GitHub, unauthenticated (60 requests an
+hour per IP, far beyond what any interval here can reach, and no token on the
+device).
+
+**The variant has to match.** A release build is offered the release APK and a
+debug build the debug APK. That is not tidiness: the two are signed with
+different keys, and Android refuses an update whose signature does not match
+the installed app. Offering the wrong one fails at the last step with a message
+nobody can act on.
+
+**Nothing installs silently, and nothing tries to.** Android requires the user
+to allow this app to install packages, per app, and then confirms the install
+itself. Both prompts are the point. The app deep-links to the exact settings
+screen rather than failing with a permission error.
+
+| Setting | Default | Why |
+|---|---|---|
+| Check interval | Once a day | Weekly leaves a known-broken build running for days. Every launch is wasted work on a phone nobody opens. `Never` exists for operators who ship their own builds. |
+| Pre-download | Off | It spends someone's data on a file they have not agreed to install. |
+| Wi-Fi only | On | Applies to the download, not the check — the check is a few hundred bytes, the APK is twelve megabytes, and this phone is often on mobile data as its only link. |
+
+Background checks run on a six-hour periodic worker that decides for itself
+whether a check is due, rather than being rescheduled whenever the interval
+changes. WorkManager's floor is fifteen minutes and its scheduling is
+approximate, so the interval is enforced by comparing timestamps — which also
+means a changed setting takes effect immediately instead of next cycle.
+
+A found version is announced once. A daily check that re-notified every day
+about an update someone has decided not to install is how notifications get
+turned off entirely.
+
+Tapping that notification opens Settings and re-runs the check out loud. It has
+to: the worker found the release in a process that no longer exists, and its
+check recorded a timestamp, so the launch check would decide nothing was due
+and the Updates card would sit there saying nothing at all.
+
+The downloaded APK is cleared on the launch *after* an install, not when the
+installer returns — a successful install replaces the process, so no callback
+in the old one ever runs. Comparing the cached file's version against the one
+now running answers it after the fact, and stays correct when the install was
+abandoned halfway or the phone rebooted during it.
+
+---
+
 ## App UI
 
-Four screens. Compose. Deliberately plain — nobody uses this app, they check it.
+Three destinations. Compose. Deliberately plain — nobody uses this app, they
+check it.
 
 **Status (home).** One glance answers "is it working?"
 
@@ -321,14 +394,26 @@ permission is missing. Red means captures are failing or permissions are gone.
 because when the parser breaks this is where you read what actually arrived. Long
 press to copy.
 
-**Setup.** Permission checklist with a live tick or cross against each, and a
-button that opens the relevant system settings page. Include the OEM autostart
-guidance here.
+**Settings.** Everything that is not "is it working?" or "what arrived?", in
+six labelled groups, each row carrying a Material icon and — where there is
+something to be right or wrong — a tick, a cross, or a neutral dot:
 
-**About.** Server URL, device id, app version, token rotation status, and a
-"re-provision" action.
+| Group | What is in it |
+|---|---|
+| Permissions | Notification access, SMS. Live status, tap to open the system screen. |
+| Staying alive | Battery optimisation, and the vendor's own background-app screen on the ROMs that have one. |
+| What to capture | The filters, mirroring the account's server-side settings. |
+| Updates | Interval, pre-download, Wi-Fi only, and a manual check. |
+| Device | Server URL, device id, pairing state, re-provision. |
+| About | Developer, version and variant, package, source code. |
 
-Use the system font. This is not a place to spend design effort.
+About is a group here rather than its own destination. It was a screen in an
+earlier draft, which meant a quarter of the navigation bar was spent on four
+lines of text nobody needs twice.
+
+Use the system font. This is not a place to spend design effort — but it is a
+place to spend consistency: every row is the same `ListItem`, so a group can
+grow without anything being redesigned.
 
 ---
 

@@ -21,11 +21,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Article
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.FilterAlt
@@ -34,7 +35,6 @@ import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Sms
@@ -63,9 +63,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,6 +73,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jomma.notifier.data.Capture
 import com.jomma.notifier.net.CaptureSettings
+import com.jomma.notifier.update.UpdateInterval
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -93,23 +91,29 @@ fun JommaScreens(
     state: UiState,
     captures: List<Capture>,
     snackbarHost: SnackbarHostState,
+    destination: Int,
+    onDestinationChange: (Int) -> Unit,
     onScan: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onRequestSms: () -> Unit,
     onRequestBatteryExemption: () -> Unit,
     onOpenAutoStart: () -> Unit,
+    onIntervalChange: (UpdateInterval) -> Unit,
+    onAutoDownloadChange: (Boolean) -> Unit,
+    onUnmeteredOnlyChange: (Boolean) -> Unit,
+    onCheckForUpdates: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onOpenGitHub: () -> Unit,
     onFlush: () -> Unit,
     onHeartbeat: () -> Unit,
     onTestCapture: () -> Unit,
     onReprovision: () -> Unit,
     onCaptureChange: (CaptureSettings) -> Unit,
 ) {
-    var destination by remember { mutableIntStateOf(0) }
-
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (destination == 1) "Log" else if (destination == 2) "Setup" else "Jomma Notifier") },
+                title = { Text(if (destination == 1) "Log" else if (destination == 2) "Settings" else "Jomma Notifier") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -120,21 +124,21 @@ fun JommaScreens(
             NavigationBar {
                 NavigationBarItem(
                     selected = destination == 0,
-                    onClick = { destination = 0 },
+                    onClick = { onDestinationChange(0) },
                     icon = { Icon(Icons.Outlined.MonitorHeart, contentDescription = null) },
                     label = { Text("Status") },
                 )
                 NavigationBarItem(
                     selected = destination == 1,
-                    onClick = { destination = 1 },
-                    icon = { Icon(Icons.Outlined.Article, contentDescription = null) },
+                    onClick = { onDestinationChange(1) },
+                    icon = { Icon(Icons.AutoMirrored.Outlined.Article, contentDescription = null) },
                     label = { Text("Log") },
                 )
                 NavigationBarItem(
                     selected = destination == 2,
-                    onClick = { destination = 2 },
+                    onClick = { onDestinationChange(2) },
                     icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
-                    label = { Text("Setup") },
+                    label = { Text("Settings") },
                 )
             }
         },
@@ -144,14 +148,20 @@ fun JommaScreens(
             when (destination) {
                 0 -> StatusScreen(state, onScan, onFlush, onHeartbeat, onTestCapture, onReprovision)
                 1 -> LogScreen(captures)
-                else -> SetupScreen(
-                    state,
-                    onOpenNotificationSettings,
-                    onRequestSms,
-                    onRequestBatteryExemption,
-                    onOpenAutoStart,
-                    onScan,
-                    onCaptureChange,
+                else -> SettingsScreen(
+                    state = state,
+                    onOpenNotificationSettings = onOpenNotificationSettings,
+                    onRequestSms = onRequestSms,
+                    onRequestBatteryExemption = onRequestBatteryExemption,
+                    onOpenAutoStart = onOpenAutoStart,
+                    onScan = onScan,
+                    onCaptureChange = onCaptureChange,
+                    onIntervalChange = onIntervalChange,
+                    onAutoDownloadChange = onAutoDownloadChange,
+                    onUnmeteredOnlyChange = onUnmeteredOnlyChange,
+                    onCheckForUpdates = onCheckForUpdates,
+                    onInstallUpdate = onInstallUpdate,
+                    onOpenGitHub = onOpenGitHub,
                 )
             }
         }
@@ -255,7 +265,7 @@ private fun StatusScreen(
                 HorizontalDivider()
                 StatListItem(Icons.Filled.Bolt, "Last heartbeat", if (state.lastHeartbeatAt == 0L) "never" else ago(state.lastHeartbeatAt))
                 HorizontalDivider()
-                StatListItem(Icons.Outlined.Send, "Queue", "${state.queueDepth} pending")
+                StatListItem(Icons.AutoMirrored.Outlined.Send, "Queue", "${state.queueDepth} pending")
                 HorizontalDivider()
                 StatListItem(Icons.Outlined.Monitor, "Today", "${state.capturedToday} captured")
             }
@@ -311,7 +321,7 @@ private fun LogScreen(captures: List<Capture>) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
-                    Icons.Outlined.Article,
+                    Icons.AutoMirrored.Outlined.Article,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(48.dp),
@@ -400,232 +410,6 @@ private fun LogScreen(captures: List<Capture>) {
     }
 }
 
-/** Permission checklist with a live tick or cross against each. */
-@Composable
-private fun SetupScreen(
-    state: UiState,
-    onOpenNotificationSettings: () -> Unit,
-    onRequestSms: () -> Unit,
-    onRequestBatteryExemption: () -> Unit,
-    onOpenAutoStart: () -> Unit,
-    onScan: () -> Unit,
-    onCaptureChange: (CaptureSettings) -> Unit,
-) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        CheckCard(
-            icon = Icons.Outlined.NotificationsActive,
-            label = "Notification access",
-            granted = state.hasNotificationAccess,
-            detail = "The primary capture path. Without it nothing is captured at all.",
-            action = "Open settings",
-            onAction = onOpenNotificationSettings,
-        )
-        CheckCard(
-            icon = Icons.Outlined.Sms,
-            label = "SMS permission",
-            granted = state.hasSmsPermission,
-            detail = "The second path. Catches what notifications miss, and fails independently.",
-            action = "Grant",
-            onAction = onRequestSms,
-        )
-        CheckCard(
-            icon = Icons.Outlined.BatteryChargingFull,
-            label = "Battery optimisation",
-            // A real check now. This used to open a list of every installed app
-            // and never look at the result, so "I turned it off" and "it is off
-            // for this app" were indistinguishable.
-            granted = state.batteryExempt,
-            detail = if (state.batteryExempt) {
-                "Android has been told to leave this app running."
-            } else {
-                "Android will eventually stop this app in the background. " +
-                    "Granting this is the single most important setting here."
-            },
-            action = if (state.batteryExempt) "Review" else "Allow",
-            onAction = onRequestBatteryExemption,
-        )
-        if (state.aggressiveVendor) {
-            CheckCard(
-                icon = Icons.Outlined.Shield,
-                label = "${state.vendorLabel} app launch",
-                // Not checkable: no API reports whether a vendor's own killer is
-                // set to leave an app alone. Claiming to know would be worse
-                // than admitting we cannot.
-                granted = null,
-                detail = "${state.vendorLabel} runs its own background-app manager, " +
-                    "separate from Android's, and it is the usual reason a notifier " +
-                    "dies overnight with every Android setting correct. Find this app " +
-                    "in the list and allow it to launch and run in the background — " +
-                    "turn OFF any \"manage automatically\" toggle first.",
-                action = "Open ${state.vendorLabel} settings",
-                onAction = onOpenAutoStart,
-            )
-        }
-        CheckCard(
-            icon = Icons.Outlined.QrCodeScanner,
-            label = "Provisioning",
-            granted = state.provisioned && !state.revoked,
-            detail = state.serverUrl ?: "Not provisioned",
-            action = "Scan code",
-            onAction = onScan,
-        )
-
-        if (state.provisioned && !state.revoked) {
-            CaptureCard(state, onCaptureChange)
-        }
-    }
-}
-
-/**
- * What this number keeps, mirroring the dashboard's "What to capture".
- *
- * Genuinely the same setting and not a copy of it — both write the account row,
- * and this screen re-reads it on every launch. It is here because the person
- * holding the phone is usually the person who wants the noise gone, and making
- * them find a laptop to stop it is the kind of friction that ends with the app
- * being uninstalled.
- *
- * The phone does not act on these itself. It forwards raw text and never parses,
- * so it cannot know what type a message is; the server drops what these exclude
- * and answers `filtered` so the queue clears. That keeps one copy of the parser.
- */
-@Composable
-private fun CaptureCard(state: UiState, onChange: (CaptureSettings) -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(Icons.Outlined.FilterAlt, contentDescription = null)
-                Text(
-                    "What to capture",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                if (state.captureSaving) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                }
-            }
-            Text(
-                "bKash shows this phone far more than payments. Anything switched off is dropped " +
-                    "when it reaches the server and never stored. The same switches are in the " +
-                    "dashboard.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            /*
-             * Fixed row, not a disabled switch. A greyed-out toggle reads as
-             * "coming soon"; this says the true thing, which is that incoming
-             * Send Money is the only type that can settle an order.
-             */
-            ListItem(
-                headlineContent = { Text("Incoming Send Money") },
-                supportingContent = { Text("Money buyers send you. The only type that pays an order.") },
-                trailingContent = {
-                    Text("always", style = MaterialTheme.typography.labelLarge)
-                },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
-            HorizontalDivider()
-            CaptureSwitch(
-                label = "Cash In",
-                detail = "Top-ups from an agent or your bank.",
-                checked = state.capture.cashIn,
-                enabled = !state.captureSaving,
-                onCheckedChange = { onChange(state.capture.copy(cashIn = it)) },
-            )
-            HorizontalDivider()
-            CaptureSwitch(
-                label = "Money you sent",
-                detail = "Send Money leaving this number. A ledger, never a payment.",
-                checked = state.capture.outgoing,
-                enabled = !state.captureSaving,
-                onCheckedChange = { onChange(state.capture.copy(outgoing = it)) },
-            )
-            HorizontalDivider()
-            CaptureSwitch(
-                label = "Everything else",
-                detail = "Promotions, balance notices, offers. Usually noise.",
-                checked = state.capture.other,
-                enabled = !state.captureSaving,
-                onCheckedChange = { onChange(state.capture.copy(other = it)) },
-            )
-
-            Text(
-                "A message the parser cannot read is kept whatever these say.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CaptureSwitch(
-    label: String,
-    detail: String,
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    ListItem(
-        headlineContent = { Text(label) },
-        supportingContent = { Text(detail) },
-        trailingContent = {
-            Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
-        },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(enabled = enabled) { onCheckedChange(!checked) },
-    )
-}
-
-@Composable
-private fun CheckCard(
-    icon: ImageVector,
-    label: String,
-    granted: Boolean?,
-    detail: String,
-    action: String,
-    onAction: () -> Unit,
-) {
-    val status = LocalStatusColors.current
-    val tint = when (granted) {
-        true -> status.connected
-        false -> status.down
-        null -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(icon, contentDescription = null, tint = tint)
-                Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                when (granted) {
-                    true -> Icon(Icons.Filled.CheckCircle, contentDescription = "granted", tint = tint)
-                    false -> Icon(Icons.Filled.Error, contentDescription = "missing", tint = tint)
-                    null -> Unit
-                }
-            }
-            Text(
-                detail,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedButton(onClick = onAction) { Text(action) }
-        }
-    }
-}
 
 @Composable
 fun JommaSurface(content: @Composable () -> Unit) {

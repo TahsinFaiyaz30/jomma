@@ -228,9 +228,35 @@ pnpm dev:worker   # the scheduler</pre></div>
     long as it looks like a transaction at all &mdash; that is the evidence
     needed to fix the parser.
   </p>
+  <h3>It updates itself</h3>
+  <p>
+    There is no Play listing, so nothing updates this app unless it updates
+    itself &mdash; and the phone that most needs a fix is the one nobody is
+    looking at. <b>Settings &rarr; Updates</b> checks this project's GitHub
+    releases once a day by default; weekly, monthly, every launch and never are
+    the alternatives. A new version raises a notification once, and tapping it
+    opens the Updates card.
+  </p>
+  <p>
+    It fetches the build matching the one installed &mdash; release for release,
+    debug for debug. The two are signed with different keys, and Android refuses
+    an update whose signature does not match, so offering the wrong one fails at
+    the very last step with a message nobody can act on.
+  </p>
+  <p>
+    Installing is always your decision. Android requires the app to be allowed
+    to install packages, per app, and then confirms the install itself; the app
+    deep-links to that settings screen rather than failing with a permission
+    error. <b>Pre-download</b> fetches the APK before you say yes and is off by
+    default. <b>Wi-Fi only</b> is on by default and governs the download, not the
+    check &mdash; the check is a few hundred bytes, the APK is twelve megabytes,
+    and this phone is often on mobile data as its only link.
+  </p>
+
   <h3>Keeping it alive</h3>
   <ul>
-    <li>Turn off battery optimisation for the app, or Android will eventually stop it.</li>
+    <li>Turn off battery optimisation for the app, or Android will eventually stop it. <b>Settings &rarr; Staying alive</b> asks for it directly and shows whether it actually took.</li>
+    <li>On Honor, Huawei, Xiaomi, Oppo, Vivo and Samsung, also allow it in the vendor's own background-app screen &mdash; the same screen offers a shortcut to it. That setting is separate from Android's, and is the usual reason a notifier dies overnight while every Android setting reads as correct.</li>
     <li>Leave it charging. The app survives reboot, but a dead phone captures nothing.</li>
     <li>Watch for <code>account.degraded</code> &mdash; a silent phone raises it, and that is your early warning that payments may be arriving unseen.</li>
   </ul>

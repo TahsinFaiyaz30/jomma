@@ -74,6 +74,43 @@ class Prefs private constructor(private val prefs: SharedPreferences) {
             .apply()
     }
 
+    /* ── Updates ─────────────────────────────────────────────────────────── */
+
+    /** How often to look for a new release. See UpdateInterval for the default. */
+    var updateInterval: String
+        get() = prefs.getString(KEY_UPDATE_INTERVAL, null) ?: "Daily"
+        set(value) = prefs.edit().putString(KEY_UPDATE_INTERVAL, value).apply()
+
+    /**
+     * Fetch the APK as soon as one is found, rather than when the user says yes.
+     *
+     * Off by default. It spends someone's data on a file they have not agreed
+     * to install yet, which is not a decision to make on their behalf.
+     */
+    var autoDownloadUpdates: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_DOWNLOAD, false)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_DOWNLOAD, value).apply()
+
+    /**
+     * Only use an unmetered connection for downloads.
+     *
+     * On by default, and it applies to downloading rather than checking: the
+     * check is a few hundred bytes, the APK is twelve megabytes. This phone
+     * often lives on someone's mobile data as its only link.
+     */
+    var updatesOnUnmeteredOnly: Boolean
+        get() = prefs.getBoolean(KEY_UNMETERED_ONLY, true)
+        set(value) = prefs.edit().putBoolean(KEY_UNMETERED_ONLY, value).apply()
+
+    var lastUpdateCheckAt: Long
+        get() = prefs.getLong(KEY_LAST_UPDATE_CHECK, 0)
+        set(value) = prefs.edit().putLong(KEY_LAST_UPDATE_CHECK, value).apply()
+
+    /** The version last offered, so the same one is not announced repeatedly. */
+    var lastNotifiedVersion: String?
+        get() = prefs.getString(KEY_LAST_NOTIFIED, null)
+        set(value) = prefs.edit().putString(KEY_LAST_NOTIFIED, value).apply()
+
     companion object {
         private const val FILE = "jomma_secure_prefs"
         private const val KEY_SERVER_URL = "server_url"
@@ -85,6 +122,11 @@ class Prefs private constructor(private val prefs: SharedPreferences) {
         private const val KEY_CAPTURE_CASH_IN = "capture_cash_in"
         private const val KEY_CAPTURE_OUTGOING = "capture_outgoing"
         private const val KEY_CAPTURE_OTHER = "capture_other"
+        private const val KEY_UPDATE_INTERVAL = "update_interval"
+        private const val KEY_AUTO_DOWNLOAD = "auto_download_updates"
+        private const val KEY_UNMETERED_ONLY = "updates_unmetered_only"
+        private const val KEY_LAST_UPDATE_CHECK = "last_update_check"
+        private const val KEY_LAST_NOTIFIED = "last_notified_version"
 
         @Volatile
         private var instance: Prefs? = null

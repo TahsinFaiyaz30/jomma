@@ -14,6 +14,11 @@ import com.jomma.notifier.net.PairingLink
 import com.jomma.notifier.service.KeepAlive
 import com.jomma.notifier.service.NotifierService
 import com.jomma.notifier.service.RestartAlarm
+import com.jomma.notifier.update.AvailableUpdate
+import com.jomma.notifier.update.UpdateCheckWorker
+import com.jomma.notifier.update.UpdateInterval
+import com.jomma.notifier.update.Updater
+import java.io.File
 import com.jomma.notifier.work.FlushWorker
 import com.jomma.notifier.work.HeartbeatWorker
 import com.jomma.notifier.work.WatchdogWorker
@@ -46,6 +51,15 @@ data class UiState(
     val vendorLabel: String = "",
     val capture: CaptureSettings = CaptureSettings(),
     val captureSaving: Boolean = false,
+    /* Updates. `availableUpdate` is the version string, or null when current. */
+    val updateInterval: String = "Daily",
+    val autoDownloadUpdates: Boolean = false,
+    val updatesOnUnmeteredOnly: Boolean = true,
+    val availableUpdate: String? = null,
+    val updateChecking: Boolean = false,
+    val updateDownloading: Boolean = false,
+    val updateProgress: Int = 0,
+    val updateStatus: String? = null,
     val busy: Boolean = false,
     val message: String? = null,
 ) {
@@ -110,6 +124,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             aggressiveVendor = KeepAlive.isAggressiveVendor,
             vendorLabel = KeepAlive.vendorLabel,
             capture = prefs.capture,
+            updateInterval = prefs.updateInterval,
+            autoDownloadUpdates = prefs.autoDownloadUpdates,
+            updatesOnUnmeteredOnly = prefs.updatesOnUnmeteredOnly,
         )
 
         if (prefs.isProvisioned && !prefs.revoked) refreshCaptureSettings()
@@ -274,6 +291,156 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissMessage() {
         _state.value = _state.value.copy(message = null)
+    }
+
+    /* ── Updates ─────────────────────────────────────────────────────────── */
+
+    /** The release the last check found, kept so it can be downloaded on demand. */
+    private var pending: AvailableUpdate? = null
+    private var downloaded: File? = null
+
+    fun setUpdateInterval(interval: UpdateInterval) {
+        prefs.updateInterval = interval.name
+        _state.value = _state.value.copy(updateInterval = interval.name)
+        val app = getApplication<Application>()
+        if (interval == UpdateInterval.Never) {
+            UpdateCheckWorker.cancel(app)
+        } else {
+            UpdateCheckWorker.schedule(app)
+        }
+    }
+
+    fun setAutoDownloadUpdates(enabled: Boolean) {
+        prefs.autoDownloadUpdates = enabled
+        _state.value = _state.value.copy(autoDownloadUpdates = enabled)
+        // Turning it off should also reclaim the space, not just stop fetching.
+        if (!enabled) Updater.clearDownloads(getApplication())
+    }
+
+    fun setUpdatesOnUnmeteredOnly(enabled: Boolean) {
+        prefs.updatesOnUnmeteredOnly = enabled
+        _state.value = _state.value.copy(updatesOnUnmeteredOnly = enabled)
+    }
+
+    /**
+     * Looks for a new release.
+     *
+     * @param silent true when this runs automatically on launch, so a phone
+     *   with no signal does not greet its owner with a failure they did not ask
+     *   for. A check they pressed a button for always reports what happened.
+     */
+    fun checkForUpdates(silent: Boolean = false) {
+        if (_state.value.updateChecking) return
+        _state.value = _state.value.copy(
+            updateChecking = true,
+            updateStatus = if (silent) _state.value.updateStatus else "Checking…",
+        )
+
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            when (val result = Updater.check(app)) {
+                is Updater.CheckResult.Available -> {
+                    pending = result.update
+                    prefs.lastUpdateCheckAt = System.currentTimeMillis()
+                    downloaded = Updater.downloadedFile(app, result.update)
+                    _state.value = _state.value.copy(
+                        updateChecking = false,
+                        availableUpdate = result.update.version,
+                        updateStatus = if (downloaded != null) {
+                            "Downloaded · ready to install"
+                        } else {
+                            "${result.update.sizeLabel} · not downloaded yet"
+                        },
+                    )
+                    if (prefs.autoDownloadUpdates && downloaded == null &&
+                        Updater.canDownloadNow(app)
+                    ) {
+                        downloadUpdate()
+                    }
+                }
+
+                is Updater.CheckResult.UpToDate -> {
+                    pending = null
+                    prefs.lastUpdateCheckAt = System.currentTimeMillis()
+                    Updater.clearDownloads(app)
+                    _state.value = _state.value.copy(
+                        updateChecking = false,
+                        availableUpdate = null,
+                        updateStatus = "Up to date · ${result.version}",
+                    )
+                }
+
+                is Updater.CheckResult.Failed ->
+                    _state.value = _state.value.copy(
+                        updateChecking = false,
+                        updateStatus = if (silent) null else "Could not check: ${result.message}",
+                    )
+            }
+        }
+    }
+
+    private fun downloadUpdate() {
+        val update = pending ?: return
+        val app = getApplication<Application>()
+
+        if (!Updater.canDownloadNow(app)) {
+            _state.value = _state.value.copy(
+                updateStatus = "Waiting for Wi-Fi. Turn off \"Wi-Fi only\" to use mobile data.",
+            )
+            return
+        }
+
+        _state.value = _state.value.copy(updateDownloading = true, updateProgress = 0)
+        viewModelScope.launch {
+            val file = Updater.download(app, update) { percent ->
+                _state.value = _state.value.copy(updateProgress = percent)
+            }
+            downloaded = file
+            _state.value = _state.value.copy(
+                updateDownloading = false,
+                updateStatus = if (file == null) "Download failed" else "Downloaded · ready to install",
+            )
+        }
+    }
+
+    /**
+     * What the Install button does, which depends on where things stand.
+     *
+     * Download first if needed, then hand off. The permission check happens in
+     * the Activity, because only it can start the settings screen and come back.
+     */
+    fun requestInstall(onReady: (File) -> Unit, onNeedsPermission: () -> Unit) {
+        val app = getApplication<Application>()
+        val file = downloaded
+
+        if (file == null) {
+            downloadUpdate()
+            return
+        }
+        if (!Updater.canInstall(app)) {
+            onNeedsPermission()
+            return
+        }
+        onReady(file)
+    }
+
+    /** Surfaces an update problem in the same place as its status. */
+    fun reportUpdateProblem(message: String) {
+        _state.value = _state.value.copy(updateStatus = message)
+    }
+
+    /**
+     * Drops a cached APK the running build has caught up with.
+     *
+     * Run on launch, which is the only moment this can be judged: a successful
+     * install replaces the process, so the version now running is the answer to
+     * whether the download did its job. Either it did — and twelve megabytes of
+     * it are dead weight — or it was abandoned for a release that has since
+     * shipped, and it is dead weight for a different reason.
+     */
+    fun purgeStaleDownloads() {
+        Updater.purgeInstalledDownloads(getApplication())
+        downloaded = downloaded?.takeIf { it.isFile }
     }
 
     private fun startOfToday(): Long {

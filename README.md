@@ -579,6 +579,31 @@ Anything switched off is dropped when it reaches the server, so it never fills
 the feed. A message the parser cannot read is kept regardless, as long as it
 looks like a transaction at all.
 
+### It updates itself
+
+There is no Play listing, so nothing updates this app unless it updates itself —
+and the phone that most needs a fix is the one nobody is looking at. **Settings
+→ Updates** checks the project's GitHub releases once a day by default, with
+weekly, monthly, every-launch and never as alternatives.
+
+A new version raises a notification, once per version. Tapping it opens the
+Updates card. Installing is always a decision someone makes: Android requires
+this app to be allowed to install packages, per app, and then confirms the
+install itself — the app deep-links to that settings screen rather than failing
+with a permission error.
+
+It downloads the build that matches what is installed — release for release,
+debug for debug. The two are signed with different keys and Android refuses an
+update whose signature does not match, so the wrong one fails at the very last
+step with a message nobody can act on.
+
+Two switches sit alongside it. **Pre-download** fetches the APK as soon as one
+is found rather than when you say yes; off by default, because it spends
+someone's data on a file they have not agreed to install. **Wi-Fi only** is on
+by default and applies to the download, not the check — the check is a few
+hundred bytes, the APK is twelve megabytes, and this phone is often on mobile
+data as its only link.
+
 Setup and permissions: **[docs/android.md](docs/android.md)**.
 
 ---
