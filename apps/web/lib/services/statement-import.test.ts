@@ -75,4 +75,29 @@ describe('parseStatementCsv', () => {
     expect(parseStatementCsv('').errors).toHaveLength(1)
     expect(parseStatementCsv('TrxID,Amount').errors).toHaveLength(1)
   })
+
+  it('refuses a file with more rows than an import can finish', () => {
+    /*
+     * The five megabyte cap on the upload sounds like a bound and is not one:
+     * five megabytes of short rows is well over a hundred thousand of them, and
+     * importing does a round trip per row to insert plus another per recovered
+     * row to match. Saying so beats a timeout with half the rows imported.
+     */
+    const rows = Array.from({ length: 10_001 }, (_, i) => `BK${i},100.00`)
+    const { rows: parsed, errors } = parseStatementCsv(['TrxID,Amount', ...rows].join('\n'))
+
+    expect(parsed).toHaveLength(0)
+    expect(errors.join(' ')).toMatch(/10001 rows/)
+    expect(errors.join(' ')).toMatch(/split it by month/i)
+  })
+
+  it('still accepts a statement at the limit', () => {
+    // The bound has to let a real file through, or it is just an outage with a
+    // friendlier message. A busy shop's month is a few thousand lines.
+    const rows = Array.from({ length: 10_000 }, (_, i) => `BK${i},100.00`)
+    const { rows: parsed, errors } = parseStatementCsv(['TrxID,Amount', ...rows].join('\n'))
+
+    expect(errors).toHaveLength(0)
+    expect(parsed).toHaveLength(10_000)
+  })
 })

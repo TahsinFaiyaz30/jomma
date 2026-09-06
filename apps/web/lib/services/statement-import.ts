@@ -45,6 +45,9 @@ export interface ImportResult {
   recoveredRows: Array<{ trxId: string; amountCents: number | null; occurredAt: string | null }>
 }
 
+/** Above this it is the wrong file, not a big one. See `parseStatementCsv`. */
+const MAX_ROWS = 10_000
+
 /**
  * Parses a bKash statement CSV.
  *
@@ -56,6 +59,30 @@ export function parseStatementCsv(csv: string): { rows: ImportRow[]; errors: str
   const errors: string[] = []
   const lines = csv.split(/\r?\n/).filter((line) => line.trim().length > 0)
   if (lines.length < 2) return { rows: [], errors: ['The file has no data rows.'] }
+
+  /*
+   * Refused rather than started, past a point.
+   *
+   * The action already caps the upload at five megabytes, which sounds like a
+   * bound and is not one: five megabytes of short rows is well over a hundred
+   * thousand of them, and `importStatement` does a round trip per row to insert
+   * and another per recovered row to match. That is a quarter of a million
+   * sequential queries inside one request — it will not finish, and on a shared
+   * instance it spends the database everyone else is waiting on.
+   *
+   * Ten thousand is far past any real statement. A busy shop's month runs to a
+   * few thousand lines, so anything above this is a wrong file rather than a
+   * big one, and saying so beats a timeout with half the rows imported.
+   */
+  if (lines.length - 1 > MAX_ROWS) {
+    return {
+      rows: [],
+      errors: [
+        `That file has ${lines.length - 1} rows; the limit is ${MAX_ROWS}. ` +
+          'Split it by month and import each separately.',
+      ],
+    }
+  }
 
   const header = splitCsvLine(lines[0] as string).map((h) => h.trim().toLowerCase())
 
