@@ -1,4 +1,6 @@
+import { isServiceMode } from '@jomma/shared/env'
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getAdmin } from '@/lib/auth/session'
 import { LoginForm } from './login-form'
@@ -20,12 +22,27 @@ export default async function LoginPage() {
             </div>
             <span className="text-title font-medium">Jomma</span>
           </div>
-          <p className="text-small text-muted-foreground">
-            Admin access only. Accounts are created from the server, never here.
+          <p className="text-muted-foreground text-small">
+            {isServiceMode()
+              ? 'Sign in to your dashboard.'
+              : 'Admin access only. Accounts are created from the server, never here.'}
           </p>
         </div>
 
         <LoginForm />
+
+        {/*
+          Only in service mode. Self-hosted, signup is disabled server-side, so
+          a link here would lead to a form that always fails.
+        */}
+        {isServiceMode() ? (
+          <p className="text-muted-foreground text-small">
+            New here?{' '}
+            <Link href="/signup" className="underline underline-offset-4">
+              Create an account
+            </Link>
+          </p>
+        ) : null}
       </div>
     </main>
   )

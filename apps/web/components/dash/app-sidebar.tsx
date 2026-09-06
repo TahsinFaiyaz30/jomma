@@ -31,6 +31,7 @@ import type { MessageKey } from '@/lib/i18n/messages'
 import { useI18n } from '@/lib/i18n/provider'
 import type { SidebarCounts } from '@/lib/services/dashboard'
 import { type AccountFooterItem, AccountHealthFooter } from './account-health'
+import { BusinessSwitcher, type SwitcherBusiness } from './business-switcher'
 import { openCommandPalette } from './command-palette'
 import { UserMenu } from './user-menu'
 
@@ -77,10 +78,21 @@ export function AppSidebar({
   counts,
   accounts,
   admin,
+  business,
+  businesses,
 }: {
   counts: SidebarCounts
   accounts: AccountFooterItem[]
-  admin: { name: string; email: string }
+  admin: { name: string; email: string; isPlatformAdmin: boolean }
+  /**
+   * The active business, and everything else this user could switch to.
+   *
+   * Null when the instance is running for a single shop: there is one business,
+   * it has no name worth showing, and a switcher with one entry is a control
+   * that teaches you it does nothing.
+   */
+  business: SwitcherBusiness | null
+  businesses: SwitcherBusiness[]
 }) {
   const pathname = usePathname()
   const { t, number } = useI18n()
@@ -88,15 +100,25 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1">
-          <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <span className="text-micro font-semibold">জ</span>
+        {business ? (
+          <BusinessSwitcher
+            active={business}
+            businesses={businesses}
+            isPlatformAdmin={admin.isPlatformAdmin}
+          />
+        ) : (
+          <div className="flex items-center gap-2 px-2 py-1">
+            <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <span className="font-semibold text-micro">জ</span>
+            </div>
+            <div className="min-w-0 group-data-[collapsible=icon]:hidden">
+              <div className="truncate font-medium text-small">{t('app.name')}</div>
+              <div className="truncate text-micro text-sidebar-foreground/60">
+                {t('app.tagline')}
+              </div>
+            </div>
           </div>
-          <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-            <div className="truncate text-small font-medium">{t('app.name')}</div>
-            <div className="truncate text-micro text-sidebar-foreground/60">{t('app.tagline')}</div>
-          </div>
-        </div>
+        )}
       </SidebarHeader>
 
       <SidebarContent>

@@ -46,6 +46,21 @@ ALTER TABLE "user" ALTER COLUMN "role" SET DEFAULT 'member';--> statement-breakp
 ALTER TABLE "receiving_accounts" ADD COLUMN "business_id" uuid;--> statement-breakpoint
 ALTER TABLE "apps" ADD COLUMN "business_id" uuid;--> statement-breakpoint
 
+
+ALTER TABLE "invitations" ADD CONSTRAINT "invitations_business_id_businesses_id_fk" FOREIGN KEY ("business_id") REFERENCES "public"."businesses"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "memberships" ADD CONSTRAINT "memberships_business_id_businesses_id_fk" FOREIGN KEY ("business_id") REFERENCES "public"."businesses"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "ux_businesses_slug" ON "businesses" USING btree ("slug");--> statement-breakpoint
+CREATE INDEX "ix_businesses_status" ON "businesses" USING btree ("status");--> statement-breakpoint
+CREATE UNIQUE INDEX "ux_invitations_token" ON "invitations" USING btree ("token_hash");--> statement-breakpoint
+CREATE UNIQUE INDEX "ux_invitations_business_email" ON "invitations" USING btree ("business_id","email");--> statement-breakpoint
+CREATE INDEX "ix_invitations_business" ON "invitations" USING btree ("business_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "ux_memberships_user_business" ON "memberships" USING btree ("user_id","business_id");--> statement-breakpoint
+CREATE INDEX "ix_memberships_user" ON "memberships" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "ix_memberships_business" ON "memberships" USING btree ("business_id","role");--> statement-breakpoint
+ALTER TABLE "receiving_accounts" ADD CONSTRAINT "receiving_accounts_business_id_businesses_id_fk" FOREIGN KEY ("business_id") REFERENCES "public"."businesses"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "apps" ADD CONSTRAINT "apps_business_id_businesses_id_fk" FOREIGN KEY ("business_id") REFERENCES "public"."businesses"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "ix_receiving_accounts_business" ON "receiving_accounts" USING btree ("business_id","status");--> statement-breakpoint
+CREATE INDEX "ix_apps_business" ON "apps" USING btree ("business_id","status");--> statement-breakpoint
 -- An existing deployment is a single business that predates the concept of
 -- one, so give it the concept and put everything it owns inside.
 --
@@ -84,19 +99,6 @@ BEGIN
     UPDATE "user" SET role = 'platform_admin' WHERE role = 'admin';
   END IF;
 END $$;--> statement-breakpoint
-ALTER TABLE "invitations" ADD CONSTRAINT "invitations_business_id_businesses_id_fk" FOREIGN KEY ("business_id") REFERENCES "public"."businesses"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "memberships" ADD CONSTRAINT "memberships_business_id_businesses_id_fk" FOREIGN KEY ("business_id") REFERENCES "public"."businesses"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "ux_businesses_slug" ON "businesses" USING btree ("slug");--> statement-breakpoint
-CREATE INDEX "ix_businesses_status" ON "businesses" USING btree ("status");--> statement-breakpoint
-CREATE UNIQUE INDEX "ux_invitations_token" ON "invitations" USING btree ("token_hash");--> statement-breakpoint
-CREATE UNIQUE INDEX "ux_invitations_business_email" ON "invitations" USING btree ("business_id","email");--> statement-breakpoint
-CREATE INDEX "ix_invitations_business" ON "invitations" USING btree ("business_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "ux_memberships_user_business" ON "memberships" USING btree ("user_id","business_id");--> statement-breakpoint
-CREATE INDEX "ix_memberships_user" ON "memberships" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX "ix_memberships_business" ON "memberships" USING btree ("business_id","role");--> statement-breakpoint
-ALTER TABLE "receiving_accounts" ADD CONSTRAINT "receiving_accounts_business_id_businesses_id_fk" FOREIGN KEY ("business_id") REFERENCES "public"."businesses"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "apps" ADD CONSTRAINT "apps_business_id_businesses_id_fk" FOREIGN KEY ("business_id") REFERENCES "public"."businesses"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "ix_receiving_accounts_business" ON "receiving_accounts" USING btree ("business_id","status");--> statement-breakpoint
-CREATE INDEX "ix_apps_business" ON "apps" USING btree ("business_id","status");--> statement-breakpoint
+
 ALTER TABLE "receiving_accounts" ALTER COLUMN "business_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "apps" ALTER COLUMN "business_id" SET NOT NULL;

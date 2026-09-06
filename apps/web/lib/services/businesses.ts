@@ -428,13 +428,6 @@ export async function listBusinessesForReview(
       description: businesses.description,
       createdAt: businesses.createdAt,
       reviewedAt: businesses.reviewedAt,
-      memberCount: sql<number>`(
-        select count(*) from ${memberships} where ${memberships.businessId} = ${businesses.id}
-      )::int`,
-      accountCount: sql<number>`(
-        select count(*) from ${receivingAccounts}
-        where ${receivingAccounts.businessId} = ${businesses.id}
-      )::int`,
     })
     .from(businesses)
     .where(status ? eq(businesses.status, status) : undefined)
@@ -443,7 +436,32 @@ export async function listBusinessesForReview(
       desc(businesses.createdAt),
     )
 
-  return rows
+  /*
+   * Counted with grouped aggregates rather than correlated subqueries in a raw
+   * `sql` template. Those rendered without their correlation and silently
+   * returned zero for every business — a wrong number on a review screen is
+   * worse than a missing one, because "0 numbers" reads as "they have not set
+   * anything up", which is exactly the sort of thing the decision turns on.
+   */
+  const [memberCounts, accountCounts] = await Promise.all([
+    db
+      .select({ businessId: memberships.businessId, total: count() })
+      .from(memberships)
+      .groupBy(memberships.businessId),
+    db
+      .select({ businessId: receivingAccounts.businessId, total: count() })
+      .from(receivingAccounts)
+      .groupBy(receivingAccounts.businessId),
+  ])
+
+  const members = new Map(memberCounts.map((row) => [row.businessId, row.total]))
+  const accounts = new Map(accountCounts.map((row) => [row.businessId, row.total]))
+
+  return rows.map((row) => ({
+    ...row,
+    memberCount: members.get(row.id) ?? 0,
+    accountCount: accounts.get(row.id) ?? 0,
+  }))
 }
 
 /**

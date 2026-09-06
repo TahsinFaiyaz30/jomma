@@ -1,9 +1,10 @@
+import { isServiceMode } from '@jomma/shared/env'
 import { redirect } from 'next/navigation'
 import { AppSidebar } from '@/components/dash/app-sidebar'
 import { CommandPalette } from '@/components/dash/command-palette'
 import { NotPayableBanner } from '@/components/dash/not-payable-banner'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
-import { requireBusiness } from '@/lib/auth/tenancy'
+import { listBusinessesFor, requireBusiness } from '@/lib/auth/tenancy'
 import { getAccountFooter, getSidebarCounts } from '@/lib/services/dashboard'
 import { canTakePayments, hasCompletedSetup } from '@/lib/services/onboarding'
 
@@ -40,6 +41,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
    */
   if (!(await hasCompletedSetup())) redirect('/setup')
 
+  /*
+   * The switcher only appears when there is a choice to make. Self-hosted there
+   * is one business with a name nobody chose, so the header keeps the product
+   * name it always had.
+   */
+  const businesses = isServiceMode() ? await listBusinessesFor(admin.id) : []
+
   const [counts, accounts, payable] = await Promise.all([
     getSidebarCounts(business.id),
     getAccountFooter(business.id),
@@ -50,7 +58,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <SidebarProvider>
       <AppSidebar
         counts={counts}
-        admin={admin}
+        admin={{
+          name: admin.name,
+          email: admin.email,
+          isPlatformAdmin: admin.role === 'platform_admin',
+        }}
+        business={isServiceMode() ? { ...business } : null}
+        businesses={businesses}
         accounts={accounts.map((account) => ({
           id: account.id,
           provider: account.provider,
