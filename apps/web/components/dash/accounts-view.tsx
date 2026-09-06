@@ -7,6 +7,7 @@ import {
   acknowledgeAlertAction,
   addAccountAction,
   addDeviceAction,
+  approveDeviceAction,
   revokeDeviceAction,
   rotateTokenAction,
   setAccountStatusAction,
@@ -314,6 +315,7 @@ function AccountCard({ account }: { account: AccountView }) {
               elapsed={elapsed}
               onRotate={() => run(() => rotateTokenAction(device.id))}
               onRevoke={() => run(() => revokeDeviceAction(device.id))}
+              onApprove={() => run(() => approveDeviceAction(device.id))}
             />
           ))
         )}
@@ -460,72 +462,148 @@ function CaptureToggle({
   )
 }
 
+function deviceTone(device: DeviceRow) {
+  if (device.status === 'revoked') return 'neutral'
+  if (device.status === 'pending' || device.status === 'awaiting_approval') return 'ambiguous'
+
+  const stale =
+    device.lastHeartbeatAt && Date.now() - Date.parse(device.lastHeartbeatAt) > 15 * 60_000
+  return stale ? 'offline' : 'matched'
+}
+
+/** The middle of the row: what this phone is doing, or what it is waiting for. */
+function DeviceDetail({
+  device,
+  elapsed,
+}: {
+  device: DeviceRow
+  elapsed: (from: string) => string
+}) {
+  if (device.status === 'awaiting_approval') {
+    return (
+      <span className="text-ambiguous-subtle-foreground text-micro">
+        a phone scanned this code — approve it only if you recognise it
+      </span>
+    )
+  }
+
+  if (device.status === 'pending') {
+    return (
+      <span className="text-ambiguous-subtle-foreground text-micro">
+        waiting for the QR to be scanned
+      </span>
+    )
+  }
+
+  return (
+    <>
+      <span className="text-micro text-muted-foreground">
+        beat {device.lastHeartbeatAt ? elapsed(device.lastHeartbeatAt) : 'never'}
+      </span>
+      {device.battery !== null ? (
+        <span className="text-micro text-muted-foreground">
+          {device.battery}%{device.charging ? ' charging' : ''}
+        </span>
+      ) : null}
+      {device.queueDepth ? (
+        <span className="text-ambiguous-subtle-foreground text-micro">
+          queue {device.queueDepth}
+        </span>
+      ) : null}
+      {device.appVersion ? (
+        <span className="figure text-micro text-muted-foreground">v{device.appVersion}</span>
+      ) : null}
+    </>
+  )
+}
+
+function DeviceActions({
+  device,
+  pending,
+  onRotate,
+  onRevoke,
+  onApprove,
+}: {
+  device: DeviceRow
+  pending: boolean
+  onRotate: () => void
+  onRevoke: () => void
+  onApprove: () => void
+}) {
+  if (device.status === 'awaiting_approval') {
+    return (
+      <>
+        <Button size="sm" disabled={pending} onClick={onApprove}>
+          Approve
+        </Button>
+        {/* Rejecting is revoking: the token was already issued, so refusing has
+            to invalidate it rather than merely decline to promote it. */}
+        <Button size="sm" variant="ghost" disabled={pending} onClick={onRevoke}>
+          Reject
+        </Button>
+      </>
+    )
+  }
+
+  if (device.status === 'revoked') {
+    return <span className="text-micro text-muted-foreground">re-provision to use again</span>
+  }
+
+  return (
+    <>
+      <Button size="sm" variant="ghost" disabled={pending} onClick={onRotate}>
+        Rotate token
+      </Button>
+      <Button size="sm" variant="ghost" disabled={pending} onClick={onRevoke}>
+        Revoke
+      </Button>
+    </>
+  )
+}
+
 function DeviceRowView({
   device,
   pending,
   elapsed,
   onRotate,
   onRevoke,
+  onApprove,
 }: {
   device: DeviceRow
   pending: boolean
   elapsed: (from: string) => string
   onRotate: () => void
   onRevoke: () => void
+  onApprove: () => void
 }) {
-  const tone =
-    device.status === 'revoked'
-      ? 'neutral'
-      : device.status === 'pending'
-        ? 'ambiguous'
-        : device.lastHeartbeatAt && Date.now() - Date.parse(device.lastHeartbeatAt) > 15 * 60_000
-          ? 'offline'
-          : 'matched'
+  const awaiting = device.status === 'awaiting_approval'
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-card px-3 py-2">
-      <StatusDot tone={tone} />
+    <div
+      className={
+        // A phone waiting on a decision has to be findable without reading every
+        // row, so it gets a border rather than another grey label.
+        awaiting
+          ? 'flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-ambiguous bg-ambiguous-subtle px-3 py-2'
+          : 'flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-card px-3 py-2'
+      }
+    >
+      <StatusDot tone={deviceTone(device)} />
       <span className="text-small">{device.name}</span>
-      <span className="text-micro text-muted-foreground">{device.status}</span>
+      <span className="text-micro text-muted-foreground">
+        {awaiting ? 'awaiting approval' : device.status}
+      </span>
 
-      {device.status === 'pending' ? (
-        <span className="text-micro text-ambiguous-subtle-foreground">
-          waiting for the QR to be scanned
-        </span>
-      ) : (
-        <>
-          <span className="text-micro text-muted-foreground">
-            beat {device.lastHeartbeatAt ? elapsed(device.lastHeartbeatAt) : 'never'}
-          </span>
-          {device.battery !== null ? (
-            <span className="text-micro text-muted-foreground">
-              {device.battery}%{device.charging ? ' charging' : ''}
-            </span>
-          ) : null}
-          {device.queueDepth ? (
-            <span className="text-micro text-ambiguous-subtle-foreground">
-              queue {device.queueDepth}
-            </span>
-          ) : null}
-          {device.appVersion ? (
-            <span className="figure text-micro text-muted-foreground">v{device.appVersion}</span>
-          ) : null}
-        </>
-      )}
+      <DeviceDetail device={device} elapsed={elapsed} />
 
       <span className="ml-auto flex gap-1">
-        {device.status !== 'revoked' ? (
-          <>
-            <Button size="sm" variant="ghost" disabled={pending} onClick={onRotate}>
-              Rotate token
-            </Button>
-            <Button size="sm" variant="ghost" disabled={pending} onClick={onRevoke}>
-              Revoke
-            </Button>
-          </>
-        ) : (
-          <span className="text-micro text-muted-foreground">re-provision to use again</span>
-        )}
+        <DeviceActions
+          device={device}
+          pending={pending}
+          onRotate={onRotate}
+          onRevoke={onRevoke}
+          onApprove={onApprove}
+        />
       </span>
     </div>
   )
@@ -581,6 +659,18 @@ function RevealPanel({
               )}
               <p className="text-micro text-muted-foreground">
                 Expires {new Date(reveal.expiresAt).toLocaleTimeString()}. One scan only.
+              </p>
+              {/*
+                Said here rather than only on the device row, because this is
+                where somebody is standing when the phone scans. Without it the
+                pairing looks like it failed: the app says it is waiting, the
+                dialog said nothing about a second step, and the obvious guess
+                is to issue another code.
+              */}
+              <p className="max-w-56 rounded-md bg-ambiguous-subtle px-2.5 py-2 text-ambiguous-subtle-foreground text-micro">
+                Scanning is not the last step. The phone appears below as{' '}
+                <strong>awaiting approval</strong> and captures nothing until you approve it — so a
+                code that leaks is still not a working device.
               </p>
             </>
           ) : (

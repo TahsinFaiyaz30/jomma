@@ -246,7 +246,22 @@ export type DeviceCommand =
   | { type: 'stop' }
 
 /** `pending` is a device that has a provisioning QR but has not scanned it yet. */
-export const DEVICE_STATUSES = ['pending', 'active', 'revoked'] as const
+/**
+ * Where a phone is in its life.
+ *
+ * `awaiting_approval` sits between scanning and working, and it is the whole
+ * point of the pairing gate. A QR is a bearer credential: it is fifteen minutes
+ * long, it gets screenshotted, it gets forwarded, and anyone holding it can
+ * complete a pairing. So completing one no longer earns anything. The phone
+ * gets its token, and the token does nothing until someone at the dashboard
+ * says that phone is theirs.
+ *
+ * The token is issued at scan rather than at approval on purpose: handing it
+ * over later would mean storing a plaintext credential somewhere in between,
+ * waiting to be collected. Issuing it immediately and refusing to honour it is
+ * the same guarantee without the storage.
+ */
+export const DEVICE_STATUSES = ['pending', 'awaiting_approval', 'active', 'revoked'] as const
 export type DeviceStatus = (typeof DEVICE_STATUSES)[number]
 
 export const KEY_ENVIRONMENTS = ['live', 'test'] as const

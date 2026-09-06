@@ -16,6 +16,7 @@ import {
   assertOwnsReceivingAccount,
 } from '@/lib/services/businesses'
 import {
+  approveDevice,
   createDeviceWithProvisioning,
   requestTokenRotation,
   revokeDevice,
@@ -121,6 +122,20 @@ export async function rotateTokenAction(deviceId: string): Promise<DeviceActionR
     }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Could not rotate.' }
+  }
+}
+
+export async function approveDeviceAction(deviceId: string): Promise<DeviceActionResult> {
+  const { user: admin, business } = await requireWriteAccess()
+
+  try {
+    await assertOwnsDevice(business.id, deviceId)
+    await approveDevice({ deviceId, actorId: admin.id })
+    revalidatePath('/accounts')
+    revalidatePath('/')
+    return { ok: true, message: 'Approved. That phone can start capturing.' }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not approve.' }
   }
 }
 

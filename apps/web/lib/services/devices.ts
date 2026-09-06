@@ -1,8 +1,9 @@
 import 'server-only'
 
 import { createHash, randomBytes } from 'node:crypto'
+import type { DeviceStatus } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
-import { and, desc, eq, gt } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull } from 'drizzle-orm'
 import QRCode from 'qrcode'
 import { generateDeviceToken, verifyCredential } from '@/lib/auth/tokens'
 import { db } from '@/lib/db/client'
@@ -227,7 +228,12 @@ async function claimProvisioning(options: {
       .set({
         tokenPrefix: issued.prefix,
         tokenHash: issued.hash,
-        status: 'active',
+        /*
+         * Not `active`. Scanning proves someone holds the code; it does not
+         * prove they are the operator. The token is inert until the dashboard
+         * approves this phone — see DEVICE_STATUSES.
+         */
+        status: 'awaiting_approval',
         provisioningHash: null,
         // Cleared together. Leaving the lookup behind would keep a burned code
         // resolving to a row, and the unique index would then reject the next
@@ -247,14 +253,16 @@ async function claimProvisioning(options: {
       receivingAccountId: device.receivingAccountId,
       deviceId: device.id,
       kind: 'service_restarted',
-      severity: 'low',
-      detail: 'Device provisioned',
+      // Medium, not low: this is a decision waiting on a human, and it is the
+      // signal the accounts screen raises its attention badge from.
+      severity: 'medium',
+      detail: 'A phone scanned the pairing code and is waiting for approval',
     })
 
     await audit(tx, {
       action: 'device.provisioned',
       actorType: 'device',
-      payload: { device_id: device.id, stage: 'claimed' },
+      payload: { device_id: device.id, stage: 'awaiting_approval' },
     })
   })
 
@@ -343,6 +351,52 @@ export async function completeTokenRotation(options: {
 }
 
 /** Revocation is immediate. The device gets 401 and must be re-provisioned. */
+/**
+ * Approving a phone that has scanned the code.
+ *
+ * The second half of pairing. Scanning proves somebody holds a QR, which is a
+ * bearer credential that gets screenshotted and forwarded; this proves the
+ * operator recognises the phone. Only after both is the token it was issued
+ * worth anything.
+ *
+ * Conditional on still being `awaiting_approval`, so approving twice — two
+ * people looking at the same alert, or a double-click — cannot resurrect a
+ * phone that was revoked in between.
+ */
+export async function approveDevice(options: { deviceId: string; actorId: string }): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [device] = await tx
+      .update(devices)
+      .set({ status: 'active', provisionedAt: new Date() })
+      .where(and(eq(devices.id, options.deviceId), eq(devices.status, 'awaiting_approval')))
+      .returning()
+
+    if (!device) throw new Error('That phone is not waiting for approval.')
+
+    // Acknowledges the alert that raised the attention badge, so approving is
+    // one action rather than two.
+    await tx
+      .update(notifierEvents)
+      .set({ acknowledgedAt: new Date(), acknowledgedBy: options.actorId })
+      .where(and(eq(notifierEvents.deviceId, device.id), isNull(notifierEvents.acknowledgedAt)))
+
+    await tx.insert(notifierEvents).values({
+      receivingAccountId: device.receivingAccountId,
+      deviceId: device.id,
+      kind: 'service_restarted',
+      severity: 'low',
+      detail: 'Phone approved and now capturing',
+    })
+
+    await audit(tx, {
+      action: 'device.provisioned',
+      actorId: options.actorId,
+      actorType: 'admin',
+      payload: { device_id: device.id, stage: 'approved' },
+    })
+  })
+}
+
 export async function revokeDevice(options: { deviceId: string; actorId: string }): Promise<void> {
   await db.transaction(async (tx) => {
     const [device] = await tx
@@ -380,7 +434,7 @@ export async function revokeDevice(options: { deviceId: string; actorId: string 
 export interface DeviceRow {
   id: string
   name: string
-  status: 'pending' | 'active' | 'revoked'
+  status: DeviceStatus
   platform: string
   appVersion: string | null
   lastHeartbeatAt: string | null

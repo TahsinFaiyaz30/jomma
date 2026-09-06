@@ -149,6 +149,19 @@ export async function authenticateDevice(request: Request): Promise<Authenticate
   if (!valid) throw ApiError.unauthorized()
   if (row.deviceId !== deviceId) throw ApiError.unauthorized()
   // A revoked device must be re-provisioned by QR from the dashboard.
+  /*
+   * The pairing gate. A phone that has scanned a valid QR holds a real token
+   * and still cannot do anything with it until someone at the dashboard says
+   * that phone is theirs — see DEVICE_STATUSES.
+   *
+   * Told apart from a revocation because the two need opposite reactions: one
+   * is "wait, someone is about to approve you", the other is "stop, and do not
+   * come back". A phone that retried forever on a revoked token would be a
+   * phone nobody could switch off.
+   */
+  if (row.status === 'awaiting_approval') {
+    throw ApiError.forbidden('This phone is waiting to be approved on the dashboard.')
+  }
   if (row.status !== 'active') throw ApiError.unauthorized('This device has been revoked.')
 
   return {
