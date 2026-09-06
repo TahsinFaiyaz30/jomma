@@ -82,7 +82,7 @@ jobs:
     # Pushes to the default branch only. Not pull requests — a fork's PR must
     # never be able to deploy — and not manual runs, which are for checking a
     # branch rather than shipping it.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: false && github.event_name == 'push'  # temporarily off: testing Render native
     runs-on: ubuntu-latest
     # `deployments: write` so this job can record the deployment on the commit.
     # Render's GitHub App used to do that, and driving deploys from here took it
