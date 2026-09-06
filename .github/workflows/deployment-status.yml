@@ -29,6 +29,11 @@ concurrency:
 permissions:
   contents: read
   deployments: write
+  # For the "Render" entry in the commit's check list. Render used to post that
+  # status itself and stopped when the repository was recreated — the same
+  # breakage that stopped push events, except re-resolving the repository only
+  # fixed the events.
+  statuses: write
 
 jobs:
   record:
@@ -57,6 +62,15 @@ jobs:
           gh api "repos/$REPO/deployments/$id/statuses" \
             -f state=in_progress \
             -f environment_url=https://jomma-web.onrender.com >/dev/null
+
+          # The "Render" line in the commit's check list, alongside CI's. Same
+          # shape as the status Render posted before, so the commit reads the
+          # way it used to.
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=pending \
+            -f context=Render \
+            -f description="Building on Render" \
+            -f target_url=https://dashboard.render.com/web/srv-dadn4k9t0dsc73f96bjg >/dev/null
 
       - name: Wait for production to report this commit
         env:
@@ -89,11 +103,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           ID: ${{ steps.deployment.outputs.id }}
+          SHA: ${{ github.sha }}
         run: |
           gh api "repos/$REPO/deployments/$ID/statuses" \
             -f state=success \
             -f environment_url=https://jomma-web.onrender.com \
             -f description="Verified live via /api/health" >/dev/null
+
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=success \
+            -f context=Render \
+            -f description="Deployed and serving this commit" \
+            -f target_url=https://jomma-web.onrender.com/api/health >/dev/null
 
       - name: Mark it failed
         # `always()` so a failure earlier in the job does not skip this and
@@ -103,7 +124,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           ID: ${{ steps.deployment.outputs.id }}
+          SHA: ${{ github.sha }}
         run: |
           gh api "repos/$REPO/deployments/$ID/statuses" \
             -f state=failure \
             -f description="Production never reported this commit" >/dev/null || true
+
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=failure \
+            -f context=Render \
+            -f description="Production is not serving this commit" \
+            -f target_url=https://dashboard.render.com/web/srv-dadn4k9t0dsc73f96bjg >/dev/null || true
