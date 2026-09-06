@@ -79,6 +79,33 @@ android {
                 keyPassword = project.findProperty("jommaKeyPassword") as String?
             }
         }
+
+        /*
+         * A debug keystore that travels with the repository.
+         *
+         * Left alone, the Android plugin generates one per machine at
+         * `~/.android/debug.keystore` — a different key on every developer's
+         * laptop and, because runners are ephemeral, on every CI run. That is
+         * fine right up until the debug APK is something people install:
+         * Android refuses an update whose signature does not match, so each
+         * published debug build was uninstallable over the last one, failing at
+         * the very end with "package conflicts with an existing package".
+         * Confirmed rather than assumed — the 1.2.0 and 1.3.0 debug APKs came
+         * off CI with different certificates.
+         *
+         * The credentials below are the plugin's own well-known debug values
+         * and are not secrets. Nothing here is: this key signs no release, and
+         * the release keystore stays in CI secrets, off disk, and out of this
+         * file. The one thing it does mean is that a debug-signed APK is not
+         * evidence of origin — which was already true of every debug build
+         * anyone has ever produced.
+         */
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     defaultConfig {

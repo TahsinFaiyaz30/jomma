@@ -91,8 +91,8 @@ jobs:
           echo "Releasing $version"
 
       # Absent on a fork, and that is expected rather than an error. Without it
-      # the release APK cannot be signed, so only the debug APK — which Android
-      # signs with its own well-known key — is installable.
+      # the release APK cannot be signed, so only the debug APK — which uses the
+      # keystore committed alongside the app — is installable.
       - name: Restore signing key
         id: signing
         env:
@@ -172,7 +172,7 @@ jobs:
             echo
             echo "| File | What it is |"
             echo "| --- | --- |"
-            echo "| \`jomma-notifier-$v-debug.apk\` | Debug build. Installable on any phone, signed with Android's debug key. |"
+            echo "| \`jomma-notifier-$v-debug.apk\` | Debug build. Not minified, all ABIs, signed with this repository's debug key. For development. |"
             if [ "$SIGNED" = "true" ]; then
               echo "| \`jomma-notifier-$v-release.apk\` | Release build. Minified, arm-only, signed with this project's key. **Install this one.** |"
             fi

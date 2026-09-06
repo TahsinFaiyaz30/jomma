@@ -7,6 +7,12 @@
 *.key
 *.keystore
 *.jks
+# The debug keystore is the exception, and deliberately committed: the Android
+# plugin otherwise generates a different one per machine and per CI run, which
+# made every published debug APK uninstallable over the last one. Its password
+# is the plugin's own well-known debug value. It signs no release — that key
+# lives in CI secrets and never touches the tree.
+!apps/android/debug.keystore
 secrets/
 google-services.json
 
