@@ -50,9 +50,16 @@ export const GET = route(async (request, context) => {
         amount: payment.amountCents,
         applied_at: payment.appliedAt,
       })),
-      receiving_msisdn: view.receivingMsisdn,
+      /*
+       * The two fields that are the instruction to send money, withheld from a
+       * merchant the platform has stopped. Everything else stays: the buyer can
+       * still watch a payment they already made land, and still ask for it
+       * back. See `PayView.acceptingPayments`.
+       */
+      receiving_msisdn: view.acceptingPayments ? view.receivingMsisdn : null,
       provider: view.provider,
-      ref_code: view.refCode,
+      ref_code: view.acceptingPayments ? view.refCode : null,
+      accepting_payments: view.acceptingPayments,
       expires_at: view.expiresAt,
       return_url: view.returnUrl,
       request_id: context.requestId,

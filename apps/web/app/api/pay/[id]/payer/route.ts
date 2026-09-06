@@ -6,6 +6,7 @@ import { enforceRateLimit, parseBody, route } from '@/lib/api/handler'
 import { msisdnSchema } from '@/lib/api/schemas'
 import { db } from '@/lib/db/client'
 import { paymentIntents } from '@/lib/db/schema'
+import { isAcceptingPayments } from '@/lib/services/pay-page'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -39,6 +40,15 @@ export const POST = route(async (request, context) => {
   const publicId = segments[segments.indexOf('pay') + 1] ?? ''
   const uuid = fromPublicId('intent', publicId)
   if (!uuid) throw ApiError.notFound('No such payment.')
+
+  /*
+   * A suspended merchant may not be helped to take another payment. Withholding
+   * the number from the page is most of it, but this endpoint answers anyone
+   * holding the link directly — see `isAcceptingPayments`.
+   */
+  if (!(await isAcceptingPayments(uuid))) {
+    throw ApiError.forbidden('This shop cannot take payments at the moment.')
+  }
 
   const body = await parseBody(request, bodySchema)
 

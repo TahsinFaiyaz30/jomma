@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db, pool } from '@/lib/db/client'
@@ -22,9 +23,19 @@ const created: string[] = []
 const createdApps: string[] = []
 
 beforeAll(async () => {
-  const [admin] = await db.select({ id: users.id }).from(users).limit(1)
-  if (!admin) throw new Error('No admin in the database. Run `pnpm db:seed` first.')
-  actorId = admin.id
+  /*
+   * Its own actor, rather than whichever user happens to come back first.
+   *
+   * This used to take `select id from user limit 1` with no ordering, which
+   * made the suite depend on what else was in the table. `payment_audit`
+   * records the actor in a *uuid* column — the app only satisfies that because
+   * Better Auth is configured to generate uuids — so a leftover fixture user
+   * with a hex id sorted ahead of the real admin turned every audited operation
+   * here into a 22P02, in a file that had not changed.
+   */
+  actorId = randomUUID()
+  await db.insert(users).values({ id: actorId, name: 'Fixture', email: `${actorId}@test.local` })
+
   // Both of these now belong to a merchant, so the fixture needs one.
   businessId = await ensureSingleBusiness(actorId)
 })
@@ -32,6 +43,9 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const id of created) await db.delete(receivingAccounts).where(eq(receivingAccounts.id, id))
   for (const id of createdApps) await db.delete(apps).where(eq(apps.id, id))
+  // Audit rows reference the actor, so they go first or the delete is refused.
+  await db.delete(paymentAudit).where(eq(paymentAudit.actorId, actorId))
+  await db.delete(users).where(eq(users.id, actorId))
   await pool.end()
 })
 

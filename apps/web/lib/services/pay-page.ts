@@ -1,10 +1,11 @@
 import 'server-only'
 
-import { fromPublicId } from '@jomma/shared'
+import { fromPublicId, isBusinessLive } from '@jomma/shared'
 import { and, asc, eq, isNull } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   apps,
+  businesses,
   incomingPayments,
   orderPayments,
   paymentIntents,
@@ -41,8 +42,16 @@ export interface PayView {
   excessCents: number
 
   provider: 'bkash' | 'nagad'
-  /** Local format, 01XXXXXXXXX — what the buyer types into bKash. */
-  receivingMsisdn: string
+  /**
+   * Local format, 01XXXXXXXXX — what the buyer types into bKash.
+   *
+   * Null when the merchant may not be paid. Nulled *here*, in the view, rather
+   * than hidden by whatever renders it: this object is serialised into the
+   * page's payload, so a component that simply declines to display the number
+   * still ships it to the browser, where view-source finds it. Withholding has
+   * to happen before it leaves the server.
+   */
+  receivingMsisdn: string | null
   merchantName: string
 
   amountCents: number
@@ -91,6 +100,23 @@ export interface PayView {
    */
   payerKnown: boolean
 
+  /**
+   * Whether this merchant may still be sent money.
+   *
+   * False once the platform has suspended, rejected or not yet approved them.
+   * The approval gate is enforced on the API credential, which stops a merchant
+   * in that state creating *new* intents — but the intents they already have
+   * carry no credential at all. Their pay links keep working, and a page that
+   * says "send Tk 500 to 01xxxxxxxxx" is soliciting money into an account the
+   * platform has decided should not be trading.
+   *
+   * So the instructions are withheld rather than the page: money already sent
+   * is still shown, and can still be claimed with a TrxID or asked back — a
+   * buyer who paid ten minutes before the suspension needs all of that, and
+   * hiding it would strand them with no way to even prove what happened.
+   */
+  acceptingPayments: boolean
+
   expiresAt: string
   /** Null unless the app registered the host. Never echoed back unchecked. */
   returnUrl: string | null
@@ -131,6 +157,33 @@ function deriveStatus(
   return 'open'
 }
 
+/**
+ * Whether this intent's merchant may still be sent money, by intent uuid.
+ *
+ * A narrow lookup for the buyer-facing writes that exist to help somebody pay —
+ * choosing a method, declaring the number they will pay from, fetching the QR.
+ * Withholding the instructions from the page is most of the job, but each of
+ * those is a separate endpoint anyone holding the link can call directly, and a
+ * suspension that only removes the number from a screen is a suspension that a
+ * saved bookmark walks straight around.
+ *
+ * Deliberately not applied to reading status, claiming a TrxID or requesting a
+ * refund. Those are how a buyer who already paid finds out where their money
+ * went, and taking them away would punish the one person in this who has done
+ * nothing wrong.
+ */
+export async function isAcceptingPayments(intentId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ businessStatus: businesses.status })
+    .from(paymentIntents)
+    .innerJoin(apps, eq(apps.id, paymentIntents.appId))
+    .innerJoin(businesses, eq(businesses.id, apps.businessId))
+    .where(eq(paymentIntents.id, intentId))
+    .limit(1)
+
+  return row ? isBusinessLive(row.businessStatus) : false
+}
+
 export async function getPayView(publicId: string): Promise<PayView | null> {
   const uuid = fromPublicId('intent', publicId)
   if (!uuid) return null
@@ -151,10 +204,12 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
       msisdn: receivingAccounts.msisdn,
       merchantName: apps.name,
       allowedRedirectHosts: apps.allowedRedirectHosts,
+      businessStatus: businesses.status,
     })
     .from(paymentIntents)
     .innerJoin(receivingAccounts, eq(receivingAccounts.id, paymentIntents.receivingAccountId))
     .innerJoin(apps, eq(apps.id, paymentIntents.appId))
+    .innerJoin(businesses, eq(businesses.id, apps.businessId))
     .leftJoin(paymentRefs, eq(paymentRefs.intentId, paymentIntents.id))
     .where(eq(paymentIntents.id, uuid))
     .limit(1)
@@ -172,20 +227,24 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
     .where(and(eq(orderPayments.intentId, row.id), isNull(orderPayments.reversedAt)))
     .orderBy(asc(orderPayments.appliedAt))
 
-  const methods = await listCheckoutMethods(row.id)
+  const accepting = isBusinessLive(row.businessStatus)
+  // Nothing to choose between when none of them may be paid.
+  const methods = accepting ? await listCheckoutMethods(row.id) : []
   const hosts = row.allowedRedirectHosts ?? []
 
   return {
     id: publicId,
     status: deriveStatus(row.status, row.expiresAt, row.receivedAmountCents, row.amountCents),
     provider: row.provider as 'bkash' | 'nagad',
-    receivingMsisdn: toLocalMsisdn(row.msisdn),
+    // Both nulled together: the number and the code are the instruction, and
+    // half of one is no use to a buyer and no safer to publish.
+    receivingMsisdn: accepting ? toLocalMsisdn(row.msisdn) : null,
     merchantName: row.merchantName,
     amountCents: row.amountCents,
     receivedAmountCents: row.receivedAmountCents,
     shortfallCents: Math.max(0, row.amountCents - row.receivedAmountCents),
     excessCents: Math.max(0, row.receivedAmountCents - row.amountCents),
-    refCode: row.refCode,
+    refCode: accepting ? row.refCode : null,
     payments: applied.map((payment) => ({
       trxId: payment.trxId,
       amountCents: payment.amountCents,
@@ -194,7 +253,8 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
     methods,
     // A single applied payment pins the receiving account, because the matcher
     // gates on it — see switchCheckoutMethod.
-    canSwitchMethod: applied.length === 0 && row.status === 'open',
+    canSwitchMethod: accepting && applied.length === 0 && row.status === 'open',
+    acceptingPayments: accepting,
     methodLocked: row.providerPreference !== 'any',
     payerKnown: Boolean(row.payerMsisdn),
     expiresAt: row.expiresAt.toISOString(),

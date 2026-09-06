@@ -48,6 +48,22 @@ export async function GET(request: Request): Promise<NextResponse> {
     )
   }
 
+  /*
+   * No code for a merchant who may not be paid.
+   *
+   * This one encodes the pay page's URL rather than the number itself, so it
+   * leaks nothing directly — but its whole purpose is to get somebody to the
+   * instruction, and printing it on a counter outlives any suspension. 403
+   * rather than 404: the payment exists, and the buyer can still open the page
+   * to see what happened to money they already sent.
+   */
+  if (!view.acceptingPayments) {
+    return NextResponse.json(
+      { error: { code: 'forbidden', message: 'This shop cannot take payments at the moment.' } },
+      { status: 403, headers },
+    )
+  }
+
   const png = await renderPayQrPng(view.id, requestOrigin(request))
 
   return new NextResponse(png as unknown as BodyInit, {

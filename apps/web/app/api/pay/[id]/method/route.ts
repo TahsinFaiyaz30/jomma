@@ -4,6 +4,7 @@ import { ApiError } from '@/lib/api/errors'
 import { enforceRateLimit, parseBody, route } from '@/lib/api/handler'
 import { intentIdFromPayUrl } from '@/lib/api/pay-url'
 import { listCheckoutMethods, switchCheckoutMethod } from '@/lib/services/checkout'
+import { isAcceptingPayments } from '@/lib/services/pay-page'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,6 +30,15 @@ export const POST = route(async (request, context) => {
   if (!uuid) throw ApiError.notFound('No such payment.')
 
   enforceRateLimit(context, 'pay:write', context.ip ?? 'unknown')
+
+  /*
+   * A suspended merchant may not be helped to take another payment. Withholding
+   * the number from the page is most of it, but this endpoint answers anyone
+   * holding the link directly — see `isAcceptingPayments`.
+   */
+  if (!(await isAcceptingPayments(uuid))) {
+    throw ApiError.forbidden('This shop cannot take payments at the moment.')
+  }
 
   const body = await parseBody(request, bodySchema)
   const { changed } = await switchCheckoutMethod({

@@ -220,6 +220,43 @@ function Receipt({ view }: { view: PayView }) {
   )
 }
 
+/**
+ * The merchant has been stopped by the platform, so there is nothing to pay to.
+ *
+ * Shown instead of the instructions rather than instead of the page. Somebody
+ * looking at this may have sent money minutes ago, and the two things they need
+ * — that it was recorded, and that they must not send more — are both here.
+ * What is not here is the number and the reference code, which together are the
+ * whole instruction and are withheld server-side as well.
+ */
+function NotAccepting({ view }: { view: PayView }) {
+  const received = view.receivedAmountCents > 0
+
+  return (
+    <Shell merchant={view.merchantName}>
+      <div className="space-y-4 text-center">
+        <h1 className="font-medium text-display">This shop cannot take payments</h1>
+        <p className="text-small text-muted-foreground">
+          {view.merchantName} is not able to accept payments at the moment, so this order cannot be
+          paid.
+        </p>
+
+        {received ? (
+          <p className="text-small">
+            {taka(view.receivedAmountCents)} you already sent has been recorded against this order.
+            Contact {view.merchantName} about it.
+          </p>
+        ) : null}
+
+        {/* The one thing that must not happen next is sending money anyway. */}
+        <p className="text-micro text-muted-foreground">
+          Do not send any money for this order. Anything sent now would not be matched to it.
+        </p>
+      </div>
+    </Shell>
+  )
+}
+
 function Closed({ view }: { view: PayView }) {
   const expired = view.status === 'expired'
 
@@ -536,6 +573,13 @@ export function PayClient({ initial }: { initial: PayView }) {
 
   if (view.status === 'matched') return <Receipt view={view} />
   if (view.status === 'expired' || view.status === 'cancelled') return <Closed view={view} />
+  /*
+   * After the terminal states, deliberately. A payment that already completed
+   * still shows its receipt and an expired one still says so — those are facts
+   * about the buyer's money, and a suspension arriving afterwards does not
+   * change them. This only replaces the part that asks for money.
+   */
+  if (!view.acceptingPayments) return <NotAccepting view={view} />
 
   if (step === 'method') {
     return (
@@ -565,8 +609,14 @@ export function PayClient({ initial }: { initial: PayView }) {
   }
 
   const buyerDigits = buyerMsisdn.replace(/\D/g, '')
+  /*
+   * Both are non-null by here: `NotAccepting` returns above whenever they are
+   * not, since a page with no number to send to has nothing to guide anybody
+   * through. Stated rather than assumed, so the fallbacks are visibly dead
+   * code and not a silently blank instruction if that order ever changes.
+   */
   const guideData = {
-    msisdn: view.receivingMsisdn,
+    msisdn: view.receivingMsisdn ?? '',
     amount: taka(view.shortfallCents),
     refCode: view.refCode ?? '',
     buyerLabel: buyerDigits.length >= 11 ? buyerDigits : 'You',
@@ -612,7 +662,7 @@ export function PayClient({ initial }: { initial: PayView }) {
       {view.status === 'partial' ? <PartialNotice view={view} /> : null}
 
       <div className="space-y-2">
-        <CopyRow label="Send to" value={view.receivingMsisdn} />
+        {view.receivingMsisdn ? <CopyRow label="Send to" value={view.receivingMsisdn} /> : null}
         <CopyRow label="Amount" value={(view.shortfallCents / 100).toFixed(2)} />
         {view.refCode ? <CopyRow label="Reference" value={view.refCode} /> : null}
       </div>

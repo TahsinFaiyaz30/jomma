@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db, pool } from '@/lib/db/client'
@@ -44,6 +44,8 @@ import {
 let victim: { business: string; app: string; account: string }
 let attacker: { business: string; app: string; account: string }
 const created: { table: 'business'; id: string }[] = []
+/** Users this file inserts, so it does not leave them for the next one. */
+const createdUsers: string[] = []
 
 async function makeBusiness(name: string) {
   const slug = `${name}-${randomBytes(4).toString('hex')}`
@@ -97,6 +99,17 @@ afterAll(async () => {
     await db.delete(incomingPayments).where(eq(incomingPayments.receivingAccountId, account))
   }
   for (const row of created) await db.delete(businesses).where(eq(businesses.id, row.id))
+
+  /*
+   * And the users, which this used to leave behind.
+   *
+   * They are not harmless litter. `admin-create` picked an actor with an
+   * unordered `limit(1)` over the table, and `payment_audit.actor_id` is a uuid
+   * column — so a leftover fixture user sorting ahead of the real admin made
+   * that file fail with a type error, in tests that had not changed. Cleaning up
+   * is the half of this that is actually mine to fix.
+   */
+  for (const id of createdUsers) await db.delete(users).where(eq(users.id, id))
   await pool.end()
 })
 
@@ -288,7 +301,8 @@ describe('setMemberRole', () => {
   let ownerId: string
 
   beforeAll(async () => {
-    ownerId = randomBytes(8).toString('hex')
+    ownerId = randomUUID()
+    createdUsers.push(ownerId)
     await db.insert(users).values({ id: ownerId, name: 'Owner', email: `${ownerId}@test.local` })
     await db
       .insert(memberships)
@@ -304,7 +318,11 @@ describe('setMemberRole', () => {
   })
 
   it('allows the demotion once a second owner exists', async () => {
-    const second = randomBytes(8).toString('hex')
+    // A uuid, like the ones Better Auth is configured to generate. A hex id is
+    // accepted by `user.id` (text) and rejected by every uuid column that
+    // references it, which is a confusing way to discover the mismatch.
+    const second = randomUUID()
+    createdUsers.push(second)
     await db.insert(users).values({ id: second, name: 'Second', email: `${second}@test.local` })
     await db
       .insert(memberships)

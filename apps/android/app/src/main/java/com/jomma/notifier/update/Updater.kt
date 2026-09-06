@@ -84,7 +84,7 @@ object Updater {
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    return@withContext CheckResult.Failed("GitHub said ${response.code}")
+                    return@withContext CheckResult.Failed(describeFailure(response))
                 }
 
                 val body = response.body?.string().orEmpty()
@@ -139,6 +139,35 @@ object Updater {
             CheckResult.Failed(error.message ?: "Network error")
         } catch (error: Exception) {
             CheckResult.Failed(error.message ?: "Could not read the release")
+        }
+    }
+
+    /**
+     * Why a check failed, in words the person holding the phone can act on.
+     *
+     * Rate limiting is the one worth naming. GitHub allows sixty unauthenticated
+     * requests an hour **per IP**, and answers `403` rather than `429` when that
+     * runs out — so the honest-looking "GitHub said 403" reads as a permission
+     * problem, which is the one thing it is not. It is also shared: every phone
+     * behind one shop's wi-fi draws on the same sixty.
+     *
+     * Nothing here is broken when it happens and it clears itself, so the useful
+     * thing to say is when to try again. `X-RateLimit-Remaining` is what tells
+     * this apart from any other 403.
+     */
+    private fun describeFailure(response: okhttp3.Response): String {
+        val exhausted = response.code == 403 && response.header("X-RateLimit-Remaining") == "0"
+        if (!exhausted) return "GitHub said ${response.code}"
+
+        val resetAt = response.header("X-RateLimit-Reset")?.toLongOrNull()
+        val minutes = resetAt
+            ?.let { ((it * 1000) - System.currentTimeMillis()) / 60_000 }
+            ?.coerceAtLeast(1)
+
+        return if (minutes == null) {
+            "Too many update checks from this network. Try again later."
+        } else {
+            "Too many update checks from this network. Try again in $minutes min."
         }
     }
 
