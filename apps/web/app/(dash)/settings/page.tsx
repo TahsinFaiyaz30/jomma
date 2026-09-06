@@ -206,6 +206,21 @@ export default async function SettingsPage() {
           <section className="space-y-2">
             <h2 className="text-title font-medium">Environment</h2>
             <dl className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border">
+              {/*
+                First, because it is the most consequential thing on this page:
+                it decides whether strangers can create accounts on a server
+                that watches your bKash number. An operator who inherited a
+                deployment, or who has just set the variable and wants to know
+                it took, had no way to check without reading the host's config.
+              */}
+              <ConfigRow
+                label="Deployment mode"
+                value={
+                  config.JOMMA_MODE === 'service'
+                    ? 'service — many businesses, open signup, new ones need approving'
+                    : 'single — one business, signup closed'
+                }
+              />
               <ConfigRow label="Match threshold" value={String(config.MATCH_APPROVE_THRESHOLD)} />
               <ConfigRow label="Ambiguity margin" value={String(config.MATCH_AMBIGUITY_MARGIN)} />
               <ConfigRow
