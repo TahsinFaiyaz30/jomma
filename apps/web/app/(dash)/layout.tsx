@@ -41,9 +41,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!(await hasCompletedSetup())) redirect('/setup')
 
   const [counts, accounts, payable] = await Promise.all([
-    getSidebarCounts(),
+    getSidebarCounts(business.id),
     getAccountFooter(business.id),
-    canTakePayments(),
+    canTakePayments(business.id),
   ])
 
   return (

@@ -30,10 +30,10 @@ export default async function ReconcilePage() {
   const { business } = await requireBusiness()
 
   const [paidWithoutPayment, overdue, parseFailures, queue, accounts] = await Promise.all([
-    getPaidWithoutPaymentCount(),
-    getOverdueIntentCount(),
-    getParseFailureCount(),
-    getQueueDepth(),
+    getPaidWithoutPaymentCount(business.id),
+    getOverdueIntentCount(business.id),
+    getParseFailureCount(business.id),
+    getQueueDepth(business.id),
     listAccountHealth(business.id),
   ])
 

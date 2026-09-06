@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, eq } from 'drizzle-orm'
+import { and, eq, getTableColumns } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   apiKeys,
@@ -57,13 +57,25 @@ export interface SetupState {
   firstAppId: string | null
 }
 
-export async function getSetupState(): Promise<SetupState> {
+export async function getSetupState(businessId: string): Promise<SetupState> {
   const [accounts, allApps, allKeys, allEndpoints, allDevices] = await Promise.all([
-    db.select().from(receivingAccounts),
-    db.select().from(apps),
-    db.select().from(apiKeys).where(eq(apiKeys.status, 'active')),
-    db.select().from(webhookEndpoints).where(eq(webhookEndpoints.status, 'active')),
-    db.select().from(devices).where(eq(devices.status, 'active')),
+    db.select().from(receivingAccounts).where(eq(receivingAccounts.businessId, businessId)),
+    db.select().from(apps).where(eq(apps.businessId, businessId)),
+    db
+      .select({ ...getTableColumns(apiKeys) })
+      .from(apiKeys)
+      .innerJoin(apps, eq(apiKeys.appId, apps.id))
+      .where(and(eq(apiKeys.status, 'active'), eq(apps.businessId, businessId))),
+    db
+      .select({ ...getTableColumns(webhookEndpoints) })
+      .from(webhookEndpoints)
+      .innerJoin(apps, eq(webhookEndpoints.appId, apps.id))
+      .where(and(eq(webhookEndpoints.status, 'active'), eq(apps.businessId, businessId))),
+    db
+      .select({ ...getTableColumns(devices) })
+      .from(devices)
+      .innerJoin(receivingAccounts, eq(devices.receivingAccountId, receivingAccounts.id))
+      .where(and(eq(devices.status, 'active'), eq(receivingAccounts.businessId, businessId))),
   ])
 
   const account = accounts[0] ?? null
@@ -185,11 +197,13 @@ export async function markSetupComplete(): Promise<void> {
  * that has completed setup is an operational problem worth a banner, not a
  * reason to hide the dashboard.
  */
-export async function canTakePayments(): Promise<boolean> {
+export async function canTakePayments(businessId: string): Promise<boolean> {
   const [account] = await db
     .select({ id: receivingAccounts.id })
     .from(receivingAccounts)
-    .where(eq(receivingAccounts.status, 'active'))
+    .where(
+      and(eq(receivingAccounts.status, 'active'), eq(receivingAccounts.businessId, businessId)),
+    )
     .limit(1)
 
   if (!account) return false
@@ -197,7 +211,8 @@ export async function canTakePayments(): Promise<boolean> {
   const [key] = await db
     .select({ id: apiKeys.id })
     .from(apiKeys)
-    .where(eq(apiKeys.status, 'active'))
+    .innerJoin(apps, eq(apiKeys.appId, apps.id))
+    .where(and(eq(apiKeys.status, 'active'), eq(apps.businessId, businessId)))
     .limit(1)
 
   if (!key) return false

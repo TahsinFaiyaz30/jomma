@@ -3,15 +3,19 @@
 import { newRequestId } from '@jomma/shared'
 import { and, eq, isNull } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
-import { requireAdmin } from '@/lib/auth/session'
+import { requireBusiness, requireWriteAccess } from '@/lib/auth/tenancy'
 import { db } from '@/lib/db/client'
 import { orderPayments } from '@/lib/db/schema'
 import { logger } from '@/lib/logger'
 import { reversePayment } from '@/lib/services/apply'
+import { assertOwnsIntent } from '@/lib/services/businesses'
 import { getIntentDetail } from '@/lib/services/intent-admin'
 
 export async function loadIntentDetail(intentId: string) {
-  await requireAdmin()
+  const { business } = await requireBusiness()
+  // Reads are scoped too, not just writes. This returns the whole audit
+  // timeline for an intent, which is a merchant's trading history.
+  await assertOwnsIntent(business.id, intentId)
   return getIntentDetail(intentId)
 }
 
@@ -28,10 +32,11 @@ export async function reverseMatchAction(
   intentId: string,
   reason: string,
 ): Promise<{ ok: boolean; message: string }> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   const requestId = newRequestId()
 
   try {
+    await assertOwnsIntent(business.id, intentId)
     const live = await db
       .select({ id: orderPayments.id })
       .from(orderPayments)

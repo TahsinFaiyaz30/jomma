@@ -2,7 +2,8 @@
 
 import { newRequestId } from '@jomma/shared'
 import { revalidatePath } from 'next/cache'
-import { requireAdmin } from '@/lib/auth/session'
+import { requireWriteAccess } from '@/lib/auth/tenancy'
+import { assertOwnsReceivingAccount } from '@/lib/services/businesses'
 import { ingestManualEntry, type ManualEntryResult } from '@/lib/services/manual-entry'
 import { type ImportResult, importStatement } from '@/lib/services/statement-import'
 
@@ -10,12 +11,13 @@ export async function importStatementAction(
   receivingAccountId: string,
   csv: string,
 ): Promise<{ ok: boolean; message: string; result?: ImportResult }> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
 
   if (!csv.trim()) return { ok: false, message: 'Nothing to import.' }
   if (csv.length > 5_000_000) return { ok: false, message: 'That file is too large (5MB limit).' }
 
   try {
+    await assertOwnsReceivingAccount(business.id, receivingAccountId)
     const result = await importStatement({ receivingAccountId, csv, actorId: admin.id })
     revalidatePath('/reconcile')
     revalidatePath('/queue')
@@ -45,12 +47,13 @@ export async function manualEntryAction(
   receivingAccountId: string,
   raw: string,
 ): Promise<{ ok: boolean; message: string; result?: ManualEntryResult }> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   const requestId = newRequestId()
 
   if (!raw.trim()) return { ok: false, message: 'Nothing to import.' }
 
   try {
+    await assertOwnsReceivingAccount(business.id, receivingAccountId)
     const result = await ingestManualEntry({
       receivingAccountId,
       raw,

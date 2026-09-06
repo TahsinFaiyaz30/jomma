@@ -52,8 +52,12 @@ export interface AppView {
   deliveryCounts: { pending: number; delivered: number; failed: number }
 }
 
-export async function listApps(): Promise<AppView[]> {
-  const rows = await db.select().from(apps).orderBy(apps.name)
+export async function listApps(businessId: string): Promise<AppView[]> {
+  const rows = await db
+    .select()
+    .from(apps)
+    .where(eq(apps.businessId, businessId))
+    .orderBy(apps.name)
 
   return Promise.all(
     rows.map(async (app) => {

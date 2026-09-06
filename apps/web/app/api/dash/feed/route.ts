@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAdmin } from '@/lib/auth/session'
+import { getActiveBusiness } from '@/lib/auth/tenancy'
 import { logger } from '@/lib/logger'
 import { getFeed } from '@/lib/services/dashboard'
 
@@ -39,11 +40,25 @@ export async function GET(request: Request) {
     )
   }
 
+  /*
+   * Which business the poll is for. Resolved from the session, not from the
+   * query string — this route is hit every two seconds and returns raw capture
+   * text, so a `businessId` parameter would be the cheapest cross-tenant read
+   * on the instance.
+   */
+  const business = await getActiveBusiness(admin)
+  if (!business) {
+    return NextResponse.json(
+      { error: { code: 'no_business', message: 'No business selected.' } },
+      { status: 404, headers: { 'cache-control': 'no-store' } },
+    )
+  }
+
   const url = new URL(request.url)
   const sinceParam = url.searchParams.get('since')
   const since = sinceParam ? new Date(sinceParam) : null
 
-  const page = await getFeed({
+  const page = await getFeed(business.id, {
     limit: since ? 100 : 300,
     since: since && !Number.isNaN(since.getTime()) ? since : null,
   })

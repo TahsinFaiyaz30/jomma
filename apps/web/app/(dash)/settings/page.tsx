@@ -1,13 +1,14 @@
 import { ADAPTERS, type IngestAdapterId } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import type { Metadata } from 'next'
 import { PageHeader } from '@/components/dash/page-header'
 import { LocaleSegmented } from '@/components/locale-toggle'
 import { StatusDot } from '@/components/status'
 import { ThemeSegmented } from '@/components/theme-toggle'
+import { requireBusiness } from '@/lib/auth/tenancy'
 import { db } from '@/lib/db/client'
-import { incomingPayments } from '@/lib/db/schema'
+import { incomingPayments, receivingAccounts } from '@/lib/db/schema'
 import { REF_CODE_LENGTH } from '@/lib/services/refs'
 import { QUEUE_STALE_HOURS, UTILIZATION_STOP, UTILIZATION_WARN } from '@/lib/thresholds'
 
@@ -15,7 +16,9 @@ export const metadata: Metadata = { title: 'Settings' }
 export const dynamic = 'force-dynamic'
 
 /** Which adapters have actually delivered anything, so "enabled" is observed. */
-async function adapterUsage(): Promise<Record<string, { count: number; lastAt: string | null }>> {
+async function adapterUsage(
+  businessId: string,
+): Promise<Record<string, { count: number; lastAt: string | null }>> {
   const rows = await db
     .select({
       adapter: incomingPayments.adapter,
@@ -23,6 +26,8 @@ async function adapterUsage(): Promise<Record<string, { count: number; lastAt: s
       lastAt: sql<string | null>`max(${incomingPayments.receivedAt})`,
     })
     .from(incomingPayments)
+    .innerJoin(receivingAccounts, eq(incomingPayments.receivingAccountId, receivingAccounts.id))
+    .where(eq(receivingAccounts.businessId, businessId))
     .groupBy(incomingPayments.adapter)
 
   return Object.fromEntries(
@@ -41,8 +46,9 @@ const ADAPTER_NOTES: Record<IngestAdapterId, string> = {
 }
 
 export default async function SettingsPage() {
+  const { business } = await requireBusiness()
   const config = env()
-  const usage = await adapterUsage()
+  const usage = await adapterUsage(business.id)
 
   return (
     <div className="flex h-svh min-h-0 flex-col">

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { PageHeader } from '@/components/dash/page-header'
 import { QueueList } from '@/components/dash/queue-list'
+import { requireBusiness } from '@/lib/auth/tenancy'
 import { getQueue } from '@/lib/services/queue'
 
 export const metadata: Metadata = { title: 'Queue' }
@@ -14,7 +15,8 @@ export const dynamic = 'force-dynamic'
  * automatic matching, not a second implementation of it.
  */
 export default async function QueuePage() {
-  const items = await getQueue()
+  const { business } = await requireBusiness()
+  const items = await getQueue(business.id)
 
   return (
     <div className="flex h-svh min-h-0 flex-col">

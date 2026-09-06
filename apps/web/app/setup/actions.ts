@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/session'
-import { requireWriteAccess } from '@/lib/auth/tenancy'
+import { requireBusiness, requireWriteAccess } from '@/lib/auth/tenancy'
 import { createReceivingAccount, setAccountStatus } from '@/lib/services/account-admin'
 import { createApiKey, createApp, createWebhookEndpoint } from '@/lib/services/app-admin'
 import { createDeviceWithProvisioning } from '@/lib/services/devices'
@@ -38,7 +38,8 @@ async function reply(
   revalidatePath('/apps')
   revalidatePath('/')
 
-  const state = await getSetupState()
+  const { business } = await requireBusiness()
+  const state = await getSetupState(business.id)
   // The moment the last required step lands, record it — so a later disable or
   // revoke shows a banner rather than throwing the operator back in here.
   if (state.complete) await markSetupComplete()

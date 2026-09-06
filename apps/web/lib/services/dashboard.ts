@@ -4,6 +4,7 @@ import type { TransactionType } from '@jomma/shared'
 import { and, count, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
+  apps,
   incomingPayments,
   notifierEvents,
   orderPayments,
@@ -41,6 +42,7 @@ export interface FeedPage {
 }
 
 export async function getFeed(
+  businessId: string,
   options: { limit?: number; since?: Date | null } = {},
 ): Promise<FeedPage> {
   const limit = Math.min(options.limit ?? 200, 500)
@@ -73,7 +75,12 @@ export async function getFeed(
       ),
     )
     .leftJoin(paymentIntents, eq(orderPayments.intentId, paymentIntents.id))
-    .where(options.since ? gt(incomingPayments.receivedAt, options.since) : undefined)
+    .where(
+      and(
+        eq(receivingAccounts.businessId, businessId),
+        options.since ? gt(incomingPayments.receivedAt, options.since) : undefined,
+      ),
+    )
     .orderBy(desc(incomingPayments.receivedAt))
     .limit(limit)
 
@@ -98,7 +105,7 @@ export interface SidebarCounts {
  * Counts for the nav badges. One round trip — these render on every page, so
  * five separate queries would be five per navigation.
  */
-export async function getSidebarCounts(): Promise<SidebarCounts> {
+export async function getSidebarCounts(businessId: string): Promise<SidebarCounts> {
   const [row] = await db
     .select({
       feed: sql<string>`count(*) filter (
@@ -110,17 +117,22 @@ export async function getSidebarCounts(): Promise<SidebarCounts> {
       )`,
     })
     .from(incomingPayments)
+    .innerJoin(receivingAccounts, eq(incomingPayments.receivingAccountId, receivingAccounts.id))
+    .where(eq(receivingAccounts.businessId, businessId))
 
   const [intents] = await db
     .select({ value: count() })
     .from(paymentIntents)
-    .where(eq(paymentIntents.status, 'open'))
+    .innerJoin(apps, eq(paymentIntents.appId, apps.id))
+    .where(and(eq(paymentIntents.status, 'open'), eq(apps.businessId, businessId)))
 
   const [alerts] = await db
     .select({ value: count() })
     .from(notifierEvents)
+    .innerJoin(receivingAccounts, eq(notifierEvents.receivingAccountId, receivingAccounts.id))
     .where(
       and(
+        eq(receivingAccounts.businessId, businessId),
         isNull(notifierEvents.acknowledgedAt),
         or(eq(notifierEvents.severity, 'critical'), eq(notifierEvents.severity, 'high')),
       ),
@@ -175,7 +187,7 @@ export async function getAccountFooter(businessId: string): Promise<AccountFoote
 }
 
 /** Oldest first — the queue is worked from the top, and age is the priority. */
-export async function getQueueDepth(): Promise<{
+export async function getQueueDepth(businessId: string): Promise<{
   depth: number
   oldestAt: string | null
 }> {
@@ -185,7 +197,10 @@ export async function getQueueDepth(): Promise<{
       oldest: sql<string | null>`min(${incomingPayments.receivedAt})`,
     })
     .from(incomingPayments)
-    .where(eq(incomingPayments.status, 'unmatched'))
+    .innerJoin(receivingAccounts, eq(incomingPayments.receivingAccountId, receivingAccounts.id))
+    .where(
+      and(eq(receivingAccounts.businessId, businessId), eq(incomingPayments.status, 'unmatched')),
+    )
 
   return { depth: row?.depth ?? 0, oldestAt: row?.oldest ?? null }
 }
@@ -195,7 +210,7 @@ export async function getQueueDepth(): Promise<{
  * row. This must always be zero. If it is not, something wrote a paid status
  * without money behind it.
  */
-export async function getPaidWithoutPaymentCount(): Promise<number> {
+export async function getPaidWithoutPaymentCount(businessId: string): Promise<number> {
   const [row] = await db
     .select({ value: count() })
     .from(paymentIntents)
@@ -203,45 +218,71 @@ export async function getPaidWithoutPaymentCount(): Promise<number> {
       orderPayments,
       and(eq(orderPayments.intentId, paymentIntents.id), isNull(orderPayments.reversedAt)),
     )
-    .where(and(eq(paymentIntents.status, 'matched'), isNull(orderPayments.id)))
+    .innerJoin(apps, eq(paymentIntents.appId, apps.id))
+    .where(
+      and(
+        eq(apps.businessId, businessId),
+        eq(paymentIntents.status, 'matched'),
+        isNull(orderPayments.id),
+      ),
+    )
 
   return row?.value ?? 0
 }
 
 /** Open intents older than their own TTL — the expiry sweep falling behind. */
-export async function getOverdueIntentCount(): Promise<number> {
+export async function getOverdueIntentCount(businessId: string): Promise<number> {
   const [row] = await db
     .select({ value: count() })
     .from(paymentIntents)
-    .where(and(eq(paymentIntents.status, 'open'), lt(paymentIntents.expiresAt, new Date())))
+    .innerJoin(apps, eq(paymentIntents.appId, apps.id))
+    .where(
+      and(
+        eq(apps.businessId, businessId),
+        eq(paymentIntents.status, 'open'),
+        lt(paymentIntents.expiresAt, new Date()),
+      ),
+    )
 
   return row?.value ?? 0
 }
 
-export async function getRecentAlerts(limit = 20) {
-  return db
-    .select({
-      id: notifierEvents.id,
-      kind: notifierEvents.kind,
-      severity: notifierEvents.severity,
-      detail: notifierEvents.detail,
-      createdAt: notifierEvents.createdAt,
-      accountLabel: receivingAccounts.label,
-    })
-    .from(notifierEvents)
-    .leftJoin(receivingAccounts, eq(notifierEvents.receivingAccountId, receivingAccounts.id))
-    .where(isNull(notifierEvents.acknowledgedAt))
-    .orderBy(desc(notifierEvents.createdAt))
-    .limit(limit)
+export async function getRecentAlerts(businessId: string, limit = 20) {
+  return (
+    db
+      .select({
+        id: notifierEvents.id,
+        kind: notifierEvents.kind,
+        severity: notifierEvents.severity,
+        detail: notifierEvents.detail,
+        createdAt: notifierEvents.createdAt,
+        accountLabel: receivingAccounts.label,
+      })
+      .from(notifierEvents)
+      /*
+       * Inner, where this used to be a left join. Filtering on the joined table
+       * makes it one anyway, and the semantics are what we want: an event with no
+       * account belongs to no merchant, so there is no business that should see
+       * it on a business screen.
+       */
+      .innerJoin(receivingAccounts, eq(notifierEvents.receivingAccountId, receivingAccounts.id))
+      .where(
+        and(eq(receivingAccounts.businessId, businessId), isNull(notifierEvents.acknowledgedAt)),
+      )
+      .orderBy(desc(notifierEvents.createdAt))
+      .limit(limit)
+  )
 }
 
 /** Parse failures in the last 24 hours — the "bKash changed its format" alarm. */
-export async function getParseFailureCount(): Promise<number> {
+export async function getParseFailureCount(businessId: string): Promise<number> {
   const [row] = await db
     .select({ value: count() })
     .from(incomingPayments)
+    .innerJoin(receivingAccounts, eq(incomingPayments.receivingAccountId, receivingAccounts.id))
     .where(
       and(
+        eq(receivingAccounts.businessId, businessId),
         eq(incomingPayments.parseStatus, 'failed'),
         gt(incomingPayments.receivedAt, minutesAgo(24 * 60)),
       ),
@@ -250,10 +291,12 @@ export async function getParseFailureCount(): Promise<number> {
   return row?.value ?? 0
 }
 
-export async function getOpenRefCodeCount(): Promise<number> {
+export async function getOpenRefCodeCount(businessId: string): Promise<number> {
   const [row] = await db
     .select({ value: count() })
     .from(paymentRefs)
-    .where(eq(paymentRefs.status, 'open'))
+    .innerJoin(paymentIntents, eq(paymentRefs.intentId, paymentIntents.id))
+    .innerJoin(apps, eq(paymentIntents.appId, apps.id))
+    .where(and(eq(apps.businessId, businessId), eq(paymentRefs.status, 'open')))
   return row?.value ?? 0
 }

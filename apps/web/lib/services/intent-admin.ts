@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { IntentStatus } from '@jomma/shared'
 import { toPublicId } from '@jomma/shared'
+import type { SQL } from 'drizzle-orm'
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
@@ -40,8 +41,14 @@ export interface IntentFilters {
   search?: string
 }
 
-export async function listIntents(filters: IntentFilters = {}, limit = 200): Promise<IntentRow[]> {
-  const conditions = []
+export async function listIntents(
+  businessId: string,
+  filters: IntentFilters = {},
+  limit = 200,
+): Promise<IntentRow[]> {
+  // Always first, so no filter combination can widen the result past the
+  // merchant asking for it.
+  const conditions: (SQL<unknown> | undefined)[] = [eq(apps.businessId, businessId)]
 
   if (filters.status && filters.status !== 'all') {
     conditions.push(eq(paymentIntents.status, filters.status))
@@ -72,7 +79,7 @@ export async function listIntents(filters: IntentFilters = {}, limit = 200): Pro
     .innerJoin(apps, eq(paymentIntents.appId, apps.id))
     .innerJoin(receivingAccounts, eq(paymentIntents.receivingAccountId, receivingAccounts.id))
     .leftJoin(paymentRefs, eq(paymentRefs.intentId, paymentIntents.id))
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .where(and(...conditions))
     .orderBy(desc(paymentIntents.createdAt))
     .limit(limit)
 
@@ -217,10 +224,11 @@ export async function getIntentDetail(intentId: string): Promise<IntentDetail | 
 }
 
 /** Options for the filter bar. */
-export async function getIntentFilterOptions() {
+export async function getIntentFilterOptions(businessId: string) {
   const accounts = await db
     .select({ id: receivingAccounts.id, label: receivingAccounts.label })
     .from(receivingAccounts)
+    .where(eq(receivingAccounts.businessId, businessId))
     .orderBy(receivingAccounts.label)
 
   const [counts] = await db
@@ -231,6 +239,8 @@ export async function getIntentFilterOptions() {
       total: sql<string>`count(*)`,
     })
     .from(paymentIntents)
+    .innerJoin(apps, eq(paymentIntents.appId, apps.id))
+    .where(eq(apps.businessId, businessId))
 
   return {
     accounts,

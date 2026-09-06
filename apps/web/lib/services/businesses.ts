@@ -6,6 +6,7 @@ import {
   apps,
   businesses,
   devices,
+  incomingPayments,
   memberships,
   notifierEvents,
   paymentIntents,
@@ -213,6 +214,44 @@ export async function assertOwnsDelivery(
     .limit(1)
 
   if (!row) throw new Error('Unknown delivery')
+}
+
+/** As above, for an intent — reached through the app that created it. */
+export async function assertOwnsIntent(
+  businessId: string,
+  intentId: string,
+  client: Database | Tx = db,
+): Promise<void> {
+  const [row] = await client
+    .select({ id: paymentIntents.id })
+    .from(paymentIntents)
+    .innerJoin(apps, eq(paymentIntents.appId, apps.id))
+    .where(and(eq(paymentIntents.id, intentId), eq(apps.businessId, businessId)))
+    .limit(1)
+
+  if (!row) throw new Error('Unknown payment')
+}
+
+/**
+ * As above, for a captured payment — reached through the number it arrived on.
+ *
+ * This is the one guarding the queue, which is where a mistake would be worst:
+ * approving is the action that credits money to an intent, and doing it across
+ * a tenant boundary would pay one merchant's order out of another's takings.
+ */
+export async function assertOwnsIncomingPayment(
+  businessId: string,
+  paymentId: string,
+  client: Database | Tx = db,
+): Promise<void> {
+  const [row] = await client
+    .select({ id: incomingPayments.id })
+    .from(incomingPayments)
+    .innerJoin(receivingAccounts, eq(incomingPayments.receivingAccountId, receivingAccounts.id))
+    .where(and(eq(incomingPayments.id, paymentId), eq(receivingAccounts.businessId, businessId)))
+    .limit(1)
+
+  if (!row) throw new Error('Unknown payment')
 }
 
 /* ── Creating one ──────────────────────────────────────────────────────── */

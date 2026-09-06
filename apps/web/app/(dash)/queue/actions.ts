@@ -2,8 +2,9 @@
 
 import { newRequestId } from '@jomma/shared'
 import { revalidatePath } from 'next/cache'
-import { requireAdmin } from '@/lib/auth/session'
+import { requireWriteAccess } from '@/lib/auth/tenancy'
 import { logger } from '@/lib/logger'
+import { assertOwnsIncomingPayment, assertOwnsIntent } from '@/lib/services/businesses'
 import { approveFromQueue, rejectFromQueue, restoreToQueue } from '@/lib/services/queue'
 
 /**
@@ -20,10 +21,13 @@ export interface ActionResult {
 }
 
 export async function approveAction(paymentId: string, intentId: string): Promise<ActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   const requestId = newRequestId()
 
   try {
+    // Both sides, because this is the action that moves money between them.
+    await assertOwnsIncomingPayment(business.id, paymentId)
+    await assertOwnsIntent(business.id, intentId)
     const result = await approveFromQueue({ paymentId, intentId, actorId: admin.id, requestId })
     revalidatePath('/queue')
     revalidatePath('/')
@@ -47,10 +51,11 @@ export async function approveAction(paymentId: string, intentId: string): Promis
 }
 
 export async function rejectAction(paymentId: string, note?: string): Promise<ActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   const requestId = newRequestId()
 
   try {
+    await assertOwnsIncomingPayment(business.id, paymentId)
     await rejectFromQueue({ paymentId, actorId: admin.id, note, requestId })
     revalidatePath('/queue')
     revalidatePath('/reconcile')
@@ -67,9 +72,10 @@ export async function rejectAction(paymentId: string, note?: string): Promise<Ac
 }
 
 export async function restoreAction(paymentId: string): Promise<ActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
 
   try {
+    await assertOwnsIncomingPayment(business.id, paymentId)
     await restoreToQueue({ paymentId, actorId: admin.id })
     revalidatePath('/queue')
     return { ok: true, message: 'Back in the queue.' }

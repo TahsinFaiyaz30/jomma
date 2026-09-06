@@ -68,7 +68,7 @@ function reasonFor(
   return 'Scored below the automatic threshold'
 }
 
-export async function getQueue(limit = 100): Promise<QueueItem[]> {
+export async function getQueue(businessId: string, limit = 100): Promise<QueueItem[]> {
   const payments = await db
     .select({
       payment: incomingPayments,
@@ -79,6 +79,7 @@ export async function getQueue(limit = 100): Promise<QueueItem[]> {
     .innerJoin(receivingAccounts, eq(incomingPayments.receivingAccountId, receivingAccounts.id))
     .where(
       and(
+        eq(receivingAccounts.businessId, businessId),
         or(
           eq(incomingPayments.status, 'unmatched'),
           eq(incomingPayments.status, 'orphaned'),

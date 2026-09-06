@@ -1,13 +1,15 @@
 import type { Metadata } from 'next'
 import { AppsView } from '@/components/dash/apps-view'
 import { PageHeader } from '@/components/dash/page-header'
+import { requireBusiness } from '@/lib/auth/tenancy'
 import { listApps } from '@/lib/services/app-admin'
 
 export const metadata: Metadata = { title: 'Apps' }
 export const dynamic = 'force-dynamic'
 
 export default async function AppsPage() {
-  const apps = await listApps()
+  const { business } = await requireBusiness()
+  const apps = await listApps(business.id)
   const failed = apps.reduce((total, app) => total + app.deliveryCounts.failed, 0)
 
   return (

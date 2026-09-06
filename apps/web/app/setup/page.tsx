@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { SetupWizard } from '@/components/setup/setup-wizard'
-import { requireAdmin } from '@/lib/auth/session'
+import { requireBusiness } from '@/lib/auth/tenancy'
 import { getSetupState, markSetupComplete } from '@/lib/services/onboarding'
 
 /**
@@ -19,8 +19,8 @@ export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Set up Jomma' }
 
 export default async function SetupPage() {
-  await requireAdmin()
-  const state = await getSetupState()
+  const { business } = await requireBusiness()
+  const state = await getSetupState(business.id)
 
   /*
    * Stamp the moment every required step is satisfied.
