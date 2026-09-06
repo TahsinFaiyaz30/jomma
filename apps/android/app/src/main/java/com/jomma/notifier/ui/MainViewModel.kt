@@ -9,6 +9,8 @@ import com.jomma.notifier.data.CaptureRepository
 import com.jomma.notifier.data.JommaDatabase
 import com.jomma.notifier.data.Pairing
 import com.jomma.notifier.data.Prefs
+import com.jomma.notifier.data.SimCard
+import com.jomma.notifier.data.SimInventory
 import com.jomma.notifier.net.CaptureSettings
 import com.jomma.notifier.net.JommaApi
 import com.jomma.notifier.net.PairingLink
@@ -58,6 +60,16 @@ data class UiState(
     val vendorLabel: String = "",
     /** Which number's settings are mid-save, so only that row shows a spinner. */
     val captureSavingFor: String? = null,
+
+    /**
+     * The SIMs in this phone, refreshed on every launch.
+     *
+     * Empty when the permission has not been granted or there is no SIM — the
+     * screen tells those apart, because one is a thing to fix and the other is
+     * not.
+     */
+    val sims: List<SimCard> = emptyList(),
+    val hasPhoneStatePermission: Boolean = false,
     /* Updates. `availableUpdate` is the version string, or null when current. */
     val updateInterval: String = "Daily",
     val autoDownloadUpdates: Boolean = false,
@@ -175,6 +187,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             updateInterval = prefs.updateInterval,
             autoDownloadUpdates = prefs.autoDownloadUpdates,
             updatesOnUnmeteredOnly = prefs.updatesOnUnmeteredOnly,
+            sims = SimInventory.read(app),
+            hasPhoneStatePermission = SimInventory.hasPermission(app),
         )
 
         // Each live number separately: they are different accounts on the

@@ -18,6 +18,18 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- The second capture path. Fails independently of notifications. -->
+    <!--
+        Which SIMs are in the phone, and what number each one is.
+
+        Adding an account used to mean typing the bKash number into the
+        dashboard and picking a SIM in the app as a separate step — two facts
+        entered by hand that had to agree, with nothing checking they did.
+        READ_PHONE_STATE lists the SIMs; READ_PHONE_NUMBERS is what the number
+        sources want on Android 13 and above. Neither reads a message.
+    -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
 

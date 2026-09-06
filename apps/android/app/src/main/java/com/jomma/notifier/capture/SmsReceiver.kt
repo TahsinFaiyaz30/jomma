@@ -7,6 +7,7 @@ import android.provider.Telephony
 import com.jomma.notifier.data.Attribution
 import com.jomma.notifier.data.CaptureRepository
 import com.jomma.notifier.data.Prefs
+import com.jomma.notifier.data.SimInventory
 import com.jomma.notifier.work.FlushWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,10 @@ class SmsReceiver : BroadcastReceiver() {
                 var stored = false
                 val pairings = Prefs.get(appContext).pairings
                 val subscriptionId = intent.getIntExtra("subscription", -1)
+                // Read now, not from a cache: the point is to notice that the
+                // SIM behind this subscription is no longer the one the pairing
+                // was bound to. See Attribution.forSms.
+                val sims = SimInventory.read(appContext)
 
                 for ((sender, parts) in bySender) {
                     if (!isWatched(sender)) continue
@@ -54,7 +59,7 @@ class SmsReceiver : BroadcastReceiver() {
                      * separate two accounts with the same provider on one phone,
                      * which is the case the settings screen asks about.
                      */
-                    val pairing = Attribution.forSms(pairings, sender, subscriptionId) ?: continue
+                    val pairing = Attribution.forSms(pairings, sender, subscriptionId, sims) ?: continue
 
                     val body = parts.joinToString("") { it.messageBody.orEmpty() }
                     if (repository.enqueue(pairing = pairing, source = "sms", raw = body)) {

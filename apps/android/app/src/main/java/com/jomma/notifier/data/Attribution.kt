@@ -42,11 +42,22 @@ object Attribution {
     /**
      * The pairing a notification belongs to.
      *
-     * By provider, which is enough: a phone runs one bKash account and one Nagad
-     * account, because each app holds a single logged-in number. Two pairings
-     * for the same provider on one phone therefore means two SIMs, and a
-     * notification cannot say which SIM it relates to — so that case is refused
-     * rather than guessed.
+     * By provider, and it cannot be better than that. A notification is posted
+     * by the provider's app, and the app says which provider it is and nothing
+     * else — not which SIM, not which account. Where an SMS carries the
+     * subscription it arrived on, this carries nothing to tell two bKash
+     * accounts apart, so two live bKash pairings mean the message is refused
+     * rather than assigned to whichever sorts first.
+     *
+     * Refusing is not a gap left unfilled. It is the case where the provider's
+     * own app is logged into one of the two accounts and the notification is
+     * only ever about that one — but nothing on the phone can say which, and
+     * guessing puts one merchant's payment in another merchant's feed.
+     *
+     * The second capture path covers it: SMS arrives with a subscription id,
+     * that binds to a SIM, and the SIM identifies the account. Two accounts of
+     * the same provider on one phone are therefore watched over SMS, which is
+     * why adding one now asks which SIM it is on.
      */
     fun forNotification(pairings: List<Pairing>, pkg: String?): Pairing? {
         val provider = providerForPackage(pkg) ?: return null
@@ -65,15 +76,52 @@ object Attribution {
      * Falling back to the sender covers the ordinary case, where the SIM is
      * irrelevant because only one pairing could have received it.
      */
-    fun forSms(pairings: List<Pairing>, sender: String?, subscriptionId: Int?): Pairing? {
+    fun forSms(
+        pairings: List<Pairing>,
+        sender: String?,
+        subscriptionId: Int?,
+        /**
+         * The SIMs in the phone right now, so a binding can be re-checked
+         * against reality. Empty means "could not look" — the permission is
+         * missing or the read failed — which is treated as unverified rather
+         * than as verified-false, so an existing setup keeps working when the
+         * app is upgraded before the permission is granted.
+         */
+        sims: List<SimCard> = emptyList(),
+    ): Pairing? {
         val live = pairings.filter { it.live }
 
         if (subscriptionId != null && subscriptionId >= 0) {
-            live.firstOrNull { it.subscriptionId == subscriptionId }?.let { return it }
+            val bound = live.firstOrNull { it.subscriptionId == subscriptionId }
+            if (bound != null) return bound.takeIf { stillTheSameSim(it, sims) }
         }
 
         val provider = providerForSender(sender) ?: return null
         return live.filter { it.provider == provider }.singleOrNull()
+    }
+
+    /**
+     * Whether the SIM behind a pairing's subscription is still the one it was
+     * bound to.
+     *
+     * A subscription id identifies a *slot's current SIM*, and Android hands the
+     * same id back out when a different SIM takes that place. Trusting the id
+     * alone means a SIM swap silently re-points an account: messages from
+     * whoever owns the new SIM would be captured and posted under the old
+     * account's credential, which is somebody else's money in a merchant's
+     * feed.
+     *
+     * Comparing the number closes that. It only refuses when it can positively
+     * tell they differ — an unreadable SIM or a pairing from before this
+     * existed is let through, because breaking every working phone to defend
+     * against a swap that has not happened is the worse failure.
+     */
+    private fun stillTheSameSim(pairing: Pairing, sims: List<SimCard>): Boolean {
+        val expected = pairing.simMsisdn ?: return true
+        val actual = sims.firstOrNull { it.subscriptionId == pairing.subscriptionId }
+            ?: return true
+        val reported = actual.msisdn ?: return true
+        return reported == expected
     }
 
     /**

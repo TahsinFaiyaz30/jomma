@@ -24,6 +24,7 @@ class AttributionTest {
         msisdn: String,
         provider: String,
         subscriptionId: Int? = null,
+        simMsisdn: String? = null,
         revoked: Boolean = false,
         awaiting: Boolean = false,
     ) = Pairing(
@@ -31,6 +32,7 @@ class AttributionTest {
         deviceToken = "jmd_$id",
         serverUrl = "https://pay.example.com",
         accountMsisdn = msisdn,
+        simMsisdn = simMsisdn,
         provider = provider,
         capture = CaptureSettings(),
         subscriptionId = subscriptionId,
@@ -139,5 +141,86 @@ class AttributionTest {
         val first = pairing("a", "8801700000001", "bkash", subscriptionId = 1)
         val second = pairing("c", "8801700000009", "bkash")
         assertFalse(Attribution.needsSubscriptionId(listOf(first, second), first))
+    }
+
+    /* ── The SIM swap failsafe ───────────────────────────────────────────── */
+
+    private fun sim(subscriptionId: Int, msisdn: String?) = SimCard(
+        subscriptionId = subscriptionId,
+        slotIndex = subscriptionId - 1,
+        carrierName = "Grameenphone",
+        displayName = "GP",
+        msisdn = msisdn,
+        numberSource = if (msisdn == null) null else "ims",
+        networkGeneration = "4G",
+    )
+
+    @Test
+    fun `a bound sim still holding its own number is attributed`() {
+        val bkash = pairing("a", "8801700000001", "bkash", subscriptionId = 1, simMsisdn = "8801700000001")
+        val found = Attribution.forSms(
+            listOf(bkash),
+            "bKash",
+            subscriptionId = 1,
+            sims = listOf(sim(1, "8801700000001")),
+        )
+        assertEquals("a", found?.deviceId)
+    }
+
+    @Test
+    fun `a swapped sim is refused rather than routed to the old account`() {
+        /*
+         * The whole point of recording the number. Android hands the same
+         * subscription id to whatever SIM is in the slot, so without this the
+         * messages of whoever owns the new SIM would be captured and posted
+         * under the previous account's credential — a stranger's money landing
+         * in a merchant's feed, with nothing anywhere saying it had happened.
+         */
+        val bkash = pairing("a", "8801700000001", "bkash", subscriptionId = 1, simMsisdn = "8801700000001")
+        val found = Attribution.forSms(
+            listOf(bkash),
+            "bKash",
+            subscriptionId = 1,
+            sims = listOf(sim(1, "8801799999999")),
+        )
+        assertNull(found)
+    }
+
+    @Test
+    fun `two accounts on two sims each get their own messages`() {
+        // The case the whole feature exists for: one phone, two bKash accounts,
+        // told apart by the SIM the message arrived on.
+        val first = pairing("a", "8801700000001", "bkash", subscriptionId = 1, simMsisdn = "8801700000001")
+        val second = pairing("b", "8801700000002", "bkash", subscriptionId = 2, simMsisdn = "8801700000002")
+        val sims = listOf(sim(1, "8801700000001"), sim(2, "8801700000002"))
+
+        assertEquals("a", Attribution.forSms(listOf(first, second), "bKash", 1, sims)?.deviceId)
+        assertEquals("b", Attribution.forSms(listOf(first, second), "bKash", 2, sims)?.deviceId)
+    }
+
+    @Test
+    fun `a sim that will not report its number is let through`() {
+        // Unreadable is not the same as wrong. Plenty of carriers never write
+        // the number to the SIM, and refusing on that would stop a phone that
+        // has been working for months the moment it is upgraded.
+        val bkash = pairing("a", "8801700000001", "bkash", subscriptionId = 1, simMsisdn = "8801700000001")
+        val found = Attribution.forSms(listOf(bkash), "bKash", 1, listOf(sim(1, null)))
+        assertEquals("a", found?.deviceId)
+    }
+
+    @Test
+    fun `a pairing from before sim binding keeps working`() {
+        // No recorded number means nothing to compare, so nothing to refuse.
+        val legacy = pairing("a", "8801700000001", "bkash", subscriptionId = 1)
+        val found = Attribution.forSms(listOf(legacy), "bKash", 1, listOf(sim(1, "8801799999999")))
+        assertEquals("a", found?.deviceId)
+    }
+
+    @Test
+    fun `an unreadable inventory does not break an existing setup`() {
+        // Empty means "could not look" -- the permission has not been granted
+        // yet -- which must not read as "the SIM is wrong".
+        val bkash = pairing("a", "8801700000001", "bkash", subscriptionId = 1, simMsisdn = "8801700000001")
+        assertEquals("a", Attribution.forSms(listOf(bkash), "bKash", 1, emptyList())?.deviceId)
     }
 }

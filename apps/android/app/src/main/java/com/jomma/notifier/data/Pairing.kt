@@ -30,15 +30,31 @@ data class Pairing(
     val capture: CaptureSettings = CaptureSettings(),
 
     /**
-     * Which SIM this number's SMS arrives on, when the phone has more than one
-     * and both carry the same provider.
+     * Which SIM this number's messages arrive on.
      *
-     * Null in the ordinary case, which is one account per provider: the sender
-     * name already identifies it and asking about SIM slots would be a question
-     * with one possible answer. Only set when two pairings would otherwise be
-     * indistinguishable.
+     * Set when the account was added by picking a SIM, which is now the only
+     * way — it used to be a question asked afterwards, and only when two
+     * pairings had become indistinguishable. Null on a pairing carried over
+     * from before that, and on one whose SIM has since been removed.
      */
     val subscriptionId: Int? = null,
+
+    /**
+     * What that SIM's own number was when this pairing was bound to it.
+     *
+     * The failsafe. A subscription id is Android's handle for a SIM, not the
+     * SIM itself, and handles get reused: pull a SIM out, put a different one
+     * in the same slot, and messages from a stranger's number can arrive under
+     * an id this phone still believes it knows. Nothing about the id would say
+     * so.
+     *
+     * So the binding records the number too, and every capture re-reads what
+     * the SIM in that subscription says it is now. Disagreement means the SIM
+     * was changed, and the capture is refused rather than posted to an account
+     * it may no longer belong to. Canonical `8801XXXXXXXXX`, the same form the
+     * server stores, so the two can simply be compared.
+     */
+    val simMsisdn: String? = null,
 
     /**
      * Set when the server has answered 401 for this pairing specifically.
