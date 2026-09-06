@@ -99,6 +99,9 @@ export async function createDeviceWithProvisioning(options: {
   const [device] = await db
     .insert(devices)
     .values({
+      // Taken from the account rather than passed in: they must agree, and a
+      // caller that could disagree is a caller that eventually will.
+      businessId: account.businessId,
       receivingAccountId: options.receivingAccountId,
       // Left to the column default when absent — the phone names itself on
       // pairing, which is later than this and better informed.
@@ -158,7 +161,8 @@ export async function claimPairingCode(options: {
 }): Promise<{
   deviceToken: string
   deviceId: string
-  account: { msisdn: string; provider: string }
+  /** Null when the phone paired to a business that has no number bound yet. */
+  account: { msisdn: string; provider: string } | null
 }> {
   const device = await db.query.devices.findFirst({
     where: and(
@@ -219,7 +223,8 @@ async function claimProvisioning(options: {
 }): Promise<{
   deviceToken: string
   deviceId: string
-  account: { msisdn: string; provider: string }
+  /** Null when the phone paired to a business that has no number bound yet. */
+  account: { msisdn: string; provider: string } | null
 }> {
   const device = await db.query.devices.findFirst({
     where: and(
@@ -289,7 +294,15 @@ async function claimProvisioning(options: {
   return {
     deviceToken: issued.plaintext,
     deviceId: device.id,
-    account: { msisdn: device.account.msisdn, provider: device.account.provider },
+    /*
+     * Null for a phone paired to a business with nothing bound to it yet — it
+     * has scanned the code and is reporting its SIMs, waiting for somebody to
+     * choose one. The app reads this as "paired, no number yet" rather than as
+     * a failure.
+     */
+    account: device.account
+      ? { msisdn: device.account.msisdn, provider: device.account.provider }
+      : null,
   }
 }
 

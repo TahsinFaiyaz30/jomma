@@ -84,9 +84,32 @@ export const devices = pgTable(
   'devices',
   {
     id: primaryId(),
-    receivingAccountId: fkId('receiving_account_id')
+
+    /**
+     * The business this phone reports for.
+     *
+     * The phone is paired to a *business*, not to a number. It is a helper: it
+     * watches whatever that merchant is receiving on, and one phone can be
+     * paired to several businesses at once by scanning each one's code. Which
+     * is why this is the not-null column and the account below is not.
+     */
+    businessId: fkId('business_id')
       .notNull()
-      .references(() => receivingAccounts.id, { onDelete: 'cascade' }),
+      .references(() => businesses.id, { onDelete: 'cascade' }),
+
+    /**
+     * The number this phone watches, once one has been chosen.
+     *
+     * Null between pairing and the first MFS being added — a phone that has
+     * scanned a business's code and is reporting its SIMs, with nothing yet
+     * bound to any of them. It used to be the anchor of the whole row, which is
+     * what forced the number to be typed into the dashboard *before* a QR could
+     * be made, and made the flow run backwards from how anybody actually sets a
+     * phone up.
+     */
+    receivingAccountId: fkId('receiving_account_id').references(() => receivingAccounts.id, {
+      onDelete: 'cascade',
+    }),
     /**
      * What to call this phone. Cosmetic, and only cosmetic.
      *
@@ -181,6 +204,7 @@ export const devices = pgTable(
       .on(table.pairingLookup)
       .where(sql`pairing_lookup is not null`),
     index('ix_devices_account').on(table.receivingAccountId, table.status),
+    index('ix_devices_business').on(table.businessId, table.status),
   ],
 )
 

@@ -211,6 +211,7 @@ Admin ready.
       const [created] = await db
         .insert(devices)
         .values({
+          businessId,
           receivingAccountId: account.id,
           name: spec.device,
           platform: 'android',

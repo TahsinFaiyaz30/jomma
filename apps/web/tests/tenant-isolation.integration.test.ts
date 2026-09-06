@@ -206,7 +206,11 @@ describe('assertOwnsDevice', () => {
   beforeAll(async () => {
     const [row] = await db
       .insert(devices)
-      .values({ receivingAccountId: victim.account, name: 'test phone' })
+      .values({
+        businessId: victim.business,
+        receivingAccountId: victim.account,
+        name: 'test phone',
+      })
       .returning({ id: devices.id })
     deviceId = row?.id ?? ''
   })

@@ -34,6 +34,8 @@ beforeAll(async () => {
   const [created] = await db
     .insert(devices)
     .values({
+      // The account already carries it, so there is nothing to invent.
+      businessId: account.businessId,
       receivingAccountId: account.id,
       name: 'Rotation test phone',
       platform: 'android',
