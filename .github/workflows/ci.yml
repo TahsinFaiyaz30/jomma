@@ -93,3 +93,42 @@ jobs:
           path: apps/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
+
+  release:
+    name: Release the version in VERSION
+    needs: [web, android]
+    # Only for a real commit landing on the default branch. A pull request has
+    # not been merged yet, and dispatching from one would publish a release for
+    # code that may never land.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To start the Release workflow. A tag pushed with GITHUB_TOKEN does not
+      # trigger workflows -- GitHub blocks that to stop runs recursing -- so the
+      # obvious "just push a tag" version of this job would go green and build
+      # nothing. Dispatching is the path that actually runs.
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # The gap this closes: `version-guard` already refuses a shippable change
+      # that does not move VERSION, so the number is always bumped. Nothing made
+      # the release happen. 1.4.0 shipped nine commits of features that way --
+      # VERSION correct, no tag, no APKs, and the phones never saw it.
+      #
+      # Idempotent by construction: once the release exists the tag exists, and
+      # every later push to main takes the first branch and does nothing.
+      - name: Release, if this version has not been released yet
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v$(cat VERSION)"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released — nothing to do."
+            exit 0
+          fi
+
+          echo "$tag has no release yet. Starting the Release workflow."
+          gh workflow run release.yml --ref main

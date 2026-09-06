@@ -72,15 +72,34 @@ expecting an in-place update.
 
 ## Releasing
 
-Two ways, both in `.github/workflows/release.yml`.
-
-**By tag** — the normal path:
+**The normal path is to do nothing.** Bump the version and push:
 
 ```bash
 pnpm version:set 1.2.0
 git commit -am "Release 1.2.0"
-git tag v1.2.0
-git push origin main v1.2.0
+git push origin main
+```
+
+CI runs the full suite, and its `release` job then notices that `v1.2.0` has no
+release yet and starts `release.yml`, which builds the APKs, creates the tag and
+publishes them.
+
+That job exists because the two halves of this used to be enforced very
+unevenly. `version-guard` refuses a shippable change that does not move
+`VERSION`, so the number was always right — but nothing made the *release*
+happen, and nothing noticed when it did not. 1.4.0 shipped nine commits of
+features that way: `VERSION` correct, no tag, no APKs, and the phones never saw
+any of it. A step that must be remembered every time will eventually not be.
+
+It is idempotent by construction. Once the release exists so does the tag, and
+every later push to `main` sees it and does nothing.
+
+Two manual routes remain:
+
+**By tag**, if you want the release built from one specific commit:
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0
 ```
 
 The workflow refuses a tag that disagrees with `VERSION`, so `v1.2.0` cannot
@@ -90,8 +109,17 @@ publish something built from `1.1.0`.
 inherits the workflow but not the tags, and its owner should be able to get an
 installable APK out of their own build without pushing a tag.
 
-Both run the full suite first. A release is the artefact people install without
-looking, so it does not get a weaker gate than a pull request.
+All three run the full suite first. A release is the artefact people install
+without looking, so it does not get a weaker gate than a pull request.
+
+### Why the job dispatches rather than pushing a tag
+
+A tag pushed by a workflow using `GITHUB_TOKEN` does not trigger other
+workflows — GitHub blocks that so runs cannot recurse. So the obvious version of
+this job, `git tag && git push`, would go green and build nothing at all, which
+is the same failure it was written to prevent and harder to spot. Dispatching
+`release.yml` is the path that actually runs; `gh release create` then creates
+the tag itself.
 
 ### What gets published
 
