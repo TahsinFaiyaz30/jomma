@@ -84,7 +84,41 @@ jobs:
     # branch rather than shipping it.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # `deployments: write` so this job can record the deployment on the commit.
+    # Render's GitHub App used to do that, and driving deploys from here took it
+    # away — the repository stopped showing where its code was running.
+    permissions:
+      contents: read
+      deployments: write
     steps:
+      # Recreates the "production" entry the repository used to show. It is
+      # attached to the commit, so the history says which build went live and
+      # which did not, rather than only the dashboard knowing.
+      - name: Open a deployment on the commit
+        id: deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -u
+          id="$(gh api "repos/$REPO/deployments" --input - --jq '.id' <<EOF
+          {
+            "ref": "$SHA",
+            "environment": "production",
+            "description": "Deploy to Render, gated on CI",
+            "auto_merge": false,
+            "required_contexts": []
+          }
+          EOF
+          )"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          gh api "repos/$REPO/deployments/$id/statuses" \
+            -f state=in_progress \
+            -f environment_url=https://jomma-web.onrender.com \
+            >/dev/null
+          echo "deployment $id opened"
+
       - name: Trigger a deploy
         env:
           HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
@@ -143,3 +177,33 @@ jobs:
 
           echo "::error::Production never reported $want. Check the deploy in Render."
           exit 1
+
+      # Split by outcome so the commit ends up marked with what actually
+      # happened. A deployment left "in progress" forever is worse than none:
+      # the repository would claim a deploy is still running days later.
+      - name: Mark the deployment live
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ID: ${{ steps.deployment.outputs.id }}
+        run: |
+          gh api "repos/$REPO/deployments/$ID/statuses" \
+            -f state=success \
+            -f environment_url=https://jomma-web.onrender.com \
+            -f description="Verified live via /api/health" >/dev/null
+          echo "deployment $ID marked success"
+
+      - name: Mark the deployment failed
+        # `always()` so this still runs when an earlier step failed; without it
+        # the job's failure would skip it and leave the deployment in progress.
+        if: always() && failure() && steps.deployment.outputs.id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ID: ${{ steps.deployment.outputs.id }}
+        run: |
+          gh api "repos/$REPO/deployments/$ID/statuses" \
+            -f state=failure \
+            -f description="Deploy did not reach production" >/dev/null || true
+          echo "deployment $ID marked failure"
