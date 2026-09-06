@@ -27,6 +27,40 @@ beyond the above. This device holds buyer phone numbers.
 
 ---
 
+## One phone, several numbers
+
+The app holds a *list* of pairings, not a single set of credentials. A shop can
+run a bKash account and a Nagad account on one handset, or two SIMs, and each is
+a separate device row on the server with its own token — so revoking one from
+the dashboard leaves the others reporting, and each carries its own capture
+settings, which were always per account on the server and only looked app-wide
+because there was one account to look at.
+
+Adding one is the same gesture as the first: scan. Nothing is asked of whoever
+holds the phone. Scanning a number the phone already watches is refused —
+that would create a second device row for one account and double every capture
+from it.
+
+### Which number a message belongs to
+
+Decided at capture, because the evidence is gone by the time the queue flushes.
+
+| Source | How |
+|---|---|
+| Notification | The posting package. Enough on its own: one handset runs one bKash account, because the app holds a single logged-in number. |
+| SMS | Subscription id first, sender second. The subscription is the only thing that can separate two accounts with the same provider, which is why the settings screen asks — and asks only then. |
+
+**Every path fails closed.** No confident answer means no capture. A capture
+posted under the wrong pairing is one merchant's payment arriving in another's
+feed; a missing payment is something somebody chases, a wrong one is not.
+
+`captures` carries a `deviceId` so a queued row knows which token will send it,
+and the unique index on the message body is per number rather than global — two
+SIMs can receive the same text, an identical amount to two accounts in the same
+minute, and a global index would silently drop the second.
+
+---
+
 ## Capture paths
 
 Run **both** simultaneously. They fail independently. Server-side
@@ -248,6 +282,39 @@ Two halves, and both must agree:
 Check it landed with `adb shell pm get-app-links com.jomma.notifier`, which
 should report `verified` for your host.
 
+### Scanning asks; the dashboard grants
+
+A provisioning QR is a bearer credential. Fifteen minutes, one use — and it gets
+screenshotted and forwarded, because that is how somebody gets it to the phone
+in the other room. So completing a scan earns nothing on its own.
+
+A scanned device lands at `awaiting_approval` and every device endpoint refuses
+it with 403 until an operator approves it on the Accounts screen, where it
+appears the moment it scans. Scanning proves you hold the code; approving proves
+the operator recognises the phone.
+
+The token is issued at scan rather than at approval, which looks backwards and
+is not: handing it over afterwards would mean parking a plaintext credential
+somewhere in between, waiting to be collected. Issuing it immediately and
+refusing to honour it is the same guarantee with nothing stored.
+
+A 403 is deliberately not a 401. One means "wait, someone is about to approve
+you" and the other means "stop, and do not come back" — a phone that retried
+forever on a revoked token would be a phone nobody could switch off.
+
+### Names are cosmetic
+
+The dashboard does not ask for a device name before showing a QR. That was a
+required field between the operator and the only thing the screen produces,
+filled in by somebody who has not met the phone. The app sends its own model
+when it pairs, and the name can be changed afterwards.
+
+`devices.name` is deliberately **not unique** — not per account, not per
+business, not globally. Two shops both calling a phone "Counter" is normal.
+Identity is the device id and the token; a name that had to be unique would be
+an identifier wearing a label's clothes, and renaming would start failing for
+reasons nobody could see.
+
 ### Verification lags, so there is a second path
 
 Android does not verify at install time by itself — it asks Google's Digital
@@ -418,9 +485,8 @@ something to be right or wrong — a tick, a cross, or a neutral dot:
 |---|---|
 | Permissions | Notification access, SMS. Live status, tap to open the system screen. |
 | Staying alive | Battery optimisation, and the vendor's own background-app screen on the ROMs that have one. |
-| What to capture | The filters, mirroring the account's server-side settings. |
+| Numbers | One card per watched number: its status, its own capture filters, and a plus to scan another. |
 | Updates | Interval, pre-download, Wi-Fi only, and a manual check. |
-| Device | Server URL, device id, pairing state, re-provision. |
 | About | Developer, version and variant, package, source code. |
 
 About is a group here rather than its own destination. It was a screen in an

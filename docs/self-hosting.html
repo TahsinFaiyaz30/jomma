@@ -90,8 +90,13 @@ pnpm dev:worker   # the scheduler</pre></div>
 
   <p>
     Sign in at <code>/login</code> with the admin email and password the seed
-    printed. <strong>There is no signup</strong> &mdash; accounts come from the
-    seed or from another admin, and the sign-up endpoint is disabled outright.
+    printed. On a <code>single</code> instance &mdash; the default, one shop
+    hosting Jomma for itself &mdash; <strong>there is no signup</strong>:
+    accounts come from the seed or from another admin, and the endpoint is
+    disabled outright. Set <code>JOMMA_MODE=service</code> and it opens, because
+    then registering buys nothing on its own: a new business starts
+    <em>pending</em> and cannot take a payment until a platform admin approves
+    it. The gate is on the money, not on the account.
   </p>
 
   <div class="note warn"><p>
@@ -131,6 +136,7 @@ pnpm dev:worker   # the scheduler</pre></div>
       <tr><td><code>AUTH_SECRET</code></td><td>yes</td><td>Signs dashboard sessions. Also the credential for the internal sweep endpoint.</td></tr>
       <tr><td><code>WEBHOOK_SIGNING_SECRET</code></td><td>yes</td><td>Signs outbound webhooks and verifies inbound ingest calls.</td></tr>
       <tr><td><code>APP_URL</code></td><td>yes in production</td><td>The instance's own public URL. Used for the sign-in origin check, device provisioning, and the scheduler.</td></tr>
+      <tr><td><code>JOMMA_MODE</code></td><td>no</td><td><code>single</code> (default) is one shop hosting this for itself: one business, no signup. <code>service</code> is one instance serving unrelated merchants, with open signup and businesses that need approving. It changes what the dashboard <em>shows</em>, never what a query <em>does</em>.</td></tr>
       <tr><td><code>DATABASE_POOL_MAX</code></td><td>no</td><td>Lower it on free Postgres tiers, which cap connections hard. <code>5</code> is a safe default there.</td></tr>
       <tr><td><code>LOG_LEVEL</code></td><td>no</td><td><code>info</code> in production, <code>debug</code> when something is wrong.</td></tr>
       <tr><td><code>FEATURE_MESSAGES_BRIDGE</code></td><td>no</td><td>Leave <code>false</code>. The bridge is unproven and best-effort.</td></tr>
@@ -170,7 +176,8 @@ pnpm dev:worker   # the scheduler</pre></div>
   <ol>
     <li>Install the APK on a phone holding your receiving SIM &mdash; <a href="https://github.com/TahsinFaiyaz30/jomma/releases/latest">from the releases page</a>, taking the <code>-release</code> build. The <code>-debug</code> one is for development and is signed with a different key.</li>
     <li>In the dashboard, go to <b>Accounts</b>, pick the receiving number, and add a device. A provisioning QR appears and is valid for fifteen minutes.</li>
-    <li><b>Scan it with anything.</b> The phone's camera app, any scanner you already have, or the notifier's own scanner &mdash; which will also read the code out of a screenshot.</li>
+    <li><b>Scan it with anything.</b> The phone's camera app, any scanner you already have, or the notifier's own scanner &mdash; which will also read the code out of a screenshot. You are not asked to name the phone first; it reports its own model.</li>
+    <li><b>Approve it.</b> The phone appears on the Accounts screen as <em>awaiting approval</em> and captures nothing until you press Approve. A QR gets screenshotted and forwarded, so scanning one is not by itself permission to report money. Rename the phone here too &mdash; names are cosmetic and need not be unique.</li>
     <li>Grant notification-listener and SMS-read permission. Run both paths &mdash; they fail independently.</li>
     <li>Send a small transfer and watch it appear on the <b>Feed</b>.</li>
   </ol>
@@ -228,6 +235,23 @@ pnpm dev:worker   # the scheduler</pre></div>
     long as it looks like a transaction at all &mdash; that is the evidence
     needed to fix the parser.
   </p>
+  <h3>One phone, several numbers</h3>
+  <p>
+    A phone can watch more than one number &mdash; a bKash account and a Nagad
+    account, or two SIMs. Each is a separate pairing with its own token, so
+    revoking one leaves the others working, and <b>each has its own capture
+    settings</b>, because those live on the account rather than on the app.
+    Adding one is the same gesture as the first: <b>Settings &rarr; Add another
+    number</b>, scan, approve.
+  </p>
+  <p>
+    Which number a message belongs to is decided as it arrives. Notifications go
+    by the app that posted them; SMS goes by the SIM, falling back to the sender.
+    Every path fails closed &mdash; no confident answer means no capture, because
+    a payment landing in the wrong merchant's feed is worse than one somebody has
+    to chase.
+  </p>
+
   <h3>It updates itself</h3>
   <p>
     There is no Play listing, so nothing updates this app unless it updates

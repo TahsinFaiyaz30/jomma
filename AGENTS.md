@@ -15,7 +15,24 @@ It is **not** a payment gateway. It never moves money and never touches a PIN. I
 only observes money that has already arrived and answers one question with high
 confidence: *which order does this payment belong to?*
 
-It is multi-tenant by API key, so one Jomma instance serves several client apps.
+It is multi-tenant in two layers, and they are different things. A **business**
+is a merchant and is the tenant boundary: `apps` and `receiving_accounts` carry
+`business_id`, and everything else inherits tenancy through one of those two. An
+**app** is a storefront belonging to a business, keyed by API key, so one
+merchant can run a website and a Messenger shop against one set of takings.
+
+`JOMMA_MODE` decides what the dashboard *shows* — `single` for a shop hosting
+this for itself, `service` for one instance serving unrelated merchants. It must
+never decide what a query *does*. Both modes run the same tenant-scoped reads,
+because a filter exercised only in service mode is a filter nobody notices is
+missing until the day the instance is not single-tenant any more.
+
+**The rule that the rest of the codebase depends on:** a service function that
+touches tenant data takes a `businessId`, and that value comes only from
+`lib/auth/tenancy` after a membership check, or from an authenticated API key.
+Never from a query parameter, a form field or a path segment. A by-id mutation
+must also assert the row belongs to that business — resolving the caller is only
+half of an authorisation check, and the other half is the one that leaks.
 
 ### Boundaries
 

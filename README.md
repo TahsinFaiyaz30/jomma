@@ -39,6 +39,33 @@ already arrived and answers one question with high confidence:
 It is not a payment gateway. There is no integration with any provider's servers
 — it reads the confirmation messages that arrive on a phone you control.
 
+### One shop, or many
+
+Jomma runs two ways, and `JOMMA_MODE` is the whole of the difference.
+
+**`single`** (the default) is a shop hosting this for itself. One business, every
+user in it, no public signup, and the word "business" appears nowhere in the UI
+because there is nothing to distinguish it from. An existing self-hosted
+instance upgrades into exactly what it already had.
+
+**`service`** is one instance serving unrelated merchants. Anyone can sign up
+and register a business; it starts **pending** and cannot take a payment until a
+platform admin approves it from `/admin`. Signing up is free and instant,
+because registering buys nothing on its own — the gate is on the money, not on
+the account.
+
+Both modes run the *same* tenant-scoped queries. The mode changes what is
+shown, never what a query does: a filter only exercised in service mode is a
+filter nobody notices is missing.
+
+| | single | service |
+|---|---|---|
+| Businesses | one, created on first run | many, one per merchant |
+| Signup | closed | open |
+| A new business | already live | `pending` until approved |
+| Business switcher | hidden | in the sidebar |
+| Platform console | available to the seeded admin | `/admin` |
+
 ---
 
 ## How it works
@@ -568,6 +595,18 @@ code is still a bearer credential for fifteen minutes and one use, so a
 screenshot of a live QR is worth guarding; the narrower claim is that a scanner
 which displays what it read shows a host and an opaque string.
 
+**Scanning is not the last step.** A QR is a bearer credential — it gets
+screenshotted, it gets forwarded — so completing a scan no longer earns
+anything. The phone lands as **awaiting approval** and captures nothing until
+somebody presses Approve on the Accounts screen, which is where the phone
+appears the moment it scans. Its token is real from the start and simply
+refused until then, so nothing is stored half-issued waiting to be collected.
+
+You are not asked to name the phone first. Generating a QR is one button; the
+phone reports its own model when it scans, and you rename it afterwards, when it
+is actually in front of you. Names are cosmetic and need not be unique — two
+shops both calling a phone "Counter" is fine, and so is one shop with two.
+
 ### What it keeps
 
 bKash shows the phone far more than payments. **Accounts → What to capture** has
@@ -578,6 +617,25 @@ because it is the only type that can settle an order.
 Anything switched off is dropped when it reaches the server, so it never fills
 the feed. A message the parser cannot read is kept regardless, as long as it
 looks like a transaction at all.
+
+### One phone, several numbers
+
+A phone can watch more than one number — a bKash account and a Nagad account, or
+two SIMs. Each is a separate pairing with its own token, so revoking one from
+the dashboard leaves the others working, and **each has its own capture
+settings**, because those live on the account rather than on the app.
+
+Adding one is the same gesture as the first: **Settings → Add another number**,
+scan, approve. Nothing else is asked — the code says which number it is and the
+server answers with the rest.
+
+Which number a message belongs to is decided when it arrives, because the
+evidence is gone by the time the queue flushes. Notifications go by the app that
+posted them. SMS goes by the SIM it came in on, falling back to the sender —
+and the SIM is the only thing that can separate two accounts with the *same*
+provider, which is the one case the app asks you about. Every path fails closed:
+no confident answer means no capture, because a payment in the wrong merchant's
+feed is worse than one somebody has to chase.
 
 ### It updates itself
 
