@@ -1,10 +1,10 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { requireAdmin } from '@/lib/auth/session'
 import { requireBusiness, requireWriteAccess } from '@/lib/auth/tenancy'
 import { createReceivingAccount, setAccountStatus } from '@/lib/services/account-admin'
 import { createApiKey, createApp, createWebhookEndpoint } from '@/lib/services/app-admin'
+import { assertOwnsApp, assertOwnsReceivingAccount } from '@/lib/services/businesses'
 import { createDeviceWithProvisioning } from '@/lib/services/devices'
 import { getSetupState, markSetupComplete, type SetupState } from '@/lib/services/onboarding'
 
@@ -18,6 +18,13 @@ import { getSetupState, markSetupComplete, type SetupState } from '@/lib/service
  *
  * Each returns the recomputed setup state, so the client never has to guess
  * whether a step is now satisfied — the server that just wrote the row says so.
+ *
+ * Every action that takes a row id checks that the row belongs to the caller's
+ * business. Four of them once did not, and being "the wizard" is no protection:
+ * these are ordinary POST endpoints that anybody with a session can call
+ * directly, whether or not the screen that normally calls them is on display.
+ * `setupCreateKeyAction` in particular returned a live API key for whatever app
+ * id it was handed.
  */
 
 export interface SetupResult {
@@ -48,7 +55,8 @@ async function reply(
 }
 
 export async function refreshSetupAction(): Promise<SetupResult> {
-  await requireAdmin()
+  // Read-only, and `reply` scopes the state it returns to the caller's business.
+  await requireBusiness()
   return reply(true, '')
 }
 
@@ -76,15 +84,15 @@ export async function setupAddAccountAction(
 
 export async function setupAddDeviceAction(
   receivingAccountId: string,
-  name: string,
+  name?: string,
 ): Promise<SetupResult> {
-  const admin = await requireAdmin()
-  if (!name.trim()) return reply(false, 'Give the phone a name.')
+  const { user: admin, business } = await requireWriteAccess()
 
   try {
+    await assertOwnsReceivingAccount(business.id, receivingAccountId)
     const { qrDataUrl, payload } = await createDeviceWithProvisioning({
       receivingAccountId,
-      name: name.trim(),
+      name: name?.trim() || null,
       actorId: admin.id,
     })
     return reply(true, 'Scan this from the Jomma app on that phone.', {
@@ -99,8 +107,9 @@ export async function setupAddDeviceAction(
 }
 
 export async function setupEnableAccountAction(accountId: string): Promise<SetupResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   try {
+    await assertOwnsReceivingAccount(business.id, accountId)
     await setAccountStatus({ accountId, status: 'active', actorId: admin.id })
     return reply(true, 'Account enabled. Checkout can route to it now.')
   } catch (error) {
@@ -121,8 +130,12 @@ export async function setupCreateAppAction(name: string): Promise<SetupResult> {
 }
 
 export async function setupCreateKeyAction(appId: string): Promise<SetupResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   try {
+    // The worst of the four. Without this, any signed-in user could mint a live
+    // key for any app on the instance and read the plaintext straight out of
+    // the response -- a complete takeover of another merchant's integration.
+    await assertOwnsApp(business.id, appId)
     const { plaintext } = await createApiKey({
       appId,
       name: 'Live key',
@@ -140,7 +153,7 @@ export async function setupCreateKeyAction(appId: string): Promise<SetupResult> 
 }
 
 export async function setupAddEndpointAction(appId: string, url: string): Promise<SetupResult> {
-  await requireAdmin()
+  const { business } = await requireWriteAccess()
 
   const trimmed = url.trim()
   if (!/^https?:\/\//.test(trimmed)) {
@@ -148,6 +161,10 @@ export async function setupAddEndpointAction(appId: string, url: string): Promis
   }
 
   try {
+    // Without this, anyone signed in could point another merchant's webhooks at
+    // a URL they control and be handed the signing secret -- every payment event
+    // that merchant receives, delivered to the attacker and verifiable.
+    await assertOwnsApp(business.id, appId)
     const { secret } = await createWebhookEndpoint({ appId, url: trimmed })
     return reply(true, 'Endpoint saved. Verify signatures with this secret.', {
       label: 'Signing secret',

@@ -1,10 +1,16 @@
 'use server'
 
 import { toPublicId } from '@jomma/shared'
-import { desc, eq, ilike, or, sql } from 'drizzle-orm'
-import { requireAdmin } from '@/lib/auth/session'
+import { and, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { requireBusiness } from '@/lib/auth/tenancy'
 import { db } from '@/lib/db/client'
-import { incomingPayments, paymentIntents, paymentRefs } from '@/lib/db/schema'
+import {
+  apps,
+  incomingPayments,
+  paymentIntents,
+  paymentRefs,
+  receivingAccounts,
+} from '@/lib/db/schema'
 
 /**
  * Lookup behind the command palette.
@@ -38,7 +44,18 @@ const MIN_QUERY = 2
 const MIN_MSISDN_FRAGMENT = 4
 
 export async function paletteSearch(query: string): Promise<PaletteHit[]> {
-  await requireAdmin()
+  /*
+   * Scoped, not merely authenticated.
+   *
+   * This used to call `requireAdmin`, which answers "are you signed in" and
+   * nothing else, and then searched every payment and intent on the instance.
+   * On a shared deployment that made the command palette a cross-tenant reader:
+   * any merchant could type four digits of somebody else's customer's number
+   * and read their amounts, order references and TrxIDs back. It hid because it
+   * lives beside the pages rather than in them, and looks like a widget rather
+   * than a query.
+   */
+  const { business } = await requireBusiness()
 
   const trimmed = query.trim()
   if (trimmed.length < MIN_QUERY) return []
@@ -59,11 +76,15 @@ export async function paletteSearch(query: string): Promise<PaletteHit[]> {
         status: incomingPayments.status,
       })
       .from(incomingPayments)
+      .innerJoin(receivingAccounts, eq(incomingPayments.receivingAccountId, receivingAccounts.id))
       .where(
-        or(
-          ilike(incomingPayments.trxId, like),
-          ilike(incomingPayments.referenceNormalized, `%${upper}%`),
-          byDigits ? ilike(incomingPayments.senderMsisdn, `%${digits}%`) : sql`false`,
+        and(
+          eq(receivingAccounts.businessId, business.id),
+          or(
+            ilike(incomingPayments.trxId, like),
+            ilike(incomingPayments.referenceNormalized, `%${upper}%`),
+            byDigits ? ilike(incomingPayments.senderMsisdn, `%${digits}%`) : sql`false`,
+          ),
         ),
       )
       .orderBy(desc(incomingPayments.receivedAt))
@@ -78,12 +99,16 @@ export async function paletteSearch(query: string): Promise<PaletteHit[]> {
         status: paymentIntents.status,
       })
       .from(paymentIntents)
+      .innerJoin(apps, eq(paymentIntents.appId, apps.id))
       .leftJoin(paymentRefs, eq(paymentRefs.intentId, paymentIntents.id))
       .where(
-        or(
-          eq(paymentRefs.code, upper),
-          ilike(paymentIntents.clientReference, like),
-          byDigits ? ilike(paymentIntents.payerMsisdn, `%${digits}%`) : sql`false`,
+        and(
+          eq(apps.businessId, business.id),
+          or(
+            eq(paymentRefs.code, upper),
+            ilike(paymentIntents.clientReference, like),
+            byDigits ? ilike(paymentIntents.payerMsisdn, `%${digits}%`) : sql`false`,
+          ),
         ),
       )
       .orderBy(desc(paymentIntents.createdAt))
