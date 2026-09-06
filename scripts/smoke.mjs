@@ -222,6 +222,46 @@ check(
   `${created.json.ref_code} vs ${collision.json.ref_code}`,
 )
 
+/*
+ * The second intent for section 5, allocated here rather than there.
+ *
+ * Section 5 needs an intent on the *same* account as the one whose TrxID it is
+ * about to try to reuse, because submissions are scoped to the intent's own
+ * account and one that routed elsewhere reports the TrxID as merely not found —
+ * correct, but it never reaches the reuse guard.
+ *
+ * It used to ask for that after the capture had already landed, which cannot
+ * work: routing picks the least-utilised account, and that account had just
+ * received the payment, so it was now the *most* utilised of the two. Eight
+ * retries could not change a deterministic answer. The check had been failing
+ * for anyone with more than one account ever since routing started balancing,
+ * and the run then threw on the null and reported fewer failures than it had.
+ *
+ * Asked before any money has moved, the two accounts are level and the random
+ * tiebreak makes retrying meaningful.
+ */
+const spentOn = created.json.receiving_account?.msisdn
+
+async function intentOnSameAccount() {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const candidate = await client(
+      'POST',
+      '/v1/intents',
+      {
+        amount: amount + 7 + attempt,
+        client_reference: `ORD-SUB-${nonce}-${attempt}`,
+        provider: created.json.receiving_account?.provider,
+        payer_msisdn: '01712345678',
+      },
+      { 'idempotency-key': `smoke-sub-${nonce}-${attempt}` },
+    )
+    if (candidate.json.receiving_account?.msisdn === spentOn) return candidate
+  }
+  return null
+}
+
+const fresh = await intentOnSameAccount()
+
 /* ── 3. Auth and validation ───────────────────────────────────────────────── */
 
 section('Auth and validation')
@@ -309,9 +349,27 @@ const unparsed = await captureDevice('POST', '/device/v1/capture', {
     },
   ],
 })
+/*
+ * What happens to it depends on the account's capture settings, so ask.
+ *
+ * This used to assert `unparsed` flatly, and had been failing since captures
+ * started being filtered against what the account said it wanted to keep. An
+ * unrecognised bKash notification is "other", and `other` is off by default, so
+ * the honest answer is `filtered` on a fresh seed and `unparsed` once somebody
+ * turns it on. Asserting one of them unconditionally means the check is wrong
+ * in one of the two configurations, and this one had been wrong — and ignored —
+ * for long enough that nobody read the output any more.
+ */
+const settings = await captureDevice('GET', '/device/v1/settings')
+const keepsOther = settings.json.capture?.other === true
+const junkStatus = unparsed.json.results?.[0]?.status
+
 check(
-  'unparseable message is stored, not dropped',
-  unparsed.json.results?.[0]?.status === 'unparsed',
+  keepsOther
+    ? 'unparseable message is stored, not dropped'
+    : 'unparseable message is filtered, because this account keeps no "other"',
+  junkStatus === (keepsOther ? 'unparsed' : 'filtered'),
+  `got ${junkStatus} with other=${keepsOther}`,
 )
 
 const afterMatch = await client('GET', `/v1/intents/${intentId}`)
@@ -337,42 +395,20 @@ check(
   JSON.stringify(already.json),
 )
 
-/*
- * Must land on the same receiving *account* as the intent that spent this
- * TrxID — not merely the same provider.
- *
- * Submissions are scoped to the intent's own account, so a second intent that
- * routed elsewhere reports the TrxID as simply not found. That is correct
- * behaviour, but it does not exercise the reuse guard, and asking for the same
- * provider does not pin the account when both seeded accounts are bKash.
- * Checkout balances across healthy accounts, so this asks until it gets one.
- */
-const spentOn = created.json.receiving_account?.msisdn
-
-async function intentOnSameAccount() {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const candidate = await client(
-      'POST',
-      '/v1/intents',
-      {
-        amount: amount + 7 + attempt,
-        client_reference: `ORD-SUB-${nonce}-${attempt}`,
-        provider: created.json.receiving_account?.provider,
-        payer_msisdn: '01712345678',
-      },
-      { 'idempotency-key': `smoke-sub-${nonce}-${attempt}` },
-    )
-    if (candidate.json.receiving_account?.msisdn === spentOn) return candidate
-  }
-  return null
-}
-
-const fresh = await intentOnSameAccount()
 check(
-  'a second intent can be placed on the same receiving account',
+  'a second intent was placed on the same receiving account',
   fresh !== null,
   `never routed back to ${spentOn} in 8 attempts`,
 )
+
+if (fresh === null) {
+  // Sections 5 and 6 both dereference it. Running on would throw on the first
+  // use and report fewer failures than there are, which is how the previous
+  // version of this hid the rest of the suite.
+  console.log('\n  Stopping: the next two sections need that intent.')
+  console.log(`\n${passed} passed, ${failed} failed`)
+  process.exit(1)
+}
 
 const stolen = await client('POST', '/v1/submissions', {
   intent_id: fresh.json.id,
