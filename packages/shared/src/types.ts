@@ -236,7 +236,22 @@ export const DEVICE_REPORTABLE_EVENT_KINDS = [
 ] as const
 export type DeviceReportableEventKind = (typeof DEVICE_REPORTABLE_EVENT_KINDS)[number]
 
-export const DEVICE_COMMANDS = ['flush_queue', 'resend_since', 'rotate_token', 'stop'] as const
+export const DEVICE_COMMANDS = [
+  'flush_queue',
+  'resend_since',
+  'rotate_token',
+  'stop',
+  /**
+   * A number has been chosen for this phone on the dashboard; go and claim it.
+   *
+   * Carries a pairing URL rather than a token. The phone redeems it exactly as
+   * it redeems a scanned code, which means the credential is issued to whoever
+   * is holding the phone rather than sent down a channel and hoped about — and
+   * it reuses a path that is already single-use, expiring and rate limited
+   * instead of inventing a second way to hand out a device token.
+   */
+  'add_account',
+] as const
 export type DeviceCommandType = (typeof DEVICE_COMMANDS)[number]
 
 export type DeviceCommand =
@@ -244,6 +259,7 @@ export type DeviceCommand =
   | { type: 'resend_since'; since: string }
   | { type: 'rotate_token' }
   | { type: 'stop' }
+  | { type: 'add_account'; pair_url: string; msisdn: string; provider: string }
 
 /**
  * A SIM in a paired phone, as the phone reports it.

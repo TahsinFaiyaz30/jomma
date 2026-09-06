@@ -286,6 +286,11 @@ export const devicesRelations = relations(devices, ({ one }) => ({
     fields: [devices.receivingAccountId],
     references: [receivingAccounts.id],
   }),
+  /** The merchant the phone helps, which it has even before it has a number. */
+  business: one(businesses, {
+    fields: [devices.businessId],
+    references: [businesses.id],
+  }),
 }))
 
 export const notifierEventsRelations = relations(notifierEvents, ({ one }) => ({

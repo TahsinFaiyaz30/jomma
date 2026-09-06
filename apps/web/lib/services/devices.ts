@@ -66,6 +66,30 @@ export function pairUrl(code: string, origin: string = env().APP_URL): string {
   return `${origin.replace(/\/+$/, '')}/pair/${code}`
 }
 
+/**
+ * A code that pairs a phone to a business, with no number chosen yet.
+ *
+ * The way a phone is set up now. Somebody scans this, the phone reports the
+ * SIMs it can see, and the numbers get chosen from that list afterwards — so
+ * nobody types a bKash number into a form and hopes it matches the SIM the
+ * messages will actually arrive on.
+ *
+ * The older per-account code below still exists for a phone being added to a
+ * number that is already set up, which is a different and still-real job.
+ */
+export async function createPhoneProvisioning(options: {
+  businessId: string
+  name?: string | null
+  actorId: string | null
+}): Promise<{ deviceId: string; qrDataUrl: string; payload: ProvisioningPayload }> {
+  return issueProvisioning({
+    businessId: options.businessId,
+    receivingAccountId: null,
+    name: options.name,
+    actorId: options.actorId,
+  })
+}
+
 export async function createDeviceWithProvisioning(options: {
   receivingAccountId: string
   /**
@@ -84,6 +108,23 @@ export async function createDeviceWithProvisioning(options: {
   })
   if (!account) throw new Error('Unknown receiving account')
 
+  return issueProvisioning({
+    // Taken from the account rather than passed in: they must agree, and a
+    // caller that could disagree is a caller that eventually will.
+    businessId: account.businessId,
+    receivingAccountId: account.id,
+    name: options.name,
+    actorId: options.actorId,
+  })
+}
+
+/** The half both entry points share: mint a code, stage a device, draw the QR. */
+async function issueProvisioning(options: {
+  businessId: string
+  receivingAccountId: string | null
+  name?: string | null
+  actorId: string | null
+}): Promise<{ deviceId: string; qrDataUrl: string; payload: ProvisioningPayload }> {
   /*
    * 32 bytes, url-safe, no prefix.
    *
@@ -99,9 +140,7 @@ export async function createDeviceWithProvisioning(options: {
   const [device] = await db
     .insert(devices)
     .values({
-      // Taken from the account rather than passed in: they must agree, and a
-      // caller that could disagree is a caller that eventually will.
-      businessId: account.businessId,
+      businessId: options.businessId,
       receivingAccountId: options.receivingAccountId,
       // Left to the column default when absent — the phone names itself on
       // pairing, which is later than this and better informed.
@@ -120,7 +159,12 @@ export async function createDeviceWithProvisioning(options: {
       action: 'device.provisioned',
       actorId: options.actorId,
       actorType: 'admin',
-      payload: { device_id: device.id, account_id: account.id, stage: 'qr_issued' },
+      payload: {
+        device_id: device.id,
+        business_id: options.businessId,
+        account_id: options.receivingAccountId,
+        stage: 'qr_issued',
+      },
     })
   })
 
@@ -161,6 +205,13 @@ export async function claimPairingCode(options: {
 }): Promise<{
   deviceToken: string
   deviceId: string
+  /**
+   * Which merchant this phone now helps.
+   *
+   * Always present — a phone pairs to a business, and that is the thing the app
+   * shows and switches between. The account below is the optional half.
+   */
+  business: { id: string; name: string }
   /** Null when the phone paired to a business that has no number bound yet. */
   account: { msisdn: string; provider: string } | null
 }> {
@@ -223,6 +274,13 @@ async function claimProvisioning(options: {
 }): Promise<{
   deviceToken: string
   deviceId: string
+  /**
+   * Which merchant this phone now helps.
+   *
+   * Always present — a phone pairs to a business, and that is the thing the app
+   * shows and switches between. The account below is the optional half.
+   */
+  business: { id: string; name: string }
   /** Null when the phone paired to a business that has no number bound yet. */
   account: { msisdn: string; provider: string } | null
 }> {
@@ -232,7 +290,7 @@ async function claimProvisioning(options: {
       eq(devices.status, 'pending'),
       gt(devices.provisioningExpiresAt, new Date()),
     ),
-    with: { account: true },
+    with: { account: true, business: true },
   })
 
   if (!device?.provisioningHash) throw new Error('provisioning_invalid')
@@ -294,6 +352,7 @@ async function claimProvisioning(options: {
   return {
     deviceToken: issued.plaintext,
     deviceId: device.id,
+    business: { id: device.business.id, name: device.business.name },
     /*
      * Null for a phone paired to a business with nothing bound to it yet — it
      * has scanned the code and is reporting its SIMs, waiting for somebody to

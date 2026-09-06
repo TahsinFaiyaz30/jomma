@@ -72,6 +72,14 @@ export const POST = route(async (request, context) => {
       body: {
         device_token: result.deviceToken,
         device_id: result.deviceId,
+        /*
+         * Which merchant the phone now helps. Always present, because a phone
+         * pairs to a business — this is what the app shows and switches
+         * between, and what it labels the pairing with while no number has
+         * been chosen yet.
+         */
+        business: result.business,
+        /** Null until a SIM has been picked. See `createPhoneProvisioning`. */
         account: result.account,
         request_id: context.requestId,
       },
