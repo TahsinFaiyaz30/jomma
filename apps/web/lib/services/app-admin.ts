@@ -153,6 +153,8 @@ export async function listApps(): Promise<AppView[]> {
  * since an unchecked return URL on a payment page is an open redirect.
  */
 export async function createApp(options: {
+  /** The merchant this storefront belongs to. From the session, not the form. */
+  businessId: string
   name: string
   actorId: string
 }): Promise<{ id: string; slug: string }> {
@@ -166,7 +168,10 @@ export async function createApp(options: {
   if (existing) throw new Error(`An app called "${existing.name}" already uses the slug ${slug}.`)
 
   return db.transaction(async (tx) => {
-    const [app] = await tx.insert(apps).values({ name, slug }).returning()
+    const [app] = await tx
+      .insert(apps)
+      .values({ businessId: options.businessId, name, slug })
+      .returning()
     if (!app) throw new Error('Could not create the app.')
 
     await audit(tx, {

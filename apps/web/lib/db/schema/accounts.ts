@@ -2,6 +2,7 @@ import type { DeviceCommand } from '@jomma/shared'
 import { relations, sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core'
 import { createdAt, fkId, poisha, primaryId, timestampTz, updatedAt } from './_shared'
+import { businesses } from './businesses'
 import {
   accountStatusEnum,
   alertSeverityEnum,
@@ -10,11 +11,22 @@ import {
   providerEnum,
 } from './enums'
 
-/** A bKash or Nagad number Jomma watches. Two of these is the whole redundancy story. */
+/**
+ * A bKash or Nagad number Jomma watches. Two of these is the whole redundancy
+ * story — for one merchant. Across merchants they never mix: routing only ever
+ * considers the numbers belonging to the business whose intent is being paid,
+ * which is what stops one shop's payment being directed at another's phone.
+ */
 export const receivingAccounts = pgTable(
   'receiving_accounts',
   {
     id: primaryId(),
+
+    /** Whose number this is. The tenant boundary for everything captured on it. */
+    businessId: fkId('business_id')
+      .notNull()
+      .references(() => businesses.id, { onDelete: 'cascade' }),
+
     provider: providerEnum('provider').notNull(),
     msisdn: text('msisdn').notNull(),
     label: text('label').notNull(),
@@ -54,8 +66,12 @@ export const receivingAccounts = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
+    // Globally unique, not per business. One physical bKash number cannot be
+    // watched by two merchants at once: the captures would be indistinguishable
+    // and each would see the other's incoming money.
     uniqueIndex('ux_receiving_accounts_msisdn').on(table.msisdn),
     index('ix_receiving_accounts_status').on(table.status),
+    index('ix_receiving_accounts_business').on(table.businessId, table.status),
   ],
 )
 
@@ -170,7 +186,11 @@ export const notifierEvents = pgTable(
   ],
 )
 
-export const receivingAccountsRelations = relations(receivingAccounts, ({ many }) => ({
+export const receivingAccountsRelations = relations(receivingAccounts, ({ one, many }) => ({
+  business: one(businesses, {
+    fields: [receivingAccounts.businessId],
+    references: [businesses.id],
+  }),
   devices: many(devices),
   events: many(notifierEvents),
 }))

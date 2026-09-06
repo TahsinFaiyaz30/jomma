@@ -1,7 +1,8 @@
+import { type BusinessStatus, isBusinessLive } from '@jomma/shared'
 import { eq } from 'drizzle-orm'
 import { apiKeyPrefix, bearerToken, deviceTokenPrefix, verifyCredential } from '@/lib/auth/tokens'
 import { db } from '@/lib/db/client'
-import { apiKeys, apps, devices, receivingAccounts } from '@/lib/db/schema'
+import { apiKeys, apps, businesses, devices, receivingAccounts } from '@/lib/db/schema'
 import { ApiError } from './errors'
 
 /**
@@ -15,6 +16,17 @@ import { ApiError } from './errors'
 export interface AuthenticatedApp {
   appId: string
   appName: string
+  /**
+   * The merchant this key belongs to.
+   *
+   * Carried on the authenticated principal rather than looked up per call, so
+   * every handler already has it and none has to decide where to get it. That
+   * is the point: tenancy that has to be fetched is tenancy somebody will
+   * forget to fetch.
+   */
+  businessId: string
+  /** A suspended or unapproved merchant cannot take money. */
+  businessStatus: BusinessStatus
   apiKeyId: string
   environment: 'live' | 'test'
   /** Stable identity for rate limiting. */
@@ -43,9 +55,12 @@ export async function authenticateApp(request: Request): Promise<AuthenticatedAp
       appId: apps.id,
       appName: apps.name,
       appStatus: apps.status,
+      businessId: apps.businessId,
+      businessStatus: businesses.status,
     })
     .from(apiKeys)
     .innerJoin(apps, eq(apiKeys.appId, apps.id))
+    .innerJoin(businesses, eq(apps.businessId, businesses.id))
     .where(eq(apiKeys.prefix, apiKeyPrefix(token)))
     .limit(1)
     .then((rows) => rows[0])
@@ -62,6 +77,21 @@ export async function authenticateApp(request: Request): Promise<AuthenticatedAp
   if (row.status !== 'active') throw ApiError.unauthorized('This key has been revoked.')
   if (row.appStatus !== 'active') throw ApiError.forbidden('This app is suspended.')
 
+  /*
+   * The approval gate, enforced at the credential rather than at the screen.
+   * A merchant can hold a key before they are approved — they are given one at
+   * setup so they can integrate — but it must not move money until a human has
+   * looked at them. Checking here means every endpoint inherits the rule
+   * instead of each one remembering it.
+   */
+  if (!isBusinessLive(row.businessStatus)) {
+    throw ApiError.forbidden(
+      row.businessStatus === 'pending'
+        ? 'This business is awaiting approval and cannot take payments yet.'
+        : 'This business is not currently able to take payments.',
+    )
+  }
+
   // Fire and forget: a failed last-used write must not fail the request.
   void db
     .update(apiKeys)
@@ -72,6 +102,8 @@ export async function authenticateApp(request: Request): Promise<AuthenticatedAp
   return {
     appId: row.appId,
     appName: row.appName,
+    businessId: row.businessId,
+    businessStatus: row.businessStatus,
     apiKeyId: row.keyId,
     environment: row.environment,
     rateKey: row.keyId,

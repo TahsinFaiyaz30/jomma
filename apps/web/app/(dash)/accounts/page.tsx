@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { AccountsView, type AccountView } from '@/components/dash/accounts-view'
 import { PageHeader } from '@/components/dash/page-header'
+import { requireBusiness } from '@/lib/auth/tenancy'
 import { listAccountAlerts } from '@/lib/services/account-admin'
 import { listAccountHealth } from '@/lib/services/accounts'
 import { listDevices } from '@/lib/services/devices'
@@ -9,7 +10,8 @@ export const metadata: Metadata = { title: 'Accounts' }
 export const dynamic = 'force-dynamic'
 
 export default async function AccountsPage() {
-  const health = await listAccountHealth()
+  const { business } = await requireBusiness()
+  const health = await listAccountHealth(business.id)
 
   const accounts: AccountView[] = await Promise.all(
     health.map(async (account) => ({

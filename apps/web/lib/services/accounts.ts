@@ -36,13 +36,22 @@ export interface AccountHealth {
 export { UTILIZATION_STOP, UTILIZATION_WARN } from '@/lib/thresholds'
 
 /**
- * Health for every receiving account, with today's and this month's volume.
+ * Health for one business's receiving accounts, with today's and this month's
+ * volume.
+ *
+ * `businessId` is required and comes first for a reason: this feeds routing, so
+ * an unscoped version of this function is a function that can direct one
+ * merchant's customer to another merchant's phone. Making it a parameter with
+ * no default means that mistake does not compile.
  *
  * Volume is summed from `incoming_payments` rather than tracked in a counter
  * column: a counter can drift, and the whole point of this product is that
  * observed money is the only source of truth.
  */
-export async function listAccountHealth(client: Database | Tx = db): Promise<AccountHealth[]> {
+export async function listAccountHealth(
+  businessId: string,
+  client: Database | Tx = db,
+): Promise<AccountHealth[]> {
   const config = env()
   const dayStart = startOfBusinessDay()
   const monthStart = startOfBusinessMonth()
@@ -67,6 +76,7 @@ export async function listAccountHealth(client: Database | Tx = db): Promise<Acc
         inArray(incomingPayments.status, ['matched', 'unmatched', 'orphaned']),
       ),
     )
+    .where(eq(receivingAccounts.businessId, businessId))
     .groupBy(receivingAccounts.id)
 
   return rows.map(({ account, dailyUsed, monthlyUsed }) => {

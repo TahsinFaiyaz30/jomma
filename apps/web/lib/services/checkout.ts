@@ -8,6 +8,7 @@ import { orderPayments, paymentIntents } from '@/lib/db/schema'
 import { PARSERS } from '@/lib/parsers'
 import { listAccountHealth, routableAccounts } from './accounts'
 import { audit } from './audit'
+import { businessIdForIntent } from './businesses'
 
 /**
  * Choosing how to pay, on Jomma's own page.
@@ -61,7 +62,12 @@ export async function listCheckoutMethods(intentId: string): Promise<CheckoutMet
   })
   if (!intent) throw ApiError.notFound('No such payment.')
 
-  const accounts = await listAccountHealth()
+  // The intent's own business, so the alternatives offered are this merchant's
+  // numbers and nobody else's.
+  const businessId = await businessIdForIntent(intent.id)
+  if (!businessId) throw ApiError.notFound('No such payment.')
+
+  const accounts = await listAccountHealth(businessId)
   const locked = intent.providerPreference !== 'any'
   const current = intent.receivingAccount.provider as Provider
 
@@ -139,7 +145,10 @@ export async function switchCheckoutMethod(options: {
     )
   }
 
-  const accounts = await listAccountHealth()
+  const businessId = await businessIdForIntent(intent.id)
+  if (!businessId) throw ApiError.notFound('No such payment.')
+
+  const accounts = await listAccountHealth(businessId)
   const eligible = routableAccounts(accounts, options.provider)
   if (eligible.length === 0) throw ApiError.noHealthyAccount()
 

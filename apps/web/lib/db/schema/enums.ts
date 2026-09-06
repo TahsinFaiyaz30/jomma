@@ -3,6 +3,7 @@ import {
   ADAPTER_RELIABILITY,
   ALERT_SEVERITIES,
   AUDIT_ACTIONS,
+  BUSINESS_STATUSES,
   CAPTURE_SOURCES,
   DELIVERY_STATUSES,
   DEVICE_STATUSES,
@@ -12,6 +13,7 @@ import {
   LOCK_STATUSES,
   MATCH_CONFIDENCES,
   MATCHED_BY,
+  MEMBERSHIP_ROLES,
   NOTIFIER_EVENT_KINDS,
   PARSE_STATUSES,
   PAYMENT_STATUSES,
@@ -57,5 +59,7 @@ export const keyEnvironmentEnum = pgEnum('key_environment', KEY_ENVIRONMENTS)
 export const deliveryStatusEnum = pgEnum('delivery_status', DELIVERY_STATUSES)
 export const webhookEventTypeEnum = pgEnum('webhook_event_type', WEBHOOK_EVENT_TYPES)
 export const auditActionEnum = pgEnum('audit_action', AUDIT_ACTIONS)
+export const businessStatusEnum = pgEnum('business_status', BUSINESS_STATUSES)
+export const membershipRoleEnum = pgEnum('membership_role', MEMBERSHIP_ROLES)
 export const appStatusEnum = pgEnum('app_status', ['active', 'suspended'])
 export const idempotencyStatusEnum = pgEnum('idempotency_status', ['in_progress', 'completed'])

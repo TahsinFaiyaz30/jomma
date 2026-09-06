@@ -78,6 +78,8 @@ export async function setAccountStatus(options: {
  * Provision a device first, then enable it.
  */
 export async function createReceivingAccount(options: {
+  /** Whose number this is. Resolved from the session, never from the form. */
+  businessId: string
   provider: 'bkash' | 'nagad'
   msisdn: string
   label: string
@@ -91,12 +93,16 @@ export async function createReceivingAccount(options: {
   const existing = await db.query.receivingAccounts.findFirst({
     where: eq(receivingAccounts.msisdn, msisdn),
   })
+  // Globally, not just within this business: one physical number cannot be
+  // watched by two merchants, because the captures would be indistinguishable
+  // and each would see the other's incoming money.
   if (existing) throw new Error(`${msisdn} is already being watched.`)
 
   return db.transaction(async (tx) => {
     const [account] = await tx
       .insert(receivingAccounts)
       .values({
+        businessId: options.businessId,
         provider: options.provider,
         msisdn,
         label: options.label.trim(),

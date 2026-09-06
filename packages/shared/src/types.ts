@@ -6,6 +6,72 @@
  * forgetting the other two is the classic way these drift.
  */
 
+/**
+ * How this deployment is being run.
+ *
+ * `single` is a shop hosting Jomma for itself: one business, every user in it,
+ * no signup, and no business named anywhere in the UI because there is nothing
+ * to distinguish it from. `service` is one instance serving unrelated
+ * merchants, who must never see each other.
+ *
+ * This changes what the dashboard *shows*. It must never change what a query
+ * *does* — both modes run the same scoped reads, because the single-tenant path
+ * is the one nobody is probing and therefore the one where a missing filter
+ * would sit undiscovered until the day it is not single-tenant any more.
+ */
+export const DEPLOYMENT_MODES = ['single', 'service'] as const
+export type DeploymentMode = (typeof DEPLOYMENT_MODES)[number]
+
+/**
+ * Where a business sits with the platform.
+ *
+ * Signing up is free and instant; operating is not. Anyone can create an
+ * account and describe a business, but until a platform admin approves it the
+ * business cannot take a payment — no live API key, no routable account, no
+ * device pairing. That gate is the point: this software moves other people's
+ * money through personal MFS numbers, and an instance that let anyone
+ * self-serve their way to a live integration would be a laundering service with
+ * a dashboard.
+ *
+ * `pending` is therefore the default, and it is a working state rather than a
+ * waiting room — a merchant can set everything up, look around, and read the
+ * documentation. What they cannot do is receive.
+ *
+ * `rejected` is kept rather than deleted so the same person cannot simply
+ * re-apply into a clean slate, and so the reason survives the conversation.
+ */
+export const BUSINESS_STATUSES = ['pending', 'active', 'rejected', 'suspended'] as const
+export type BusinessStatus = (typeof BUSINESS_STATUSES)[number]
+
+/** A business that may actually move money. The only status that can route. */
+export const isBusinessLive = (status: BusinessStatus): boolean => status === 'active'
+
+/**
+ * Platform-level authority, which is not the same thing as a role in a business.
+ *
+ * A `platform_admin` runs the deployment: they approve businesses, suspend
+ * them, and see the instance's own health. They are not thereby a member of any
+ * business and do not get its payment data — those are separate grants, because
+ * "can approve a merchant" and "can read that merchant's takings" are different
+ * powers and only one of them is needed to do the job.
+ *
+ * `member` is the default and what every signup gets. It was `admin` before
+ * this, which was safe only because there was no public signup; with one, that
+ * default would have handed the instance to the first stranger who registered.
+ */
+export const PLATFORM_ROLES = ['member', 'platform_admin'] as const
+export type PlatformRole = (typeof PLATFORM_ROLES)[number]
+
+/**
+ * What a member may do. The line is drawn at money, not seniority.
+ *
+ * `viewer` is the one that earns its place: somebody has to be able to watch
+ * the feed through a shift without being able to approve a payment into
+ * existence.
+ */
+export const MEMBERSHIP_ROLES = ['owner', 'admin', 'viewer'] as const
+export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number]
+
 export const PROVIDERS = ['bkash', 'nagad'] as const
 export type Provider = (typeof PROVIDERS)[number]
 

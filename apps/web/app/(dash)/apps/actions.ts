@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/session'
+import { requireWriteAccess } from '@/lib/auth/tenancy'
 import {
   createApiKey,
   createApp,
@@ -21,11 +22,11 @@ export interface AppActionResult {
 }
 
 export async function createAppAction(name: string): Promise<AppActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   if (!name.trim()) return { ok: false, message: 'Give the app a name.' }
 
   try {
-    const app = await createApp({ name, actorId: admin.id })
+    const app = await createApp({ businessId: business.id, name, actorId: admin.id })
     revalidatePath('/apps')
     return {
       ok: true,

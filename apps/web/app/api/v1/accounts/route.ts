@@ -19,7 +19,7 @@ export const GET = route(async (request, context) => {
   const app = await authenticateApp(request)
   enforceRateLimit(context, 'accounts:list', app.rateKey)
 
-  const accounts = await listAccountHealth()
+  const accounts = await listAccountHealth(app.businessId)
 
   return {
     status: 200,

@@ -1,3 +1,4 @@
+import type { PlatformRole } from '@jomma/shared'
 import { boolean, index, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core'
 import { createdAt, timestampTz, updatedAt } from './_shared'
 
@@ -21,8 +22,16 @@ export const users = pgTable(
     email: text('email').notNull(),
     emailVerified: boolean('email_verified').notNull().default(false),
     image: text('image'),
-    /** Only ever set from the seed or by another admin. No public signup. */
-    role: text('role').notNull().default('admin'),
+    /**
+     * Platform authority, not authority over any business — see PLATFORM_ROLES.
+     *
+     * Defaults to `member`, and that default is load-bearing. It was `admin`,
+     * which was safe only while there was no public signup; in service mode
+     * there is one, and the old default would have handed the whole instance to
+     * the first stranger who registered. Better Auth is configured with
+     * `input: false` so a signup body cannot set it either way.
+     */
+    role: text('role').notNull().default('member').$type<PlatformRole>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

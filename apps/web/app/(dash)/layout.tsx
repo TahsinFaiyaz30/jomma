@@ -3,7 +3,7 @@ import { AppSidebar } from '@/components/dash/app-sidebar'
 import { CommandPalette } from '@/components/dash/command-palette'
 import { NotPayableBanner } from '@/components/dash/not-payable-banner'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
-import { requireAdmin } from '@/lib/auth/session'
+import { requireBusiness } from '@/lib/auth/tenancy'
 import { getAccountFooter, getSidebarCounts } from '@/lib/services/dashboard'
 import { canTakePayments, hasCompletedSetup } from '@/lib/services/onboarding'
 
@@ -17,7 +17,13 @@ import { canTakePayments, hasCompletedSetup } from '@/lib/services/onboarding'
 export const dynamic = 'force-dynamic'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const admin = await requireAdmin()
+  /*
+   * Resolves the signed-in user *and* which business they are acting on, and
+   * every read below is scoped by it. Self-hosted there is exactly one and this
+   * is indistinguishable from what it did before; as a service it is the line
+   * between two merchants.
+   */
+  const { user: admin, business } = await requireBusiness()
 
   /*
    * A deployment that has never been set up gets sent to set itself up. One
@@ -36,7 +42,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const [counts, accounts, payable] = await Promise.all([
     getSidebarCounts(),
-    getAccountFooter(),
+    getAccountFooter(business.id),
     canTakePayments(),
   ])
 

@@ -144,8 +144,8 @@ export interface AccountFooterRow extends AccountHealth {
  * product: if a device goes down while you are looking at the queue, you see it
  * without navigating.
  */
-export async function getAccountFooter(): Promise<AccountFooterRow[]> {
-  const health = await listAccountHealth()
+export async function getAccountFooter(businessId: string): Promise<AccountFooterRow[]> {
+  const health = await listAccountHealth(businessId)
 
   const alerts = await db
     .select({ accountId: notifierEvents.receivingAccountId, value: count() })

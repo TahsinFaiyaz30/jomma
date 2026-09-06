@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/session'
+import { requireWriteAccess } from '@/lib/auth/tenancy'
 import { createReceivingAccount, setAccountStatus } from '@/lib/services/account-admin'
 import { createApiKey, createApp, createWebhookEndpoint } from '@/lib/services/app-admin'
 import { createDeviceWithProvisioning } from '@/lib/services/devices'
@@ -55,11 +56,17 @@ export async function setupAddAccountAction(
   msisdn: string,
   label: string,
 ): Promise<SetupResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   if (!label.trim()) return reply(false, 'Give the account a label.')
 
   try {
-    const account = await createReceivingAccount({ provider, msisdn, label, actorId: admin.id })
+    const account = await createReceivingAccount({
+      businessId: business.id,
+      provider,
+      msisdn,
+      label,
+      actorId: admin.id,
+    })
     return reply(true, `${account.msisdn} added.`)
   } catch (error) {
     return reply(false, error instanceof Error ? error.message : 'Could not add the account.')
@@ -101,11 +108,11 @@ export async function setupEnableAccountAction(accountId: string): Promise<Setup
 }
 
 export async function setupCreateAppAction(name: string): Promise<SetupResult> {
-  const admin = await requireAdmin()
-  if (!name.trim()) return reply(false, 'Give the business a name.')
+  const { user: admin, business } = await requireWriteAccess()
+  if (!name.trim()) return reply(false, 'Give the app a name.')
 
   try {
-    const app = await createApp({ name, actorId: admin.id })
+    const app = await createApp({ businessId: business.id, name, actorId: admin.id })
     return reply(true, `Created as "${app.slug}".`)
   } catch (error) {
     return reply(false, error instanceof Error ? error.message : 'Could not create it.')

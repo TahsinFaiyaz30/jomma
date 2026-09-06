@@ -2,6 +2,7 @@ import type { WebhookEventType } from '@jomma/shared'
 import { relations } from 'drizzle-orm'
 import { index, integer, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core'
 import { createdAt, fkId, primaryId, timestampTz, updatedAt } from './_shared'
+import { businesses } from './businesses'
 import {
   appStatusEnum,
   deliveryStatusEnum,
@@ -10,11 +11,27 @@ import {
   webhookEventTypeEnum,
 } from './enums'
 
-/** A tenant. One Jomma instance serves several client apps, keyed by API key. */
+/**
+ * A storefront. One business may run several — a website and a Messenger shop
+ * are two integrations with two API keys and one set of takings.
+ *
+ * This used to be the tenant boundary, back when one instance meant one
+ * merchant. `businesses` is that boundary now; an app is a credential and a
+ * webhook target belonging to one.
+ */
 export const apps = pgTable(
   'apps',
   {
     id: primaryId(),
+
+    /**
+     * The merchant this belongs to. Every payment, key and webhook under this
+     * app inherits its tenancy from here rather than carrying its own copy.
+     */
+    businessId: fkId('business_id')
+      .notNull()
+      .references(() => businesses.id, { onDelete: 'cascade' }),
+
     name: text('name').notNull(),
     slug: text('slug').notNull(),
     status: appStatusEnum('status').notNull().default('active'),
@@ -34,7 +51,10 @@ export const apps = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (table) => [uniqueIndex('ux_apps_slug').on(table.slug)],
+  (table) => [
+    uniqueIndex('ux_apps_slug').on(table.slug),
+    index('ix_apps_business').on(table.businessId, table.status),
+  ],
 )
 
 /**
@@ -169,7 +189,8 @@ export const idempotencyKeys = pgTable(
   ],
 )
 
-export const appsRelations = relations(apps, ({ many }) => ({
+export const appsRelations = relations(apps, ({ one, many }) => ({
+  business: one(businesses, { fields: [apps.businessId], references: [businesses.id] }),
   apiKeys: many(apiKeys),
   webhookEndpoints: many(webhookEndpoints),
 }))

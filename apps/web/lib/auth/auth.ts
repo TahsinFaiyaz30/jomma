@@ -8,11 +8,20 @@ import { accounts, sessions, users, verifications } from '@/lib/db/schema/auth'
 /**
  * Dashboard authentication.
  *
- * Admin-only, email and password, **no public signup**. AGENTS.md is explicit
- * that this is a small admin user count with no self-registration — an open
- * signup route on a tool that can approve payments is not a feature.
+ * Email and password. Whether anyone may register is the one thing
+ * `JOMMA_MODE` changes here, and the two answers are both deliberate.
  *
- * Accounts are created by `pnpm db:seed` or by an existing admin.
+ * Self-hosted (`single`), signup is closed. A shop running this for itself has
+ * a known, tiny set of operators, and an open registration route on a tool that
+ * can approve payments is not a feature. Accounts come from `pnpm db:seed` or
+ * from an existing admin.
+ *
+ * As a service, signup is open — and it is safe to open precisely because
+ * registering buys nothing on its own. A new user is a `member` with no
+ * business; the business they then create starts `pending` and cannot receive
+ * money until a platform admin approves it. The gate is on the money, not on
+ * the account, which is the right place for it: making people wait for a login
+ * only teaches them to give up before you have learned anything about them.
  */
 export const auth = betterAuth({
   appName: 'Jomma',
@@ -40,8 +49,9 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
-    // The whole point. `POST /api/auth/sign-up/email` returns an error.
-    disableSignUp: true,
+    // Closed when this instance belongs to one shop; open when it is a service.
+    // See the note above for why opening it is not the risk it looks like.
+    disableSignUp: env().JOMMA_MODE === 'single',
     minPasswordLength: 12,
     requireEmailVerification: false,
   },
@@ -66,7 +76,14 @@ export const auth = betterAuth({
 
   user: {
     additionalFields: {
-      role: { type: 'string', defaultValue: 'admin', input: false },
+      /*
+       * `member`, not `admin`. Public signup exists in service mode, so this
+       * default is the difference between a stranger registering and a stranger
+       * registering as an operator of the instance. `input: false` keeps a
+       * crafted signup body from setting it at all; the only way to become a
+       * platform admin is the seed or an existing one promoting you.
+       */
+      role: { type: 'string', defaultValue: 'member', input: false },
     },
   },
 

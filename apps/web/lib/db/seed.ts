@@ -3,6 +3,7 @@ import { WEBHOOK_EVENT_TYPES } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
 import { and, eq } from 'drizzle-orm'
 import { generateApiKey, generateDeviceToken } from '../auth/tokens'
+import { ensureSingleBusiness } from '../services/businesses'
 import { db, pool } from './client'
 import { apiKeys, apps, devices, receivingAccounts, users, webhookEndpoints } from './schema'
 
@@ -89,6 +90,23 @@ async function main() {
     adminCreated = true
   }
 
+  /*
+   * The seeded admin runs the instance, so they get platform authority — the
+   * `member` default that protects public signup would otherwise leave a fresh
+   * deployment with nobody able to approve anything.
+   */
+  const [seededAdmin] = await db
+    .update(users)
+    .set({ role: 'platform_admin' })
+    .where(eq(users.email, adminEmail))
+    .returning({ id: users.id })
+
+  if (!seededAdmin) throw new Error('Could not find the admin just seeded.')
+
+  // The business every other row hangs off. Idempotent, so re-seeding a
+  // development database does not accumulate businesses.
+  const businessId = await ensureSingleBusiness(seededAdmin.id)
+
   if (adminOnly) {
     console.log(`
 Admin ready.
@@ -108,7 +126,7 @@ Admin ready.
 
   const [app] = await db
     .insert(apps)
-    .values({ name: 'Demo Store', slug: 'demo-store' })
+    .values({ businessId, name: 'Demo Store', slug: 'demo-store' })
     .onConflictDoUpdate({ target: apps.slug, set: { name: 'Demo Store' } })
     .returning()
   if (!app) throw new Error('Failed to upsert app')
@@ -158,6 +176,7 @@ Admin ready.
     const [account] = await db
       .insert(receivingAccounts)
       .values({
+        businessId,
         provider: spec.provider,
         msisdn: spec.msisdn,
         dailyLimitCents: 25_000_000,

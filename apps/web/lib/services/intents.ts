@@ -8,6 +8,7 @@ import { db } from '@/lib/db/client'
 import { idempotencyKeys, paymentIntents, paymentRefs } from '@/lib/db/schema'
 import { listAccountHealth, routableAccounts } from './accounts'
 import { audit } from './audit'
+import { businessIdForApp } from './businesses'
 import { queueEvent } from './events'
 import { getInstalments } from './instalments'
 import {
@@ -82,7 +83,15 @@ export async function createIntent(options: {
     if (replay) return { intent: replay, replayed: true }
   }
 
-  const accounts = await listAccountHealth()
+  /*
+   * Tenancy comes from the key, never from the request. `appId` was
+   * authenticated; the business behind it is derived, so a caller cannot ask to
+   * be routed at somebody else's phone by naming it.
+   */
+  const businessId = await businessIdForApp(options.appId)
+  if (!businessId) throw ApiError.noHealthyAccount()
+
+  const accounts = await listAccountHealth(businessId)
   if (accounts.length === 0 || accounts.every((account) => account.status === 'disabled')) {
     throw ApiError.noHealthyAccount()
   }

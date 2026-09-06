@@ -134,6 +134,13 @@
       "when": 1788611487742,
       "tag": "0018_fine_luke_cage",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788682892482,
+      "tag": "0019_business_tenancy",
+      "breakpoints": true
     }
   ]
 }

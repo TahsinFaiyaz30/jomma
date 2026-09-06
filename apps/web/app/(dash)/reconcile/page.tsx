@@ -3,6 +3,7 @@ import { ManualEntry } from '@/components/dash/manual-entry'
 import { PageHeader } from '@/components/dash/page-header'
 import { StatementImport } from '@/components/dash/statement-import'
 import { StatusDot } from '@/components/status'
+import { requireBusiness } from '@/lib/auth/tenancy'
 import { listAccountHealth } from '@/lib/services/accounts'
 import {
   getOverdueIntentCount,
@@ -26,12 +27,14 @@ export const dynamic = 'force-dynamic'
  * has gone wrong and money needs accounting for by hand.
  */
 export default async function ReconcilePage() {
+  const { business } = await requireBusiness()
+
   const [paidWithoutPayment, overdue, parseFailures, queue, accounts] = await Promise.all([
     getPaidWithoutPaymentCount(),
     getOverdueIntentCount(),
     getParseFailureCount(),
     getQueueDepth(),
-    listAccountHealth(),
+    listAccountHealth(business.id),
   ])
 
   return (

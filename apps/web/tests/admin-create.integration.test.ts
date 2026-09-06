@@ -4,6 +4,7 @@ import { db, pool } from '@/lib/db/client'
 import { apps, paymentAudit, receivingAccounts, users } from '@/lib/db/schema'
 import { createReceivingAccount } from '@/lib/services/account-admin'
 import { createApp } from '@/lib/services/app-admin'
+import { ensureSingleBusiness } from '@/lib/services/businesses'
 
 /**
  * Creating the two things a deployment cannot start without.
@@ -16,6 +17,7 @@ import { createApp } from '@/lib/services/app-admin'
  */
 
 let actorId: string
+let businessId: string
 const created: string[] = []
 const createdApps: string[] = []
 
@@ -23,6 +25,8 @@ beforeAll(async () => {
   const [admin] = await db.select({ id: users.id }).from(users).limit(1)
   if (!admin) throw new Error('No admin in the database. Run `pnpm db:seed` first.')
   actorId = admin.id
+  // Both of these now belong to a merchant, so the fixture needs one.
+  businessId = await ensureSingleBusiness(actorId)
 })
 
 afterAll(async () => {
@@ -39,6 +43,7 @@ describe('createReceivingAccount', () => {
     // local-format row would simply never match a real payment.
     const local = unique()
     const account = await createReceivingAccount({
+      businessId,
       provider: 'bkash',
       msisdn: local,
       label: 'Written locally',
@@ -51,6 +56,7 @@ describe('createReceivingAccount', () => {
 
   it('starts disabled, so checkout cannot route to it before a phone is watching', async () => {
     const account = await createReceivingAccount({
+      businessId,
       provider: 'bkash',
       msisdn: unique(),
       label: 'Fresh',
@@ -69,6 +75,7 @@ describe('createReceivingAccount', () => {
 
   it('records who added it', async () => {
     const account = await createReceivingAccount({
+      businessId,
       provider: 'bkash',
       msisdn: unique(),
       label: 'Audited',
@@ -87,7 +94,7 @@ describe('createReceivingAccount', () => {
   it('refuses a number that is not a Bangladeshi mobile', async () => {
     for (const bad of ['12345', '0171234567', '02712345678', 'not a number', '']) {
       await expect(
-        createReceivingAccount({ provider: 'bkash', msisdn: bad, label: 'x', actorId }),
+        createReceivingAccount({ businessId, provider: 'bkash', msisdn: bad, label: 'x', actorId }),
       ).rejects.toThrow()
     }
   })
@@ -95,6 +102,7 @@ describe('createReceivingAccount', () => {
   it('refuses a duplicate, however it is written', async () => {
     const local = unique()
     const first = await createReceivingAccount({
+      businessId,
       provider: 'bkash',
       msisdn: local,
       label: 'First',
@@ -106,6 +114,7 @@ describe('createReceivingAccount', () => {
     // check this would slip past and hit a raw unique-constraint error.
     await expect(
       createReceivingAccount({
+        businessId,
         provider: 'bkash',
         msisdn: `880${local.slice(1)}`,
         label: 'Second',
@@ -117,14 +126,14 @@ describe('createReceivingAccount', () => {
 
 describe('createApp', () => {
   it('derives a slug and records the creation', async () => {
-    const app = await createApp({ name: `Test Shop ${Date.now()}`, actorId })
+    const app = await createApp({ businessId, name: `Test Shop ${Date.now()}`, actorId })
     createdApps.push(app.id)
 
     expect(app.slug).toMatch(/^test-shop-\d+$/)
   })
 
   it('drops apostrophes rather than turning them into separators', async () => {
-    const app = await createApp({ name: `Tahsin's Store ${Date.now()}`, actorId })
+    const app = await createApp({ businessId, name: `Tahsin's Store ${Date.now()}`, actorId })
     createdApps.push(app.id)
 
     expect(app.slug).toMatch(/^tahsins-store-/)
@@ -132,15 +141,15 @@ describe('createApp', () => {
   })
 
   it('refuses an empty name, and one with nothing sluggable in it', async () => {
-    await expect(createApp({ name: '   ', actorId })).rejects.toThrow()
-    await expect(createApp({ name: '!!! ???', actorId })).rejects.toThrow(/slug/i)
+    await expect(createApp({ businessId, name: '   ', actorId })).rejects.toThrow()
+    await expect(createApp({ businessId, name: '!!! ???', actorId })).rejects.toThrow(/slug/i)
   })
 
   it('refuses a name that collides on slug', async () => {
     const name = `Collide ${Date.now()}`
-    const app = await createApp({ name, actorId })
+    const app = await createApp({ businessId, name, actorId })
     createdApps.push(app.id)
 
-    await expect(createApp({ name, actorId })).rejects.toThrow(/already/i)
+    await expect(createApp({ businessId, name, actorId })).rejects.toThrow(/already/i)
   })
 })

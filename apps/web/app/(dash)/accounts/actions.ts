@@ -3,6 +3,7 @@
 import type { CaptureSettings } from '@jomma/shared'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth/session'
+import { requireWriteAccess } from '@/lib/auth/tenancy'
 import {
   acknowledgeAlert,
   createReceivingAccount,
@@ -30,12 +31,15 @@ export async function addAccountAction(
   msisdn: string,
   label: string,
 ): Promise<DeviceActionResult> {
-  const admin = await requireAdmin()
+  // Write access to the *active* business, so a viewer cannot add a number and
+  // a member of one merchant cannot add one to another.
+  const { user: admin, business } = await requireWriteAccess()
 
   if (!label.trim()) return { ok: false, message: 'Give the account a label.' }
 
   try {
     const account = await createReceivingAccount({
+      businessId: business.id,
       provider,
       msisdn,
       label,

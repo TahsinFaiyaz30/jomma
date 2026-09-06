@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { config as loadDotenv } from 'dotenv'
 import { z } from 'zod'
+import { DEPLOYMENT_MODES } from './types'
 
 /**
  * Env is loaded from a single `.env` at the repo root, not per-app, so `web` and
@@ -42,6 +43,24 @@ const int = (fallback: number) => z.coerce.number().int().catch(fallback).defaul
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+
+  /**
+   * Who this deployment is for.
+   *
+   * `single` — one shop hosting Jomma for itself. One business, every user in
+   * it, no signup, and the word "business" appears nowhere in the UI because
+   * there is nothing to distinguish it from. This is the default, so an
+   * existing self-hosted instance upgrades into exactly what it already had.
+   *
+   * `service` — one instance serving unrelated merchants. Open signup,
+   * businesses that start `pending` until a platform admin approves them, and
+   * a business switcher for anyone who belongs to more than one.
+   *
+   * It decides what is *shown*, never what a query *does*. Both modes run the
+   * same tenant-scoped reads, because a filter that is only exercised in
+   * service mode is a filter nobody notices is missing.
+   */
+  JOMMA_MODE: z.enum(DEPLOYMENT_MODES).default('single'),
 
   /**
    * Checked for shape, not just presence. `min(1)` accepted anything at all,
@@ -191,4 +210,7 @@ export function resetEnvCache(): void {
 }
 
 export const isProduction = () => env().NODE_ENV === 'production'
+
+/** One instance, many merchants. False means this shop is hosting it for itself. */
+export const isServiceMode = () => env().JOMMA_MODE === 'service'
 export const isTest = () => env().NODE_ENV === 'test'
