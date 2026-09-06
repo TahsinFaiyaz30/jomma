@@ -73,6 +73,29 @@ export const auth = betterAuth({
       generateId: () => randomUUID(),
     },
     useSecureCookies: env().NODE_ENV === 'production',
+
+    /*
+     * Where the client's address comes from.
+     *
+     * Without this, Better Auth cannot resolve one behind a proxy and says so:
+     * "falling back to a single shared per-path bucket". It kept working, but
+     * as *one* bucket for the whole instance -- so twenty failed logins a
+     * minute from anywhere locked every user out of signing in. On a service
+     * instance that is an unauthenticated denial of service against every
+     * merchant at once, and it costs an attacker twenty requests.
+     *
+     * `x-forwarded-for` is what Render sets, and every reverse proxy worth the
+     * name sets it. It is client-controllable in the sense that a caller can
+     * put anything in it, which here means an attacker can spread their own
+     * attempts across invented addresses rather than being throttled. That is a
+     * strictly better failure than the one it replaces: evading your own limit
+     * is not the same as revoking everybody else's, and password auth is not
+     * relying on this alone -- scrypt hashing and a twelve-character minimum
+     * are doing the actual work.
+     */
+    ipAddress: {
+      ipAddressHeaders: ['x-forwarded-for', 'x-real-ip'],
+    },
   },
 
   user: {
