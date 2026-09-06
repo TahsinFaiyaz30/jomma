@@ -1,7 +1,6 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { requireAdmin } from '@/lib/auth/session'
 import { requireWriteAccess } from '@/lib/auth/tenancy'
 import {
   createApiKey,
@@ -13,6 +12,12 @@ import {
   setAllowedRedirectHosts,
   setEndpointStatus,
 } from '@/lib/services/app-admin'
+import {
+  assertOwnsApiKey,
+  assertOwnsApp,
+  assertOwnsDelivery,
+  assertOwnsEndpoint,
+} from '@/lib/services/businesses'
 
 export interface AppActionResult {
   ok: boolean
@@ -42,10 +47,11 @@ export async function createKeyAction(
   name: string,
   environment: 'live' | 'test',
 ): Promise<AppActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   if (!name.trim()) return { ok: false, message: 'Give the key a name.' }
 
   try {
+    await assertOwnsApp(business.id, appId)
     const { plaintext } = await createApiKey({
       appId,
       name: name.trim(),
@@ -64,8 +70,9 @@ export async function createKeyAction(
 }
 
 export async function revokeKeyAction(keyId: string): Promise<AppActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   try {
+    await assertOwnsApiKey(business.id, keyId)
     await revokeApiKey({ keyId, actorId: admin.id })
     revalidatePath('/apps')
     return { ok: true, message: 'Revoked. Requests using it now get 401.' }
@@ -75,7 +82,8 @@ export async function revokeKeyAction(keyId: string): Promise<AppActionResult> {
 }
 
 export async function createEndpointAction(appId: string, url: string): Promise<AppActionResult> {
-  await requireAdmin()
+  const { business } = await requireWriteAccess()
+  await assertOwnsApp(business.id, appId)
 
   const trimmed = url.trim()
   if (!/^https?:\/\//.test(trimmed)) {
@@ -99,8 +107,9 @@ export async function toggleEndpointAction(
   endpointId: string,
   status: 'active' | 'disabled',
 ): Promise<AppActionResult> {
-  await requireAdmin()
+  const { business } = await requireWriteAccess()
   try {
+    await assertOwnsEndpoint(business.id, endpointId)
     await setEndpointStatus({ endpointId, status })
     revalidatePath('/apps')
     return { ok: true, message: status === 'active' ? 'Endpoint enabled.' : 'Endpoint disabled.' }
@@ -110,8 +119,9 @@ export async function toggleEndpointAction(
 }
 
 export async function replayDeliveryAction(deliveryId: string): Promise<AppActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   try {
+    await assertOwnsDelivery(business.id, deliveryId)
     await replayDelivery({ deliveryId, actorId: admin.id })
     revalidatePath('/apps')
     return { ok: true, message: 'Queued for redelivery on the next worker poll.' }
@@ -121,8 +131,9 @@ export async function replayDeliveryAction(deliveryId: string): Promise<AppActio
 }
 
 export async function replayAllFailedAction(appId: string): Promise<AppActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
   try {
+    await assertOwnsApp(business.id, appId)
     const count = await replayAllFailed({ appId, actorId: admin.id })
     revalidatePath('/apps')
     return {
@@ -141,9 +152,10 @@ export async function replayAllFailedAction(appId: string): Promise<AppActionRes
  * all — the pay page still works, it just has nowhere to send them afterwards.
  */
 export async function setRedirectHostsAction(appId: string, raw: string): Promise<AppActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
 
   try {
+    await assertOwnsApp(business.id, appId)
     const hosts = await setAllowedRedirectHosts({
       appId,
       hosts: raw.split(/[\s,]+/),

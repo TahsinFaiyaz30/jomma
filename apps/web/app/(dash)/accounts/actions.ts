@@ -2,7 +2,6 @@
 
 import type { CaptureSettings } from '@jomma/shared'
 import { revalidatePath } from 'next/cache'
-import { requireAdmin } from '@/lib/auth/session'
 import { requireWriteAccess } from '@/lib/auth/tenancy'
 import {
   acknowledgeAlert,
@@ -11,6 +10,11 @@ import {
   setCaptureSettings,
 } from '@/lib/services/account-admin'
 import { appLinksConfigured } from '@/lib/services/app-links'
+import {
+  assertOwnsDevice,
+  assertOwnsNotifierEvent,
+  assertOwnsReceivingAccount,
+} from '@/lib/services/businesses'
 import {
   createDeviceWithProvisioning,
   requestTokenRotation,
@@ -60,11 +64,12 @@ export async function addDeviceAction(
   receivingAccountId: string,
   name: string,
 ): Promise<DeviceActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
 
   if (!name.trim()) return { ok: false, message: 'Give the device a name.' }
 
   try {
+    await assertOwnsReceivingAccount(business.id, receivingAccountId)
     const { qrDataUrl, payload } = await createDeviceWithProvisioning({
       receivingAccountId,
       name: name.trim(),
@@ -96,9 +101,10 @@ export async function addDeviceAction(
 }
 
 export async function rotateTokenAction(deviceId: string): Promise<DeviceActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
 
   try {
+    await assertOwnsDevice(business.id, deviceId)
     await requestTokenRotation({ deviceId, actorId: admin.id })
     revalidatePath('/accounts')
     return {
@@ -119,9 +125,10 @@ export async function rotateTokenAction(deviceId: string): Promise<DeviceActionR
 }
 
 export async function revokeDeviceAction(deviceId: string): Promise<DeviceActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
 
   try {
+    await assertOwnsDevice(business.id, deviceId)
     await revokeDevice({ deviceId, actorId: admin.id })
     revalidatePath('/accounts')
     return { ok: true, message: 'Revoked. That device must be re-provisioned by QR.' }
@@ -134,9 +141,10 @@ export async function setAccountStatusAction(
   accountId: string,
   status: 'active' | 'disabled',
 ): Promise<DeviceActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
 
   try {
+    await assertOwnsReceivingAccount(business.id, accountId)
     await setAccountStatus({ accountId, status, actorId: admin.id })
     revalidatePath('/accounts')
     revalidatePath('/')
@@ -165,9 +173,10 @@ export async function setCaptureSettingsAction(
   accountId: string,
   settings: CaptureSettings,
 ): Promise<DeviceActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
 
   try {
+    await assertOwnsReceivingAccount(business.id, accountId)
     await setCaptureSettings({ accountId, settings, actorId: admin.id, actorType: 'admin' })
     revalidatePath('/accounts')
     return { ok: true, message: 'Capture settings saved.' }
@@ -177,9 +186,10 @@ export async function setCaptureSettingsAction(
 }
 
 export async function acknowledgeAlertAction(eventId: string): Promise<DeviceActionResult> {
-  const admin = await requireAdmin()
+  const { user: admin, business } = await requireWriteAccess()
 
   try {
+    await assertOwnsNotifierEvent(business.id, eventId)
     await acknowledgeAlert({ eventId, actorId: admin.id })
     revalidatePath('/accounts')
     return { ok: true, message: 'Acknowledged.' }

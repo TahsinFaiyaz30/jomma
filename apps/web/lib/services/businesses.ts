@@ -2,12 +2,16 @@ import type { BusinessStatus, MembershipRole } from '@jomma/shared'
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm'
 import { type Database, db, type Tx } from '@/lib/db/client'
 import {
+  apiKeys,
   apps,
   businesses,
   devices,
   memberships,
+  notifierEvents,
   paymentIntents,
   receivingAccounts,
+  webhookDeliveries,
+  webhookEndpoints,
 } from '@/lib/db/schema'
 
 /**
@@ -133,6 +137,82 @@ export async function assertOwnsDevice(
     .limit(1)
 
   if (!row) throw new Error('Unknown device')
+}
+
+/**
+ * As above, for an alert — reached through the account it was raised against.
+ *
+ * Events with no account are instance-wide rather than any merchant's, so they
+ * are refused here: there is no business that owns them and therefore none that
+ * may acknowledge them from a business screen.
+ */
+export async function assertOwnsNotifierEvent(
+  businessId: string,
+  eventId: string,
+  client: Database | Tx = db,
+): Promise<void> {
+  const [row] = await client
+    .select({ id: notifierEvents.id })
+    .from(notifierEvents)
+    .innerJoin(receivingAccounts, eq(notifierEvents.receivingAccountId, receivingAccounts.id))
+    .where(and(eq(notifierEvents.id, eventId), eq(receivingAccounts.businessId, businessId)))
+    .limit(1)
+
+  if (!row) throw new Error('Unknown alert')
+}
+
+/** As above, for an API key — reached through the app it authenticates. */
+export async function assertOwnsApiKey(
+  businessId: string,
+  keyId: string,
+  client: Database | Tx = db,
+): Promise<void> {
+  const [row] = await client
+    .select({ id: apiKeys.id })
+    .from(apiKeys)
+    .innerJoin(apps, eq(apiKeys.appId, apps.id))
+    .where(and(eq(apiKeys.id, keyId), eq(apps.businessId, businessId)))
+    .limit(1)
+
+  if (!row) throw new Error('Unknown key')
+}
+
+/** As above, for a webhook endpoint. */
+export async function assertOwnsEndpoint(
+  businessId: string,
+  endpointId: string,
+  client: Database | Tx = db,
+): Promise<void> {
+  const [row] = await client
+    .select({ id: webhookEndpoints.id })
+    .from(webhookEndpoints)
+    .innerJoin(apps, eq(webhookEndpoints.appId, apps.id))
+    .where(and(eq(webhookEndpoints.id, endpointId), eq(apps.businessId, businessId)))
+    .limit(1)
+
+  if (!row) throw new Error('Unknown endpoint')
+}
+
+/**
+ * As above, for a delivery.
+ *
+ * `webhook_deliveries` carries `app_id` directly, so this needs no join through
+ * the endpoint — and should not use one, since replaying is exactly the kind of
+ * action whose guard wants the shortest path to the truth.
+ */
+export async function assertOwnsDelivery(
+  businessId: string,
+  deliveryId: string,
+  client: Database | Tx = db,
+): Promise<void> {
+  const [row] = await client
+    .select({ id: webhookDeliveries.id })
+    .from(webhookDeliveries)
+    .innerJoin(apps, eq(webhookDeliveries.appId, apps.id))
+    .where(and(eq(webhookDeliveries.id, deliveryId), eq(apps.businessId, businessId)))
+    .limit(1)
+
+  if (!row) throw new Error('Unknown delivery')
 }
 
 /* ── Creating one ──────────────────────────────────────────────────────── */
