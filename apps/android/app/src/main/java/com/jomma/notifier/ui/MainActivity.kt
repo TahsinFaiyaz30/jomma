@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.jomma.notifier.service.KeepAlive
 
 /**
  * Three destinations, deliberately plain. Nobody uses this app — they check it.
@@ -61,7 +62,8 @@ class MainActivity : ComponentActivity() {
                         onScan = { scanning = true },
                         onOpenNotificationSettings = ::openNotificationAccessSettings,
                         onRequestSms = ::requestSmsPermission,
-                        onOpenBatterySettings = ::openBatterySettings,
+                        onRequestBatteryExemption = ::requestBatteryExemption,
+                        onOpenAutoStart = ::openAutoStartSettings,
                         onFlush = viewModel::flushNow,
                         onHeartbeat = viewModel::heartbeatNow,
                         onTestCapture = viewModel::sendTestCapture,
@@ -145,11 +147,43 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Battery optimisation is the most common cause of a silently dead notifier,
-     * and on Xiaomi, Oppo, Vivo and Samsung the OEM's own autostart settings
-     * override standard Android behaviour on top of this.
+     * Asks Android to stop optimising this app, as a dialog naming it.
+     *
+     * The previous version opened the system's battery list and left the user
+     * to find the app, so there was no way to tell "I turned it off" from "it
+     * is off for this app" — and the two are frequently different.
+     *
+     * Falls back to the list if the direct request is refused, which some ROMs
+     * do.
      */
-    private fun openBatterySettings() {
-        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+    private fun requestBatteryExemption() {
+        val direct = KeepAlive.requestBatteryExemption(this)
+        if (direct.resolveActivity(packageManager) != null) {
+            runCatching { startActivity(direct) }.onFailure { openBatterySettingsList() }
+        } else {
+            openBatterySettingsList()
+        }
+    }
+
+    private fun openBatterySettingsList() {
+        runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+    }
+
+    /**
+     * The vendor's own background-app manager.
+     *
+     * Separate from Android's battery settings and, on Honor, Huawei, Xiaomi,
+     * Oppo, Vivo and Samsung, the actual reason a foreground service dies
+     * overnight while every Android setting reads as correct. Falls back to the
+     * app-info screen, from which every ROM's own settings are reachable.
+     */
+    private fun openAutoStartSettings() {
+        val vendor = KeepAlive.autoStartIntent(this)
+        if (vendor != null) {
+            runCatching { startActivity(vendor) }
+                .onFailure { startActivity(KeepAlive.appDetailsIntent(this)) }
+        } else {
+            startActivity(KeepAlive.appDetailsIntent(this))
+        }
     }
 }

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -95,7 +96,8 @@ fun JommaScreens(
     onScan: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onRequestSms: () -> Unit,
-    onOpenBatterySettings: () -> Unit,
+    onRequestBatteryExemption: () -> Unit,
+    onOpenAutoStart: () -> Unit,
     onFlush: () -> Unit,
     onHeartbeat: () -> Unit,
     onTestCapture: () -> Unit,
@@ -146,7 +148,8 @@ fun JommaScreens(
                     state,
                     onOpenNotificationSettings,
                     onRequestSms,
-                    onOpenBatterySettings,
+                    onRequestBatteryExemption,
+                    onOpenAutoStart,
                     onScan,
                     onCaptureChange,
                 )
@@ -403,7 +406,8 @@ private fun SetupScreen(
     state: UiState,
     onOpenNotificationSettings: () -> Unit,
     onRequestSms: () -> Unit,
-    onOpenBatterySettings: () -> Unit,
+    onRequestBatteryExemption: () -> Unit,
+    onOpenAutoStart: () -> Unit,
     onScan: () -> Unit,
     onCaptureChange: (CaptureSettings) -> Unit,
 ) {
@@ -433,11 +437,36 @@ private fun SetupScreen(
         CheckCard(
             icon = Icons.Outlined.BatteryChargingFull,
             label = "Battery optimisation",
-            granted = null,
-            detail = "Exempt this app, then check the manufacturer's own autostart settings. On Xiaomi, Oppo, Vivo and Samsung those override standard Android and are the usual cause of a silently dead notifier.",
-            action = "Open settings",
-            onAction = onOpenBatterySettings,
+            // A real check now. This used to open a list of every installed app
+            // and never look at the result, so "I turned it off" and "it is off
+            // for this app" were indistinguishable.
+            granted = state.batteryExempt,
+            detail = if (state.batteryExempt) {
+                "Android has been told to leave this app running."
+            } else {
+                "Android will eventually stop this app in the background. " +
+                    "Granting this is the single most important setting here."
+            },
+            action = if (state.batteryExempt) "Review" else "Allow",
+            onAction = onRequestBatteryExemption,
         )
+        if (state.aggressiveVendor) {
+            CheckCard(
+                icon = Icons.Outlined.Shield,
+                label = "${state.vendorLabel} app launch",
+                // Not checkable: no API reports whether a vendor's own killer is
+                // set to leave an app alone. Claiming to know would be worse
+                // than admitting we cannot.
+                granted = null,
+                detail = "${state.vendorLabel} runs its own background-app manager, " +
+                    "separate from Android's, and it is the usual reason a notifier " +
+                    "dies overnight with every Android setting correct. Find this app " +
+                    "in the list and allow it to launch and run in the background — " +
+                    "turn OFF any \"manage automatically\" toggle first.",
+                action = "Open ${state.vendorLabel} settings",
+                onAction = onOpenAutoStart,
+            )
+        }
         CheckCard(
             icon = Icons.Outlined.QrCodeScanner,
             label = "Provisioning",

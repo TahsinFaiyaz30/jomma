@@ -58,12 +58,38 @@ class NotifierService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        // Re-armed on every start, so the alarm chain cannot be broken by the
+        // one restart that happens to fire while the previous alarm was pending.
+        RestartAlarm.schedule(applicationContext)
         // Restart if Android kills us. The watchdog is the second line.
         return START_STICKY
     }
 
+    /**
+     * Swiping the app out of recents does not mean "stop watching for money".
+     *
+     * On most vendor ROMs a swipe kills the whole process, service included,
+     * and `START_STICKY` alone is not reliably honoured there. Asking to be
+     * started again immediately is — and the alarm below covers the case where
+     * even this delivery is dropped.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val prefs = Prefs.get(applicationContext)
+        if (prefs.isProvisioned && !prefs.revoked) {
+            RestartAlarm.schedule(applicationContext)
+            runCatching { start(applicationContext) }
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         isRunning = false
+        /*
+         * Deliberately *not* cancelled here. onDestroy runs both when the user
+         * stops the service on purpose and when the system kills it — and only
+         * the second case matters. Cancelling would disarm the recovery exactly
+         * when it is needed.
+         */
         super.onDestroy()
     }
 

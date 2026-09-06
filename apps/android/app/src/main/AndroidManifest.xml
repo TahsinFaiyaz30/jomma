@@ -94,7 +94,19 @@
         <service
             android:name=".service.NotifierService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
+
+        <!--
+            Re-arms the restart alarm and brings the service back if it is gone.
+            A second recovery path, deliberately in a different subsystem from
+            the WorkManager watchdog: vendor ROMs that defer background work
+            tend not to defer alarms in the same way, so the two fail at
+            different times instead of together.
+        -->
+        <receiver
+            android:name=".service.RestartAlarm$Receiver"
+            android:exported="false" />
 
         <receiver
             android:name=".capture.SmsReceiver"

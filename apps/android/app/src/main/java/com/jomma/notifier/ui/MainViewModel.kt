@@ -11,7 +11,9 @@ import com.jomma.notifier.data.Prefs
 import com.jomma.notifier.net.CaptureSettings
 import com.jomma.notifier.net.JommaApi
 import com.jomma.notifier.net.PairingLink
+import com.jomma.notifier.service.KeepAlive
 import com.jomma.notifier.service.NotifierService
+import com.jomma.notifier.service.RestartAlarm
 import com.jomma.notifier.work.FlushWorker
 import com.jomma.notifier.work.HeartbeatWorker
 import com.jomma.notifier.work.WatchdogWorker
@@ -37,6 +39,11 @@ data class UiState(
     val capturedToday: Int = 0,
     val hasNotificationAccess: Boolean = false,
     val hasSmsPermission: Boolean = false,
+    /** Android's own exemption. Checked, not assumed — see KeepAlive. */
+    val batteryExempt: Boolean = false,
+    /** Whether this phone ships a vendor background-app killer worth warning about. */
+    val aggressiveVendor: Boolean = false,
+    val vendorLabel: String = "",
     val capture: CaptureSettings = CaptureSettings(),
     val captureSaving: Boolean = false,
     val busy: Boolean = false,
@@ -99,6 +106,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             lastHeartbeatAt = prefs.lastHeartbeatAt,
             hasNotificationAccess = NotificationListener.hasAccess(app),
             hasSmsPermission = HeartbeatWorker.hasSmsPermission(app),
+            batteryExempt = KeepAlive.isBatteryOptimisationDisabled(app),
+            aggressiveVendor = KeepAlive.isAggressiveVendor,
+            vendorLabel = KeepAlive.vendorLabel,
             capture = prefs.capture,
         )
 
@@ -212,6 +222,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     NotifierService.start(app)
                     HeartbeatWorker.schedule(app)
                     WatchdogWorker.schedule(app)
+                    // The alarm-based recovery, armed as soon as there is
+                    // something worth recovering.
+                    RestartAlarm.schedule(app)
 
                     _state.value = _state.value.copy(busy = false, message = "Provisioned.")
                     refresh()
