@@ -160,7 +160,11 @@ fun SettingsScreen(
         }
 
         SectionHeader(
-            if (state.pairings.size == 1) "Number" else "Numbers (${state.pairings.size})",
+            when (state.pairings.size) {
+                0 -> "Numbers"
+                1 -> "Number"
+                else -> "Numbers (${state.pairings.size})"
+            },
         )
 
         /*
