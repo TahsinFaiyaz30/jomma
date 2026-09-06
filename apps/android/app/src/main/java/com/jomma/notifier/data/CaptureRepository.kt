@@ -89,9 +89,27 @@ class CaptureRepository(context: Context) {
                     acknowledged += outcome.acknowledged
                     stillQueued += outcome.stillQueued
                 }
+
+                /*
+                 * A number that failed still has its captures queued, and that
+                 * has to reach the caller as work outstanding.
+                 *
+                 * Otherwise one number succeeding masks another failing: the
+                 * aggregate came back `Sent` with nothing outstanding, the
+                 * worker read that as done, and the failed number's messages
+                 * waited for the next periodic sweep instead of the retry
+                 * backoff. Minutes rather than seconds, on the one path where a
+                 * buyer is watching a pay page.
+                 */
+                is FlushOutcome.Failed -> {
+                    stillQueued += outcome.stillQueued
+                    failure = outcome
+                }
+
                 FlushOutcome.Empty, FlushOutcome.NotReady -> Unit
-                // Remembered, not returned: one number being revoked or offline
-                // must not stop the others from flushing.
+
+                // Revoked or waiting for approval: real, but not retryable, and
+                // one number in that state must not stop the others flushing.
                 else -> failure = outcome
             }
         }
@@ -145,7 +163,7 @@ class CaptureRepository(context: Context) {
 
             is JommaApi.Result.Failed -> {
                 dao.markFailed(pending.map { it.localId }, result.message)
-                FlushOutcome.Failed(result.message, result.retryable)
+                FlushOutcome.Failed(result.message, result.retryable, pending.size)
             }
         }
     }
@@ -162,7 +180,13 @@ class CaptureRepository(context: Context) {
         data class Sent(val acknowledged: Int, val stillQueued: Int) : FlushOutcome
         data object Revoked : FlushOutcome
         data object AwaitingApproval : FlushOutcome
-        data class Failed(val message: String, val retryable: Boolean) : FlushOutcome
+        /** @param stillQueued how many captures this left behind, so a caller
+         *   aggregating several numbers can report the work that remains. */
+        data class Failed(
+            val message: String,
+            val retryable: Boolean,
+            val stillQueued: Int = 0,
+        ) : FlushOutcome
     }
 
     companion object {
