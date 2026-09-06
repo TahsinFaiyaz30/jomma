@@ -18,6 +18,7 @@ import {
   assertOwnsDelivery,
   assertOwnsEndpoint,
 } from '@/lib/services/businesses'
+import { assertDeliverableUrl, WebhookTargetError } from '@/lib/services/webhook-targets'
 
 export interface AppActionResult {
   ok: boolean
@@ -85,13 +86,20 @@ export async function createEndpointAction(appId: string, url: string): Promise<
   const { business } = await requireWriteAccess()
   await assertOwnsApp(business.id, appId)
 
-  const trimmed = url.trim()
-  if (!/^https?:\/\//.test(trimmed)) {
-    return { ok: false, message: 'The URL must start with http:// or https://.' }
+  let target: URL
+  try {
+    // Protocol *and* destination. On a shared instance this is what stops an
+    // endpoint being pointed at the private network — see assertDeliverableUrl.
+    target = await assertDeliverableUrl(url)
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof WebhookTargetError ? error.message : 'That URL cannot be used.',
+    }
   }
 
   try {
-    const { secret } = await createWebhookEndpoint({ appId, url: trimmed })
+    const { secret } = await createWebhookEndpoint({ appId, url: target.toString() })
     revalidatePath('/apps')
     return {
       ok: true,

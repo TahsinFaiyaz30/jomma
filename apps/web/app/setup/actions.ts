@@ -7,6 +7,7 @@ import { createApiKey, createApp, createWebhookEndpoint } from '@/lib/services/a
 import { assertOwnsApp, assertOwnsReceivingAccount } from '@/lib/services/businesses'
 import { createDeviceWithProvisioning } from '@/lib/services/devices'
 import { getSetupState, markSetupComplete, type SetupState } from '@/lib/services/onboarding'
+import { assertDeliverableUrl, WebhookTargetError } from '@/lib/services/webhook-targets'
 
 /**
  * The wizard's actions.
@@ -155,9 +156,17 @@ export async function setupCreateKeyAction(appId: string): Promise<SetupResult> 
 export async function setupAddEndpointAction(appId: string, url: string): Promise<SetupResult> {
   const { business } = await requireWriteAccess()
 
-  const trimmed = url.trim()
-  if (!/^https?:\/\//.test(trimmed)) {
-    return reply(false, 'The URL must start with http:// or https://.')
+  let target: URL
+  try {
+    // Protocol *and* destination. The wizard is a different arrangement of the
+    // same buttons, so it has to refuse the same addresses the apps screen does
+    // -- otherwise the check is just a longer route to the same endpoint row.
+    target = await assertDeliverableUrl(url)
+  } catch (error) {
+    return reply(
+      false,
+      error instanceof WebhookTargetError ? error.message : 'That URL cannot be used.',
+    )
   }
 
   try {
@@ -165,7 +174,7 @@ export async function setupAddEndpointAction(appId: string, url: string): Promis
     // a URL they control and be handed the signing secret -- every payment event
     // that merchant receives, delivered to the attacker and verifiable.
     await assertOwnsApp(business.id, appId)
-    const { secret } = await createWebhookEndpoint({ appId, url: trimmed })
+    const { secret } = await createWebhookEndpoint({ appId, url: target.toString() })
     return reply(true, 'Endpoint saved. Verify signatures with this secret.', {
       label: 'Signing secret',
       value: secret,

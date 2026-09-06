@@ -12,6 +12,7 @@ import { env } from '@jomma/shared/env'
 import { and, eq, isNull, lte, or, sql } from 'drizzle-orm'
 import { db, schema } from '@/lib/db/client'
 import { logger } from '@/lib/logger'
+import { assertDeliverableUrl, WebhookTargetError } from '@/lib/services/webhook-targets'
 
 const { webhookDeliveries, webhookEndpoints } = schema
 
@@ -81,6 +82,31 @@ export async function deliverDueWebhooks(): Promise<{
         .update(webhookDeliveries)
         .set({ status: 'failed', lastError: 'Endpoint is disabled' })
         .where(eq(webhookDeliveries.id, id))
+      continue
+    }
+
+    /*
+     * Check the destination again here, not only where it was registered.
+     *
+     * Registration is one moment; this runs every time. A hostname that pointed
+     * somewhere public when it was saved can point at the private network by
+     * the time an event fires, and rows created before that check existed have
+     * never been looked at once. Failed outright rather than retried — the
+     * ladder cannot make an address allowed.
+     */
+    try {
+      await assertDeliverableUrl(row.url)
+    } catch (error) {
+      await db
+        .update(webhookDeliveries)
+        .set({
+          status: 'failed',
+          lastError:
+            error instanceof WebhookTargetError ? error.message : 'Endpoint URL is not usable',
+          nextAttemptAt: null,
+        })
+        .where(eq(webhookDeliveries.id, id))
+      logger.warn({ deliveryId: id, endpointId: row.delivery.endpointId }, 'webhook target refused')
       continue
     }
 
