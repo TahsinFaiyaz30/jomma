@@ -245,6 +245,36 @@ export type DeviceCommand =
   | { type: 'rotate_token' }
   | { type: 'stop' }
 
+/**
+ * A SIM in a paired phone, as the phone reports it.
+ *
+ * Here rather than in either app because both sides read it: the notifier fills
+ * it in, and the dashboard shows the same list when somebody is choosing which
+ * SIM an account lives on. One definition, so the two cannot drift into
+ * disagreeing about what a SIM is.
+ *
+ * `msisdn` is null more often than it looks like it should be. A SIM only
+ * carries its own number if the carrier wrote it there, and plenty never do —
+ * the network maps IMSI to number on its own side and the SIM never needs to
+ * know. A SIM in that state is shown and cannot be chosen, because the
+ * alternative is binding an account to a number nobody has confirmed.
+ */
+export interface SimCard {
+  /** Android's handle for this SIM. Changes when a different SIM is inserted. */
+  subscription_id: number
+  /** Physical slot, 0-based. Shown as "SIM 1" / "SIM 2". */
+  slot_index: number
+  carrier_name: string
+  /** Whatever the phone's owner has named it, which may be neither. */
+  display_name: string
+  /** Canonical `8801XXXXXXXXX`, or null when nothing would say. */
+  msisdn: string | null
+  /** Which source answered: `sim` | `carrier` | `ims` | `line1`. */
+  number_source: string | null
+  /** `2G` | `3G` | `4G` | `5G` | `unknown`. Cosmetic; nothing routes on it. */
+  network_generation: string
+}
+
 /** `pending` is a device that has a provisioning QR but has not scanned it yet. */
 /**
  * Where a phone is in its life.

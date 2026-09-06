@@ -57,6 +57,19 @@ export const POST = route(async (request, context) => {
         permissions: body.permissions ?? null,
         appVersion: body.app_version ?? null,
         lastSeenIp: context.ip,
+
+        /*
+         * Only when the phone actually said something.
+         *
+         * Spread rather than assigned, because `undefined` here means an app
+         * too old to know about SIMs — and writing null for that would erase a
+         * list a newer app had reported, leaving the dashboard with nothing to
+         * offer while somebody is halfway through adding an account. An empty
+         * array is a different statement, "I looked and there are none", and
+         * that one is stored.
+         */
+        ...(body.sims === undefined ? {} : { sims: body.sims, simsReportedAt: now }),
+
         pendingCommands: [],
       })
       .where(eq(devices.id, device.deviceId))

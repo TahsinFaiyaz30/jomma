@@ -18,6 +18,7 @@ import com.jomma.notifier.capture.NotificationListener
 import com.jomma.notifier.data.CaptureRepository
 import com.jomma.notifier.data.Pairing
 import com.jomma.notifier.data.Prefs
+import com.jomma.notifier.data.SimInventory
 import com.jomma.notifier.net.HeartbeatRequest
 import com.jomma.notifier.net.JommaApi
 import java.util.concurrent.TimeUnit
@@ -94,6 +95,13 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                         "sms" to hasSmsPermission(context),
                     ),
                     appVersion = BuildConfig.VERSION_NAME,
+                    // Null when the permission is missing, so the server does
+                    // not read "could not look" as "there are none".
+                    sims = if (SimInventory.hasPermission(context)) {
+                        SimInventory.read(context).map { it.toReport() }
+                    } else {
+                        null
+                    },
                 ),
             )
 

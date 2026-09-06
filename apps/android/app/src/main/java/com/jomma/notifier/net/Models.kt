@@ -44,6 +44,39 @@ data class HeartbeatRequest(
     @SerialName("queue_depth") val queueDepth: Int? = null,
     val permissions: Map<String, Boolean>? = null,
     @SerialName("app_version") val appVersion: String? = null,
+
+    /**
+     * The SIMs in this phone, so the dashboard can offer them.
+     *
+     * Sent on every beat rather than answered on request: the dashboard needs
+     * them while somebody is adding an account, and a phone in a drawer cannot
+     * be asked a question at the moment a browser thinks of one. A beat old is
+     * fine for a list that only changes when the tray is opened.
+     *
+     * Null, not empty, when the permission has not been granted — the server
+     * tells those apart, because "no SIMs in this phone" and "this app never
+     * looked" call for different words on the screen.
+     */
+    val sims: List<SimReport>? = null,
+)
+
+/**
+ * One SIM, in the wire shape the server's `simCardSchema` accepts.
+ *
+ * A separate type from `SimCard` on purpose. That one is what the app knows
+ * about a SIM; this is what it is willing to say about it, in snake_case,
+ * carrying nothing extra. Keeping them apart means adding a field the app finds
+ * useful does not silently start sending it.
+ */
+@Serializable
+data class SimReport(
+    @SerialName("subscription_id") val subscriptionId: Int,
+    @SerialName("slot_index") val slotIndex: Int,
+    @SerialName("carrier_name") val carrierName: String,
+    @SerialName("display_name") val displayName: String,
+    val msisdn: String? = null,
+    @SerialName("number_source") val numberSource: String? = null,
+    @SerialName("network_generation") val networkGeneration: String,
 )
 
 @Serializable

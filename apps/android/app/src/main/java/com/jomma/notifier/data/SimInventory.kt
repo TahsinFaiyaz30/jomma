@@ -62,6 +62,17 @@ data class SimCard(
 ) {
     /** Only a SIM whose number is known can be bound to an account. */
     val usable: Boolean get() = msisdn != null
+
+    /** The shape the server accepts. See `SimReport` for why it is separate. */
+    fun toReport() = com.jomma.notifier.net.SimReport(
+        subscriptionId = subscriptionId,
+        slotIndex = slotIndex,
+        carrierName = carrierName,
+        displayName = displayName,
+        msisdn = msisdn,
+        numberSource = numberSource,
+        networkGeneration = networkGeneration,
+    )
 }
 
 object SimInventory {

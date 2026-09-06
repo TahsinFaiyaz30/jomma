@@ -1,4 +1,4 @@
-import type { DeviceCommand } from '@jomma/shared'
+import type { DeviceCommand, SimCard } from '@jomma/shared'
 import { relations, sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core'
 import { createdAt, fkId, poisha, primaryId, timestampTz, updatedAt } from './_shared'
@@ -149,6 +149,23 @@ export const devices = pgTable(
 
     /** Drained into the next heartbeat response. */
     pendingCommands: jsonb('pending_commands').notNull().default([]).$type<DeviceCommand[]>(),
+
+    /**
+     * The SIMs this phone last reported, and what number each one is.
+     *
+     * Reported on every heartbeat rather than fetched on demand. The dashboard
+     * needs this while somebody is adding an account — it is what turns "type
+     * the bKash number" into "pick the SIM it is on" — and a phone in a drawer
+     * cannot be asked a question at the moment a browser thinks of it. A beat
+     * old is fine for a list of SIMs, which change when somebody opens the tray
+     * and not otherwise.
+     *
+     * Empty rather than null when the phone looked and found none, so "no SIMs
+     * in this phone" and "this phone has never told us" stay distinguishable —
+     * one is a phone to go and fix, the other is an older app.
+     */
+    sims: jsonb('sims').$type<SimCard[]>(),
+    simsReportedAt: timestampTz('sims_reported_at'),
 
     createdAt: createdAt(),
     revokedAt: timestampTz('revoked_at'),

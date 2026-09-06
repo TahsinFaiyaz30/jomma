@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   captureItemSchema,
   createIntentSchema,
+  heartbeatSchema,
   msisdnSchema,
   multilineText,
   safeText,
@@ -123,6 +124,58 @@ describe('captureItemSchema', () => {
   it('accepts a real multi-line message', () => {
     const raw = 'You have received Tk 500.00\nfrom 8801711111111.\nTrxID AB12CD34.'
     expect(captureItemSchema.safeParse({ ...base, raw }).success).toBe(true)
+  })
+})
+
+describe('heartbeatSchema sims', () => {
+  const beat = { battery: 80, charging: false, network: 'wifi' as const, queue_depth: 0 }
+  const sim = {
+    subscription_id: 1,
+    slot_index: 0,
+    carrier_name: 'Grameenphone',
+    display_name: 'GP',
+    msisdn: '8801714205878',
+    number_source: 'ims' as const,
+    network_generation: '4G' as const,
+  }
+
+  it('tells "I looked and found none" apart from "I never looked"', () => {
+    /*
+     * The whole reason `sims` is optional rather than defaulted. The route
+     * writes the column only when the key is present, so an older app that has
+     * never heard of SIMs cannot wipe the list a newer one reported — which
+     * would empty the dashboard's picker while somebody is mid-way through
+     * adding an account.
+     */
+    expect(heartbeatSchema.parse(beat).sims).toBeUndefined()
+    expect(heartbeatSchema.parse({ ...beat, sims: [] }).sims).toEqual([])
+  })
+
+  it('accepts a SIM whose number nobody could read', () => {
+    // The ordinary case on a carrier that never wrote it. It still has to be
+    // reportable, or that SIM is invisible rather than merely unusable.
+    const parsed = heartbeatSchema.safeParse({
+      ...beat,
+      sims: [{ ...sim, msisdn: null, number_source: null }],
+    })
+    expect(parsed.success).toBe(true)
+  })
+
+  it('refuses a number the accounts table could never match', () => {
+    expect(
+      heartbeatSchema.safeParse({ ...beat, sims: [{ ...sim, msisdn: '12345' }] }).success,
+    ).toBe(false)
+  })
+
+  it('refuses a source it does not recognise', () => {
+    expect(
+      heartbeatSchema.safeParse({ ...beat, sims: [{ ...sim, number_source: 'guess' }] }).success,
+    ).toBe(false)
+  })
+
+  it('refuses more SIMs than a phone has', () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({ ...sim, subscription_id: i }))
+    expect(heartbeatSchema.safeParse({ ...beat, sims: many }).success).toBe(false)
   })
 })
 

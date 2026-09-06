@@ -179,6 +179,27 @@ export const captureBatchSchema = z.object({
 })
 export type CaptureBatchInput = z.infer<typeof captureBatchSchema>
 
+/**
+ * One SIM as the phone reports it.
+ *
+ * `msisdn` goes through the same rule as every other number the API accepts, so
+ * a phone cannot register a SIM as something the accounts table could never
+ * match. Null is ordinary and means the carrier never wrote the number to the
+ * SIM — see the `SimCard` type.
+ *
+ * Bounded at eight because a phone with more SIMs than that does not exist, and
+ * this arrives on an endpoint a device token can call every minute.
+ */
+export const simCardSchema = z.object({
+  subscription_id: z.number().int(),
+  slot_index: z.number().int().min(0).max(7),
+  carrier_name: safeText(64),
+  display_name: safeText(64),
+  msisdn: msisdnSchema.nullable(),
+  number_source: z.enum(['sim', 'carrier', 'ims', 'line1']).nullable(),
+  network_generation: z.enum(['2G', '3G', '4G', '5G', 'unknown']),
+})
+
 export const heartbeatSchema = z.object({
   battery: z.number().int().min(0).max(100).optional().nullable(),
   charging: z.boolean().optional().nullable(),
@@ -186,6 +207,15 @@ export const heartbeatSchema = z.object({
   queue_depth: z.number().int().min(0).optional().nullable(),
   permissions: z.record(z.string(), z.boolean()).optional().nullable(),
   app_version: safeText(32).optional().nullable(),
+
+  /**
+   * Optional, and absent from an older app rather than empty.
+   *
+   * That distinction is the whole reason it is not defaulted: an app that has
+   * never heard of SIMs must not overwrite what a newer one reported, and a
+   * phone that genuinely has no SIM in it must be able to say so.
+   */
+  sims: z.array(simCardSchema).max(8).optional(),
 })
 
 /**
