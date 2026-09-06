@@ -10,6 +10,30 @@
 # `assembleRelease` failed outright with "Supplied proguard configuration does
 # not exist" and the release build could never be produced at all.
 
+# ML Kit's components, which it finds by name rather than by reference.
+#
+# `AndroidManifest.xml` lists them as <meta-data> *string values* under
+# MlKitComponentDiscoveryService:
+#
+#     com.google.mlkit.common.internal.CommonComponentRegistrar
+#     com.google.mlkit.vision.barcode.internal.BarcodeRegistrar
+#     com.google.mlkit.vision.common.internal.VisionCommonRegistrar
+#
+# R8 cannot follow a class name that exists only as a string, so it removed
+# them — and with R8's full mode, on by default since AGP 8, it also renames
+# anything it does keep, which breaks the lookup just as thoroughly.
+#
+# The result was not a build error. `BarcodeScanning.getClient` found no
+# registered components and dereferenced null, so the scanner crashed the app
+# the instant it opened — in release builds only. Debug builds are not
+# minified, which is why this survived testing.
+#
+# `-keep` rather than `-keepnames`: the constructor is invoked reflectively, so
+# the class needs its name *and* its no-arg constructor intact.
+-keep class * implements com.google.firebase.components.ComponentRegistrar {
+    <init>();
+}
+
 # Wire models are reflected over by kotlinx.serialization's generated
 # serializers. The plugin's own rules keep the serializer classes; this keeps
 # the `Companion.serializer()` accessor R8 cannot see being called through the
