@@ -1,0 +1,46 @@
+<!--
+    The background layer of the adaptive icon.
+
+    A gradient rather than the flat fill this used to be: flat reads as
+    unfinished next to everything else in a launcher, and the background is the
+    one layer that can carry colour without competing with the mark. Green
+    deliberately — it is the note-and-coin colour here, and it is neither
+    bKash's pink nor Nagad's orange, so the icon never looks like it is claiming
+    to be either of them.
+
+    The highlight is a radial wash from the upper left, which is where every
+    other icon on the screen is lit from. It is what stops the gradient looking
+    like a flat swatch at 48dp.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path android:pathData="M0,0 h108 v108 h-108 z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="8"
+                android:startY="0"
+                android:endX="100"
+                android:endY="108"
+                android:startColor="#34D399"
+                android:endColor="#059669" />
+        </aapt:attr>
+    </path>
+
+    <path android:pathData="M0,0 h108 v108 h-108 z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="28"
+                android:centerY="22"
+                android:gradientRadius="78"
+                android:startColor="#38FFFFFF"
+                android:endColor="#00FFFFFF" />
+        </aapt:attr>
+    </path>
+</vector>
