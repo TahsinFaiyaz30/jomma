@@ -19,11 +19,29 @@ import kotlinx.serialization.json.Json
  * so nothing here is a single value any more except the settings that really
  * are about the app rather than about a number.
  */
-class Prefs private constructor(private val prefs: SharedPreferences) {
+// `internal` rather than private so the unit tests can build one over a fake
+// SharedPreferences. Everything real still goes through `Prefs.get`.
+class Prefs internal constructor(private val prefs: SharedPreferences) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     /* ── Pairings ────────────────────────────────────────────────────────── */
+
+    /**
+     * Guards the whole list against interleaved read-modify-write.
+     *
+     * Every mutator below reads the list, changes one entry and writes the list
+     * back. Three threads do that: `HeartbeatWorker` walking the pairings,
+     * `FlushWorker` marking one revoked when the server answers 401, and the UI
+     * while someone is on the screen. Unlocked, two of those interleaving means
+     * the second write is computed from a list it read before the first — so the
+     * first is silently discarded. Losing a heartbeat timestamp that way is
+     * nothing; losing a pairing someone has just scanned is a phone that reports
+     * nothing for a number the dashboard shows as active.
+     *
+     * `Prefs` is a process singleton, so one lock covers every writer.
+     */
+    private val lock = Any()
 
     /**
      * Every number this phone reports for, oldest first.
@@ -33,12 +51,7 @@ class Prefs private constructor(private val prefs: SharedPreferences) {
      * write cannot leave a pairing half-updated with a token that no longer
      * matches its device id.
      */
-    var pairings: List<Pairing>
-        get() {
-            val raw = prefs.getString(KEY_PAIRINGS, null) ?: return migrateLegacy()
-            return runCatching { json.decodeFromString<List<Pairing>>(raw) }.getOrDefault(emptyList())
-        }
-        set(value) = prefs.edit().putString(KEY_PAIRINGS, json.encodeToString(value)).apply()
+    val pairings: List<Pairing> get() = synchronized(lock) { read() }
 
     /** The ones that can actually report right now. */
     val livePairings: List<Pairing> get() = pairings.filter { it.live }
@@ -46,18 +59,52 @@ class Prefs private constructor(private val prefs: SharedPreferences) {
     fun pairing(deviceId: String): Pairing? = pairings.firstOrNull { it.deviceId == deviceId }
 
     /** Adds a new pairing, or replaces one for the same device id. */
-    fun upsertPairing(pairing: Pairing) {
-        val existing = pairings.filterNot { it.deviceId == pairing.deviceId }
-        pairings = existing + pairing
+    fun upsertPairing(pairing: Pairing) = mutate { list ->
+        list.filterNot { it.deviceId == pairing.deviceId } + pairing
     }
 
     /** Applies a change to one pairing without disturbing the others. */
-    fun updatePairing(deviceId: String, transform: (Pairing) -> Pairing) {
-        pairings = pairings.map { if (it.deviceId == deviceId) transform(it) else it }
+    fun updatePairing(deviceId: String, transform: (Pairing) -> Pairing) = mutate { list ->
+        list.map { if (it.deviceId == deviceId) transform(it) else it }
     }
 
-    fun removePairing(deviceId: String) {
-        pairings = pairings.filterNot { it.deviceId == deviceId }
+    fun removePairing(deviceId: String) = mutate { list ->
+        list.filterNot { it.deviceId == deviceId }
+    }
+
+    /** Read, change and write back as one step, so nothing lands in between. */
+    private fun mutate(transform: (List<Pairing>) -> List<Pairing>) {
+        synchronized(lock) { write(transform(read())) }
+    }
+
+    private fun read(): List<Pairing> {
+        val raw = prefs.getString(KEY_PAIRINGS, null) ?: return migrateLegacy()
+        return runCatching { json.decodeFromString<List<Pairing>>(raw) }
+            .getOrElse { quarantine(raw); emptyList() }
+    }
+
+    private fun write(value: List<Pairing>) {
+        prefs.edit().putString(KEY_PAIRINGS, json.encodeToString(value)).apply()
+    }
+
+    /**
+     * Keeps a list that would not parse, before anything writes over it.
+     *
+     * An unreadable blob used to read back as "no pairings", and the very next
+     * write — a heartbeat, which needs no user present — would persist that
+     * emptiness over the real thing. Device tokens are issued once and never
+     * shown again, so that erased them for good: every number silently stopped
+     * reporting and the only way back was re-scanning each one.
+     *
+     * The list still reads as empty, because a blob that will not parse cannot
+     * be merged with. What changes is that the original survives, under its own
+     * key, so the tokens can be recovered rather than only mourned. Written once
+     * — a second failure must not overwrite the first copy with whatever
+     * replaced it.
+     */
+    private fun quarantine(raw: String) {
+        if (prefs.contains(KEY_PAIRINGS_UNREADABLE)) return
+        prefs.edit().putString(KEY_PAIRINGS_UNREADABLE, raw).apply()
     }
 
     /**
@@ -106,7 +153,7 @@ class Prefs private constructor(private val prefs: SharedPreferences) {
             ),
         )
 
-        pairings = migrated
+        write(migrated)
         return migrated
     }
 
@@ -160,6 +207,9 @@ class Prefs private constructor(private val prefs: SharedPreferences) {
     companion object {
         private const val FILE = "jomma_secure_prefs"
         private const val KEY_PAIRINGS = "pairings"
+
+        /** Where a list that would not parse is kept. See `quarantine`. */
+        private const val KEY_PAIRINGS_UNREADABLE = "pairings_unreadable"
 
         // Read once by the migration above, then never again.
         private const val KEY_SERVER_URL = "server_url"
