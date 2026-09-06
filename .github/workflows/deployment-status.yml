@@ -1,0 +1,109 @@
+name: Deployment status
+
+# Records on GitHub which commit is live in production.
+#
+# Render deploys this service itself, on push, and that is deliberately left
+# alone — this workflow triggers nothing. It only watches, and reports what it
+# sees.
+#
+# It exists because Render stopped posting deployment records to GitHub when the
+# repository was deleted and recreated. Push events were restored by forcing the
+# service to re-resolve the repository, but the deployment reporting was not, so
+# the repository no longer showed where its code was running.
+#
+# What it reports is stronger than what it replaces. Render's own records marked
+# a deployment when a build *started*. This one asks the running service which
+# commit it was built from, and only says "live" when the answer matches — so a
+# green marker means verified in production, not merely attempted.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Never cancel: a half-recorded deployment would leave a commit marked "in
+  # progress" forever. Later pushes queue behind this instead.
+  group: deployment-status
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  record:
+    name: Record what is live
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open a deployment
+        id: deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -u
+          id="$(gh api "repos/$REPO/deployments" --input - --jq '.id' <<EOF
+          {
+            "ref": "$SHA",
+            "environment": "production",
+            "description": "Deployed by Render",
+            "auto_merge": false,
+            "required_contexts": []
+          }
+          EOF
+          )"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          gh api "repos/$REPO/deployments/$id/statuses" \
+            -f state=in_progress \
+            -f environment_url=https://jomma-web.onrender.com >/dev/null
+
+      - name: Wait for production to report this commit
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -u
+          want="${SHA:0:7}"
+          echo "waiting for production to report $want"
+
+          # Render takes roughly two minutes on the free plan, plus up to a
+          # minute of cold start if the service had gone to sleep. Ten minutes
+          # is generous enough that a timeout means something is actually wrong.
+          for i in $(seq 1 40); do
+            sleep 15
+            got="$(curl -sf --max-time 20 https://jomma-web.onrender.com/api/health \
+                    | grep -o '"commit":"[^"]*"' | cut -d'"' -f4 || true)"
+            if [ "$got" = "$want" ]; then
+              echo "live after ~$((i * 15))s"
+              exit 0
+            fi
+            echo "  serving ${got:-no response}"
+          done
+
+          echo "::error::Production never reported $want — check the deploy in Render."
+          exit 1
+
+      - name: Mark it live
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ID: ${{ steps.deployment.outputs.id }}
+        run: |
+          gh api "repos/$REPO/deployments/$ID/statuses" \
+            -f state=success \
+            -f environment_url=https://jomma-web.onrender.com \
+            -f description="Verified live via /api/health" >/dev/null
+
+      - name: Mark it failed
+        # `always()` so a failure earlier in the job does not skip this and
+        # strand the deployment showing "in progress" indefinitely.
+        if: always() && failure() && steps.deployment.outputs.id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ID: ${{ steps.deployment.outputs.id }}
+        run: |
+          gh api "repos/$REPO/deployments/$ID/statuses" \
+            -f state=failure \
+            -f description="Production never reported this commit" >/dev/null || true
