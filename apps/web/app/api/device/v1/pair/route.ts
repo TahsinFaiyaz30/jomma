@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { requireDeviceIpAllowed } from '@/lib/api/device-guard'
 import { ApiError } from '@/lib/api/errors'
 import { enforceRateLimit, parseBody, route } from '@/lib/api/handler'
+import { safeText } from '@/lib/api/schemas'
 import { claimPairingCode } from '@/lib/services/devices'
 
 export const runtime = 'nodejs'
@@ -28,7 +29,7 @@ const pairSchema = z.object({
    * default than whatever they would guess. Optional so an older app still
    * pairs, and purely cosmetic — nothing identifies a device by name.
    */
-  device_name: z.string().trim().min(1).max(60).optional(),
+  device_name: safeText(60).min(1).optional(),
 })
 
 /**

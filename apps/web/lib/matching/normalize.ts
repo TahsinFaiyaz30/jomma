@@ -24,6 +24,30 @@ export function normalizeMsisdn(value: string | null | undefined): string | null
   return digits.slice(-10)
 }
 
+/**
+ * The form a receiving account is stored in: `880` followed by ten digits.
+ *
+ * `01712345678`, `+880 1712-345678` and `8801712345678` are one number, and the
+ * 880 form is the one the provider's own messages carry, so that is what the
+ * column holds and what the matcher compares against.
+ *
+ * Stricter than `normalizeMsisdn` on purpose. That one answers "are these the
+ * same number", where being generous costs nothing. This one answers "which
+ * account is this", where being generous means resolving a half-typed number to
+ * whichever row happens to end in the same digits — including one belonging to
+ * somebody else's business. Anything that is not a real Bangladeshi mobile
+ * number gets null rather than a best guess.
+ */
+export function canonicalMsisdn(value: string | null | undefined): string | null {
+  if (!value) return null
+  const digits = value.replace(/\D/g, '')
+  const local = digits.startsWith('880') ? digits.slice(3) : digits
+  const withZero = local.startsWith('0') ? local : `0${local}`
+
+  if (!/^01[3-9]\d{8}$/.test(withZero)) return null
+  return `880${withZero.slice(1)}`
+}
+
 /** Both must be present. A missing number is not a match, it is no information. */
 export function sameMsisdn(a: string | null | undefined, b: string | null | undefined): boolean {
   const left = normalizeMsisdn(a)

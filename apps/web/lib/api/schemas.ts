@@ -36,6 +36,37 @@ function hasControlCharacter(value: string): boolean {
   return false
 }
 
+/**
+ * The same guard for text that is genuinely multi-line.
+ *
+ * A provider's SMS runs to four or five lines and a buyer writing a note about
+ * a refund uses the return key, so `safeText` is the wrong instrument there —
+ * it would reject ordinary traffic. What still cannot be allowed is a NUL,
+ * which Postgres `text` will not store at all: `raw` on the capture endpoint
+ * accepted one, the driver forwarded it, and the insert threw a 500 for input
+ * validation had already blessed.
+ *
+ * So tab, line feed and carriage return are let through and every other C0
+ * control is not. Those neither belong in a phone message nor survive being
+ * displayed on a dashboard where an operator is comparing the text against
+ * what a customer is reading off their own screen.
+ */
+export const multilineText = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .refine(
+      (value) => {
+        for (const character of value) {
+          const code = character.codePointAt(0) ?? 0
+          if (code === 0x09 || code === 0x0a || code === 0x0d) continue
+          if (code < 0x20 || code === 0x7f) return false
+        }
+        return true
+      },
+      { message: 'Control characters are not allowed.' },
+    )
+
 /** A single-line string that is safe to store and safe to display. */
 export const safeText = (max: number) =>
   z
@@ -134,9 +165,10 @@ export const captureItemSchema = z.object({
   package: safeText(128).optional().nullable(),
   /**
    * The message, verbatim. Stored before anything tries to parse it, so the
-   * schema deliberately imposes no shape beyond a length ceiling.
+   * schema imposes no shape beyond a length ceiling and the one byte Postgres
+   * cannot hold — see `multilineText`. Line breaks are ordinary here.
    */
-  raw: z.string().min(1).max(4000),
+  raw: multilineText(4000).min(1),
   captured_at: z.iso.datetime({ offset: true }).optional().nullable(),
 })
 

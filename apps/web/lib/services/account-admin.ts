@@ -6,6 +6,9 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import type { Database, Tx } from '@/lib/db/client'
 import { db } from '@/lib/db/client'
 import { apps, notifierEvents, receivingAccounts } from '@/lib/db/schema'
+// Shared with the ingest webhook's account lookup. Two copies of this rule that
+// drift apart means one surface accepting a number the other stores differently.
+import { canonicalMsisdn as normalizeMsisdn } from '@/lib/matching/normalize'
 import { audit } from './audit'
 import { queueEvent } from './events'
 
@@ -122,21 +125,6 @@ export async function createReceivingAccount(options: {
 
     return { id: account.id, msisdn }
   })
-}
-
-/**
- * `01712345678`, `+880 1712-345678` and `8801712345678` are one number.
- *
- * Stored in the 880 form because that is what the parsers produce from a
- * provider's message, and the matcher compares them directly.
- */
-function normalizeMsisdn(input: string): string | null {
-  const digits = input.replace(/\D/g, '')
-  const local = digits.startsWith('880') ? digits.slice(3) : digits
-  const withZero = local.startsWith('0') ? local : `0${local}`
-
-  if (!/^01[3-9]\d{8}$/.test(withZero)) return null
-  return `880${withZero.slice(1)}`
 }
 
 /**

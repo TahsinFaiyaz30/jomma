@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { ApiError } from '@/lib/api/errors'
 import { enforceRateLimit, parseBody, route } from '@/lib/api/handler'
 import { intentIdFromPayUrl } from '@/lib/api/pay-url'
-import { msisdnSchema } from '@/lib/api/schemas'
+import { msisdnSchema, multilineText } from '@/lib/api/schemas'
 import { requestRefund } from '@/lib/services/refunds'
 
 export const runtime = 'nodejs'
@@ -11,7 +11,10 @@ export const dynamic = 'force-dynamic'
 
 const bodySchema = z.object({
   reason: z.enum(REFUND_REASONS),
-  note: z.string().trim().max(500).optional().nullable(),
+  // Multi-line: a buyer explaining what went wrong uses the return key. A NUL
+  // in here reached the insert and came back as a 500, on a surface that needs
+  // no credential at all.
+  note: multilineText(500).optional().nullable(),
   contact_msisdn: msisdnSchema.optional().nullable(),
 })
 

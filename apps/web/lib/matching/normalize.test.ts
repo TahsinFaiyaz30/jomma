@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canonicalMsisdn,
   isFuzzyRefMatch,
   levenshtein,
   minutesBetween,
@@ -35,6 +36,32 @@ describe('normalizeMsisdn', () => {
   it('rejects anything too short to be a number', () => {
     expect(normalizeMsisdn('12345')).toBeNull()
     expect(normalizeMsisdn(null)).toBeNull()
+  })
+})
+
+describe('canonicalMsisdn', () => {
+  it('produces the 880 form every account is stored in', () => {
+    expect(canonicalMsisdn('8801712345678')).toBe('8801712345678')
+    expect(canonicalMsisdn('01712345678')).toBe('8801712345678')
+    expect(canonicalMsisdn('+880 1712-345678')).toBe('8801712345678')
+  })
+
+  it('refuses to guess at anything that is not a whole number', () => {
+    /*
+     * The reason this is stricter than `normalizeMsisdn`. The ingest webhook
+     * used to narrow whatever it was sent to a digit suffix and take the first
+     * active account ending that way — so `+++++++++1` resolved to a real
+     * account, and one belonging to whichever business happened to sort first.
+     */
+    for (const value of ['+++++++++1', '1', '12345', '017123456', '017123456789', '', null]) {
+      expect(canonicalMsisdn(value)).toBeNull()
+    }
+  })
+
+  it('rejects an operator prefix that does not exist', () => {
+    // 012… is not an allocated mobile prefix; accepting it would create an
+    // account no message can ever arrive on.
+    expect(canonicalMsisdn('01212345678')).toBeNull()
   })
 })
 
