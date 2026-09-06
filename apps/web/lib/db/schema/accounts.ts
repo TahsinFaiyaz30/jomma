@@ -70,6 +70,24 @@ export const receivingAccounts = pgTable(
     // watched by two merchants at once: the captures would be indistinguishable
     // and each would see the other's incoming money.
     uniqueIndex('ux_receiving_accounts_msisdn').on(table.msisdn),
+
+    /*
+     * One account per provider, per business.
+     *
+     * A shop has a bKash number and a Nagad number, not two bKash numbers —
+     * and the phone could not tell two of the same apart from a notification
+     * anyway, since a notification names the provider and nothing else. So the
+     * rule the product wants and the rule the hardware can enforce are the same
+     * rule, and it belongs in the database rather than in whichever screen
+     * happens to be adding one.
+     *
+     * Partial, on the two statuses that are actually trading. A disabled or
+     * replaced account keeps its row for the payments that reference it, and
+     * must not block the merchant from adding its successor.
+     */
+    uniqueIndex('ux_receiving_accounts_business_provider')
+      .on(table.businessId, table.provider)
+      .where(sql`status in ('active', 'degraded')`),
     index('ix_receiving_accounts_status').on(table.status),
     index('ix_receiving_accounts_business').on(table.businessId, table.status),
   ],

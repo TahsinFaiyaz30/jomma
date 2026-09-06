@@ -169,6 +169,16 @@ const created = await client(
     payer_msisdn: '8801712345678',
     ttl_seconds: 600,
     metadata: { store_id: 'st_912' },
+    /*
+     * Pinned, because everything downstream sends a bKash-formatted message.
+     *
+     * A business may now hold only one account per provider, so the seed's
+     * second account is Nagad rather than a second bKash. Without this the
+     * intent can route there, and a bKash message on a Nagad account is
+     * `filtered` — correctly, but it takes the whole chain down with it and the
+     * failure reads as a broken matcher rather than a mismatched fixture.
+     */
+    provider: 'bkash',
   },
   { 'idempotency-key': `smoke-${nonce}` },
 )
@@ -196,6 +206,9 @@ const replayed = await client(
     payer_msisdn: '8801712345678',
     ttl_seconds: 600,
     metadata: { store_id: 'st_912' },
+    // Identical to the original, provider included: a replay is the *same*
+    // request arriving twice, and a body that differs is a different question.
+    provider: 'bkash',
   },
   { 'idempotency-key': `smoke-${nonce}` },
 )

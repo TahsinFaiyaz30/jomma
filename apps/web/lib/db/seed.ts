@@ -139,6 +139,16 @@ Admin ready.
    * to route around a `disabled` or drifting account. Seeding one account means
    * the failover path never runs in development and breaks the first time it is
    * needed in production.
+   *
+   * They used to be two bKash numbers. A business may now hold only one account
+   * per provider — a shop has a bKash number and a Nagad number, and two of the
+   * same could not be told apart from a notification anyway — so the second is
+   * Nagad, and failover here is between providers rather than within one.
+   *
+   * Worth knowing what that costs: a business with one bKash number has nothing
+   * to fall back to when it degrades, unless it also has a Nagad number that
+   * buyers are willing to use. Same-provider redundancy is no longer something
+   * this product can offer.
    */
   const ACCOUNT_SPECS = [
     {
@@ -148,9 +158,9 @@ Admin ready.
       device: 'Shop phone',
     },
     {
-      provider: 'bkash' as const,
+      provider: 'nagad' as const,
       msisdn: '8801611223344',
-      label: 'Jomma Store — bKash 2',
+      label: 'Jomma Store — Nagad',
       device: 'Back office phone',
     },
   ]
