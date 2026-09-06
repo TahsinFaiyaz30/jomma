@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { env } from '@jomma/shared/env'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { accounts, sessions, users, verifications } from '@/lib/db/schema/auth'
 
@@ -81,9 +82,45 @@ export const auth = betterAuth({
        * default is the difference between a stranger registering and a stranger
        * registering as an operator of the instance. `input: false` keeps a
        * crafted signup body from setting it at all; the only way to become a
-       * platform admin is the seed or an existing one promoting you.
+       * platform admin is the seed, an existing one promoting you, or being
+       * first — see the hook below.
        */
       role: { type: 'string', defaultValue: 'member', input: false },
+    },
+  },
+
+  databaseHooks: {
+    user: {
+      create: {
+        /**
+         * The first account on an empty instance runs it.
+         *
+         * Without this, a freshly deployed service-mode instance is a dead end:
+         * everyone who signs up is a `member`, every business they create sits
+         * `pending`, and there is nobody with the authority to approve one. The
+         * only way out would be a database client, which is not a bootstrap
+         * story anybody should have to be told.
+         *
+         * The guard is "this is the only account on the instance", not "there
+         * is no platform admin". The difference is the whole security argument.
+         * Keyed on the absence of an admin, deleting the sole platform admin on
+         * an instance with five hundred users would hand the role to whichever
+         * stranger signed up next — a privilege escalation reachable by anyone
+         * patient enough to watch for it. Keyed on the table being empty, it can
+         * only fire on a deployment that has nothing to protect yet.
+         *
+         * Losing your only admin later is therefore *not* self-healing, and
+         * should not be: that is a job for `pnpm db:seed --admin-only` or the
+         * database, which is the right amount of friction for taking over an
+         * instance holding other people's money.
+         */
+        after: async (user) => {
+          await db
+            .update(users)
+            .set({ role: 'platform_admin' })
+            .where(and(eq(users.id, user.id), sql`(select count(*) from ${users}) = 1`))
+        },
+      },
     },
   },
 

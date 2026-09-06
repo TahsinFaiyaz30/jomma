@@ -66,6 +66,39 @@ filter nobody notices is missing.
 | Business switcher | hidden | in the sidebar |
 | Platform console | available to the seeded admin | `/admin` |
 
+#### Choosing, and starting from nothing
+
+One environment variable, set wherever the server runs — Render's dashboard, a
+`.env`, your host's config:
+
+```bash
+JOMMA_MODE=single     # default. Omit it entirely and you get this.
+JOMMA_MODE=service
+```
+
+It is deliberately not a setting inside the app. A toggle in the UI that opens
+public registration is a toggle somebody flips by accident, and this decides
+whether strangers can create accounts on a server that watches your bKash
+number.
+
+Switching later is just changing the variable and restarting. The data model is
+identical in both, so nothing migrates: `single` simply stops hiding the parts
+that only make sense with more than one business.
+
+**The first account on an empty instance becomes the platform admin.** That is
+the bootstrap, and it is guarded on the user table being *empty* rather than on
+there being no admin — so it can only ever fire on a deployment that has nothing
+to protect yet. In `service` mode you sign up at `/signup` and you are running
+the instance. In `single` mode, where signup is closed:
+
+```bash
+pnpm db:seed --admin-only     # creates one admin, prints the password once
+```
+
+Losing your only admin later is not self-healing, and should not be. Use
+`--admin-only` again, or the database. That is the right amount of friction for
+taking over an instance holding other people's money.
+
 ---
 
 ## How it works
