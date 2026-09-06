@@ -11,7 +11,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -134,6 +137,36 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                /*
+                 * A pairing link that arrived from outside the app.
+                 *
+                 * Named rather than merely confirmed: the whole question is
+                 * *which server*, so the host is the sentence. Somebody who
+                 * scanned their own dashboard's code recognises it and taps
+                 * through; somebody who tapped nothing at all is being shown a
+                 * host they have never heard of, which is the only warning that
+                 * can be given for an intent any app can send.
+                 */
+                state.pendingLink?.let { pending ->
+                    AlertDialog(
+                        onDismissRequest = viewModel::dismissPendingLink,
+                        title = { Text("Add this phone to a server?") },
+                        text = {
+                            Text(
+                                "This will let ${pending.host} receive payment messages from " +
+                                    "this phone.\n\nIf you did not just scan a Jomma code, " +
+                                    "say no.",
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = viewModel::confirmPendingLink) { Text("Add") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = viewModel::dismissPendingLink) { Text("Cancel") }
+                        },
+                    )
+                }
+
                 BackHandler(enabled = scanning) { scanning = false }
             }
         }
@@ -186,11 +219,15 @@ class MainActivity : ComponentActivity() {
     /**
      * A provisioning link opened from outside the app.
      *
-     * Some other QR scanner read `https://<host>/pair/<code>` and Android
-     * routed it here, because the domain names this app's signing certificate
-     * in its assetlinks.json. From this point on it is the same path as the
-     * app's own scanner — `provision` takes the URL either way and does the
-     * validating.
+     * Ordinarily this is some other QR scanner having read
+     * `https://<host>/pair/<code>`, with Android routing it here because the
+     * domain names this app's signing certificate in its assetlinks.json.
+     *
+     * But that is only where the *well-behaved* ones come from. This activity is
+     * exported, and an exported activity takes an explicit intent from any app
+     * on the phone whatever its filters say — so this is not a trusted input,
+     * and it is offered for confirmation rather than acted on. See
+     * `MainViewModel.offerPairingLink`.
      *
      * The intent's data is cleared afterwards so a configuration change does
      * not replay it. Redeeming twice would fail, having burned the code, and
@@ -199,7 +236,7 @@ class MainActivity : ComponentActivity() {
     private fun handlePairingLink(intent: Intent?) {
         val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
         intent.data = null
-        viewModel.provision(link)
+        viewModel.offerPairingLink(link)
     }
 
     override fun onResume() {

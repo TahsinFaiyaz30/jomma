@@ -69,6 +69,13 @@ data class UiState(
     val updateStatus: String? = null,
     val busy: Boolean = false,
     val message: String? = null,
+
+    /**
+     * A pairing link that arrived from outside the app, waiting to be confirmed.
+     *
+     * Null for anything the phone's own scanner read — see [MainViewModel.offerPairingLink].
+     */
+    val pendingLink: PairingLink? = null,
 ) {
     val provisioned: Boolean get() = pairings.isNotEmpty()
     val livePairings: List<Pairing> get() = pairings.filter { it.live }
@@ -237,12 +244,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * A pairing link that came from outside the app, held for confirmation.
+     *
+     * `MainActivity` is exported — it has to be, it is the launcher — and an
+     * exported activity accepts an *explicit* intent from any other app on the
+     * phone regardless of what its intent filters say. So the App Link filter's
+     * `android:host` restriction bounds which links Android will route here on
+     * its own, and bounds nothing at all about what another app can hand over
+     * directly. It needs no permissions to do it.
+     *
+     * Provisioning straight off that intent meant any installed app could pair
+     * this phone with a server of its choosing. The pairing lands
+     * `awaitingApproval`, but approval is answered by that same server over the
+     * heartbeat, so it approves itself; the account number likewise comes back
+     * from the server, so it can claim the number the phone really watches.
+     * From there every captured payment message — amount, sender, TrxID,
+     * balance — is uploaded to whoever sent the intent.
+     *
+     * A link cannot be host-checked instead: self-hosted deployments each have
+     * their own domain and there is no list to check against. So the question
+     * goes to the person holding the phone, naming the server. One tap, and
+     * only on this path — the in-app scanner still provisions immediately,
+     * because pointing the camera at a code *is* the confirmation.
+     */
+    fun offerPairingLink(scanned: String) {
+        val link = PairingLink.parse(scanned)
+        if (link == null) {
+            _state.value = _state.value.copy(busy = false, message = "That is not a Jomma QR code.")
+            return
+        }
+        _state.value = _state.value.copy(pendingLink = link, message = null)
+    }
+
+    /** Goes ahead with a link the user has just been shown and accepted. */
+    fun confirmPendingLink() {
+        val link = _state.value.pendingLink ?: return
+        _state.value = _state.value.copy(pendingLink = null)
+        provision("${link.serverUrl}/pair/${link.code}")
+    }
+
+    fun dismissPendingLink() {
+        _state.value = _state.value.copy(pendingLink = null)
+    }
+
+    /**
      * Sets this device up from a provisioning link.
      *
-     * One function for both ways in, because they arrive as the same string:
-     * the app's own scanner decodes `https://host/pair/CODE` off the QR, and a
-     * third-party scanner hands the identical URL to Android, which routes it
-     * here as an App Link. Neither path is privileged over the other.
+     * Reached directly by the app's own scanner, and via [offerPairingLink]
+     * once an externally-supplied link has been confirmed.
      *
      * Scanning again *adds a number* rather than being refused. That is the
      * whole point of the plus button: one phone can hold a bKash account and a

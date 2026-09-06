@@ -133,6 +133,9 @@ data class ProvisionResponse(
  */
 data class PairingLink(val serverUrl: String, val code: String) {
 
+    /** Just the host, for asking someone whether they meant this server. */
+    val host: String get() = serverUrl.removePrefix("https://")
+
     companion object {
         private const val PATH = "/pair/"
 
