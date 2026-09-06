@@ -72,3 +72,74 @@ jobs:
           name: jomma-notifier-debug
           path: apps/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+  deploy:
+    name: Deploy to Render
+    # Only after both suites pass. This is the point of driving deploys from
+    # here: Render's own "auto-deploy on commit" ships whatever was pushed,
+    # green or not, and this service takes people's money.
+    needs: [web, android]
+    # Pushes to the default branch only. Not pull requests — a fork's PR must
+    # never be able to deploy — and not manual runs, which are for checking a
+    # branch rather than shipping it.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger a deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          set -u
+
+          # Absent on a fork, and that is not a failure — a fork has no Render
+          # service to deploy to. Say so and finish green.
+          if [ -z "${HOOK:-}" ]; then
+            echo "::notice::No RENDER_DEPLOY_HOOK secret — nothing to deploy to."
+            exit 0
+          fi
+
+          # `--fail-with-body` so a 4xx is an error rather than a silent green
+          # tick, and the body is printed so the reason is visible. The URL
+          # itself never reaches the log: it carries its own key.
+          if curl --silent --show-error --fail-with-body --max-time 60 \
+               -X POST "$HOOK" -o response.json; then
+            echo "Deploy requested."
+            # Just the id. Enough to find it in Render, and nothing sensitive.
+            grep -o '"id":"[^"]*"' response.json | head -1 || true
+          else
+            echo "::error::Render refused the deploy hook. Response:"
+            cat response.json || true
+            exit 1
+          fi
+
+      - name: Wait for the new build to answer
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -u
+
+          # A requested deploy is not a finished one. Render builds this service
+          # in roughly two to three minutes on the free plan, and without this
+          # check a red build could sit in production while the workflow showed
+          # green — which is exactly the failure this job exists to prevent.
+          #
+          # /api/health reports the commit the running build was made from, so
+          # "did my commit reach production" has a real answer rather than an
+          # assumption.
+          want="${SHA:0:7}"
+          echo "waiting for $want"
+
+          for i in $(seq 1 40); do
+            sleep 15
+            got="$(curl -sf --max-time 20 https://jomma-web.onrender.com/api/health \
+                    | grep -o '"commit":"[^"]*"' | cut -d'"' -f4 || true)"
+            if [ "$got" = "$want" ]; then
+              echo "live after ~$((i * 15))s: $got"
+              echo "### Deployed \`$want\` to production" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "  ${got:-no response} (want $want)"
+          done
+
+          echo "::error::Production never reported $want. Check the deploy in Render."
+          exit 1
