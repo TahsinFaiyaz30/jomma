@@ -1,4 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Jomma Notifier</string>
+
+    <!--
+        Who wrote this.
+
+        A resource rather than a literal in the About screen, so it survives
+        into `resources.arsc` and the manifest instead of only into compiled
+        code. That is the difference between a name the app can draw and a name
+        the *package* carries: anyone inspecting the APK — `aapt dump badging`,
+        an app-info screen, a store listing tool — reads the manifest, and a
+        string buried in classes.dex is invisible to all of them.
+
+        The signing certificate cannot carry it. That key is fixed: its
+        fingerprint is what the server publishes for App Link verification, and
+        reissuing it would break every installed copy's update path.
+    -->
+    <string name="developer_name" translatable="false">Tahsin Faiyaz</string>
 </resources>

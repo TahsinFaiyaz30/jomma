@@ -32,8 +32,37 @@
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Jomma">
+
+        <!--
+            Authorship, carried by the package rather than only drawn by it.
+
+            The About screen has said this for a while, but a string in compiled
+            code is invisible to everything that inspects an APK without running
+            it — `aapt dump badging`, an app-info screen, any listing tool. In
+            the manifest it is part of the package's own description.
+
+            It cannot go in the signing certificate, which is the other place
+            you would look: that key's fingerprint is what the server publishes
+            for App Link verification, so reissuing it under a different name
+            would break provisioning and every installed copy's update path.
+
+            Spelled out rather than pointed at `@string/developer_name`, which
+            the About screen uses. A resource reference compiles to an integer
+            id, so a tool reading this manifest without resolving resources —
+            which is most of the ones anybody reaches for — would find
+            `@0x7f0d003c` where the point was to find a name. The two are
+            expected to agree; there is one of them and it is not going to
+            change.
+        -->
+        <meta-data
+            android:name="com.jomma.notifier.developer"
+            android:value="Tahsin Faiyaz" />
+        <meta-data
+            android:name="com.jomma.notifier.source"
+            android:value="https://github.com/TahsinFaiyaz30/jomma" />
 
         <activity
             android:name=".ui.MainActivity"

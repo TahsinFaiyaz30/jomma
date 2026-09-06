@@ -52,12 +52,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jomma.notifier.BuildConfig
+import com.jomma.notifier.R
 import com.jomma.notifier.net.CaptureSettings
 import com.jomma.notifier.update.UpdateInterval
 
@@ -207,7 +209,7 @@ fun SettingsScreen(
 
         SectionHeader("About")
         SettingsCard {
-            InfoRow(Icons.Outlined.Person, "Developer", "Tahsin Faiyaz")
+            InfoRow(Icons.Outlined.Person, "Developer", stringResource(R.string.developer_name))
             HorizontalDivider()
             InfoRow(
                 Icons.Outlined.Code,
