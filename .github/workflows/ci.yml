@@ -1,5 +1,17 @@
 name: CI
 
+# What this run is called in the Actions list.
+#
+# GitHub's default is the commit subject, which on a release commit gives three
+# rows all reading "Release 1.4.2" — the checks, the deployment record, and the
+# actual release, indistinguishable. The subtitle underneath already carries the
+# workflow name, the commit and who pushed it, so repeating the message in bold
+# spends the one customisable line saying nothing.
+#
+# So each workflow says what it does instead. `head_ref` is the source branch of
+# a pull request and empty otherwise, hence the fallback.
+run-name: Checks — web and Android, on ${{ github.head_ref || github.ref_name }}
+
 # Everything that must be true before a commit is trusted. Runs on the default
 # branch, on pull requests, and on demand — `workflow_dispatch` so a fork can
 # prove its own copy builds without opening a pull request first.
@@ -131,4 +143,9 @@ jobs:
           fi
 
           echo "$tag has no release yet. Starting the Release workflow."
-          gh workflow run release.yml --ref main
+
+          # Passing the version rather than letting it re-read VERSION. Same
+          # value, but it pins the release to what this run actually tested --
+          # main can move between here and the dispatch -- and it gives that run
+          # a name, since `run-name` is evaluated before any checkout.
+          gh workflow run release.yml --ref main -f version="$(cat VERSION)"

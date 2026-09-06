@@ -1,5 +1,10 @@
 name: Deployment status
 
+# Named for what it checks rather than for the commit that triggered it, which
+# the subtitle already shows. "Live" here means verified: the running service
+# was asked which commit it was built from and agreed.
+run-name: Confirm production is running this commit
+
 # Records on GitHub which commit is live in production.
 #
 # Render deploys this service itself, on push, and that is deliberately left

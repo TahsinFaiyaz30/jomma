@@ -1,5 +1,18 @@
 name: Release
 
+# What the run is called in the Actions list.
+#
+# Without this every dispatched run is just "Release", because GitHub titles a
+# run by the commit subject only for push events — a `workflow_dispatch` has no
+# commit to name it after and falls back to the workflow's own name. So the one
+# run in that list you actually go looking for, the one that built the APKs, was
+# the only one that did not say which version it built.
+#
+# VERSION cannot be read here: `run-name` is evaluated before anything is
+# checked out. Hence the input, which CI now passes, with the tag as the
+# fallback for a tag push.
+run-name: Release ${{ inputs.version || github.ref_name }}
+
 # Publishes the APKs for one commit.
 #
 # Two ways in:
