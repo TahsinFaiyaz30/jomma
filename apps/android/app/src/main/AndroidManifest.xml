@@ -117,19 +117,19 @@
             android:exported="false" />
 
         <!--
-            Hands a downloaded APK to Android's installer. A file:// URI to
-            another process throws FileUriExposedException on anything modern,
-            and the installer is another process.
+            Where PackageInstaller reports an install session's outcome.
+
+            Not exported: the only sender is Android, through a PendingIntent
+            this app created, and that is delivered regardless. Anything else
+            reaching it would be forging install results.
+
+            This replaced a FileProvider. The old ACTION_VIEW handoff had to
+            expose the APK through a content URI; a session takes the bytes
+            directly, so there is nothing left to grant access to.
         -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.updates"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/update_paths" />
-        </provider>
+        <receiver
+            android:name=".update.InstallReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".capture.SmsReceiver"

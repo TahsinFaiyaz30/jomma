@@ -1,6 +1,6 @@
 {
   "name": "@jomma/sdk",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Typed client for the Jomma payment verification API.",
   "license": "MIT",
   "type": "module",

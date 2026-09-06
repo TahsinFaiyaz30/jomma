@@ -15,6 +15,7 @@ import com.jomma.notifier.service.KeepAlive
 import com.jomma.notifier.service.NotifierService
 import com.jomma.notifier.service.RestartAlarm
 import com.jomma.notifier.update.AvailableUpdate
+import com.jomma.notifier.update.InstallReceiver
 import com.jomma.notifier.update.UpdateCheckWorker
 import com.jomma.notifier.update.UpdateInterval
 import com.jomma.notifier.update.Updater
@@ -105,6 +106,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             dao.countSinceFlow(startOfToday()).collect { count ->
                 _state.value = _state.value.copy(capturedToday = count)
+            }
+        }
+        /*
+         * How an install actually went. Android answers a committed session by
+         * broadcast, so the outcome arrives at InstallReceiver rather than at
+         * whatever called it — this is the wire back to the screen.
+         */
+        viewModelScope.launch {
+            InstallReceiver.messages.collect { message ->
+                _state.value = _state.value.copy(updateStatus = message)
             }
         }
     }
@@ -406,10 +417,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * What the Install button does, which depends on where things stand.
      *
-     * Download first if needed, then hand off. The permission check happens in
-     * the Activity, because only it can start the settings screen and come back.
+     * Download first if it has not happened, then commit an install session.
+     * The permission gate stays a callback because only the Activity can open
+     * the settings screen it points at; the install itself does not, since
+     * `PackageInstaller` raises its own confirmation from [InstallReceiver] and
+     * needs nothing from the UI to do it.
      */
-    fun requestInstall(onReady: (File) -> Unit, onNeedsPermission: () -> Unit) {
+    fun requestInstall(onNeedsPermission: () -> Unit) {
         val app = getApplication<Application>()
         val file = downloaded
 
@@ -421,7 +435,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             onNeedsPermission()
             return
         }
-        onReady(file)
+
+        // Copying twelve megabytes into a session is not instant, and a button
+        // that looks like it did nothing gets pressed again.
+        _state.value = _state.value.copy(updateStatus = "Preparing the install…")
+        viewModelScope.launch {
+            Updater.install(app, file)?.let { error ->
+                _state.value = _state.value.copy(updateStatus = error)
+            }
+        }
     }
 
     /** Surfaces an update problem in the same place as its status. */

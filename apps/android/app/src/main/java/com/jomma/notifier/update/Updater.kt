@@ -1,14 +1,15 @@
 package com.jomma.notifier.update
 
 import android.content.Context
+import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
-import androidx.core.content.FileProvider
 import com.jomma.notifier.BuildConfig
 import com.jomma.notifier.data.Prefs
 import java.io.File
@@ -41,6 +42,7 @@ import org.json.JSONObject
 object Updater {
 
     private const val TAG = "JommaUpdate"
+    private const val SESSION_NAME = "jomma-update"
     private const val RELEASES_URL =
         "https://api.github.com/repos/TahsinFaiyaz30/jomma/releases/latest"
 
@@ -251,16 +253,67 @@ object Updater {
     /**
      * Hands the APK to Android's installer.
      *
-     * Through a `FileProvider`: a `file://` URI to another process throws
-     * `FileUriExposedException` on anything modern, and the installer is
-     * another process.
+     * Through `PackageInstaller` rather than the `ACTION_VIEW` handoff this
+     * used to do. That path is the one every tutorial shows and it does not
+     * work for an update: on a current Android it goes from `InstallStart`
+     * straight to `InstallFailed` without ever showing the confirmation, and
+     * the only thing the user sees is "App not installed as package conflicts
+     * with an existing package" — for an APK that `pm install` accepts without
+     * complaint, signed with the same key, one version code higher. Verified
+     * that way round before this was rewritten, so the blame landed on the
+     * mechanism rather than on the build.
+     *
+     * The session API is the supported one, and it is better on its own terms:
+     * the bytes are written into a session instead of exposed through a
+     * `FileProvider`, so there is no content URI to grant and no provider to
+     * declare, and committing produces a real status — see [InstallReceiver].
+     *
+     * Nothing here bypasses a prompt. The commit comes back asking for user
+     * confirmation, which is exactly what it should do.
+     *
+     * @return an error to show, or null when the session is on its way.
      */
-    fun installIntent(context: Context, apk: File): Intent {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", apk)
-        return Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    suspend fun install(context: Context, apk: File): String? = withContext(Dispatchers.IO) {
+        val installer = context.packageManager.packageInstaller
+        var sessionId = -1
+
+        try {
+            val params = PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL,
+            ).apply {
+                // Named so Android can check this is an update to us and not an
+                // attempt to install something else under our confirmation.
+                setAppPackageName(context.packageName)
+            }
+
+            sessionId = installer.createSession(params)
+            installer.openSession(sessionId).use { session ->
+                session.openWrite(SESSION_NAME, 0, apk.length()).use { output ->
+                    apk.inputStream().use { input -> input.copyTo(output) }
+                    // Without this the bytes can still be in a buffer at commit
+                    // and the session is rejected as incomplete.
+                    session.fsync(output)
+                }
+
+                session.commit(
+                    PendingIntent.getBroadcast(
+                        context,
+                        sessionId,
+                        Intent(context, InstallReceiver::class.java)
+                            .setPackage(context.packageName),
+                        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    ).intentSender,
+                )
+            }
+            null
+        } catch (error: IOException) {
+            Log.w(TAG, "install session failed", error)
+            if (sessionId != -1) runCatching { installer.abandonSession(sessionId) }
+            "Could not stage the update: ${error.message ?: "I/O error"}"
+        } catch (error: Exception) {
+            Log.w(TAG, "install session failed", error)
+            if (sessionId != -1) runCatching { installer.abandonSession(sessionId) }
+            "Could not start the install: ${error.message ?: "unknown error"}"
         }
     }
 

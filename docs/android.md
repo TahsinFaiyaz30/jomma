@@ -335,6 +335,22 @@ to allow this app to install packages, per app, and then confirms the install
 itself. Both prompts are the point. The app deep-links to the exact settings
 screen rather than failing with a permission error.
 
+**Installing goes through `PackageInstaller`, not `ACTION_VIEW`.** The intent
+handoff every tutorial shows — a `FileProvider` URI with the
+`application/vnd.android.package-archive` type — does not work for an *update*
+on a current Android. It goes from `InstallStart` to `InstallFailed` without
+ever showing the confirmation, and all the user gets is "App not installed as
+package conflicts with an existing package", for an APK that `pm install`
+accepts without complaint, signed with the same key, one version code higher.
+
+The session API is the supported path and is better on its own terms. The bytes
+are written into a session rather than exposed through a content URI, so there
+is no provider to declare and no permission to grant. More usefully, committing
+returns a real status: `STATUS_PENDING_USER_ACTION` carries the confirmation
+dialog to show, and a failure carries a reason, so the app can say "not enough
+free storage to install" instead of leaving the system to show something
+nobody can act on.
+
 | Setting | Default | Why |
 |---|---|---|
 | Check interval | Once a day | Weekly leaves a known-broken build running for days. Every launch is wasted work on a phone nobody opens. `Never` exists for operators who ship their own builds. |

@@ -218,10 +218,6 @@ class MainActivity : ComponentActivity() {
      */
     private fun installUpdate() {
         viewModel.requestInstall(
-            onReady = { apk ->
-                runCatching { startActivity(Updater.installIntent(this, apk)) }
-                    .onFailure { viewModel.reportUpdateProblem("Could not open the installer") }
-            },
             onNeedsPermission = {
                 viewModel.reportUpdateProblem("Allow Jomma to install apps, then press Install again.")
                 runCatching { startActivity(Updater.installPermissionIntent(this)) }
