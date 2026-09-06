@@ -7,6 +7,45 @@ import { z } from 'zod'
  * created to farm reference codes.
  */
 
+/**
+ * Text that is going into Postgres.
+ *
+ * Postgres `text` cannot hold a NUL byte, and neither the driver nor Zod
+ * objects to one on the way in. A JSON body carrying one inside a string is
+ * perfectly valid JSON, Zod accepts it as a string, the driver forwards it,
+ * and the database rejects it at the very end with an unhandled error -- so
+ * the caller gets a 500 for input that validation was supposed to have
+ * caught. That is a false promise from the validation layer, and a reliable
+ * way for anyone holding a key to make the intents endpoint throw.
+ *
+ * Every other C0 control goes too. Those survive the round trip but arrive
+ * invisible: a reference carrying a backspace or a line feed renders as
+ * something other than what was sent, on a dashboard where an operator is
+ * comparing it against a message a customer read off their phone.
+ *
+ * Checked by code point rather than by regex. A character class of control
+ * characters has to be written with escapes that are easy to get subtly wrong
+ * and impossible to review by eye, and it trips the lint rule that exists to
+ * catch exactly that mistake.
+ */
+function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0
+    if (code < 0x20 || code === 0x7f) return true
+  }
+  return false
+}
+
+/** A single-line string that is safe to store and safe to display. */
+export const safeText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .refine((value) => !hasControlCharacter(value), {
+      message: 'Control characters are not allowed.',
+    })
+
 export const poishaSchema = z
   .number()
   .int('Amount must be an integer number of poisha.')
@@ -19,6 +58,9 @@ export const msisdnSchema = z
   .trim()
   .min(10)
   .max(20)
+  .refine((value) => !hasControlCharacter(value), {
+    message: 'Control characters are not allowed.',
+  })
   .refine((value) => value.replace(/\D/g, '').length >= 10, {
     message: 'Not a valid Bangladeshi mobile number.',
   })
@@ -58,7 +100,7 @@ const redirectUrlSchema = z
 
 export const createIntentSchema = z.object({
   amount: poishaSchema,
-  client_reference: z.string().trim().min(1).max(255),
+  client_reference: safeText(255).min(1),
   payer_msisdn: msisdnSchema.optional().nullable(),
   provider: z.enum(PROVIDER_PREFERENCES).default('any'),
   ttl_seconds: z.number().int().min(60).max(3600).optional(),
@@ -75,7 +117,7 @@ export const extendIntentSchema = z.object({
 })
 
 export const createSubmissionSchema = z.object({
-  intent_id: z.string().trim().min(1),
+  intent_id: safeText(128).min(1),
   trx_id: trxIdSchema,
   sender_msisdn: msisdnSchema.optional().nullable(),
   claimed_amount: poishaSchema.optional().nullable(),
@@ -85,11 +127,11 @@ export type CreateSubmissionInput = z.infer<typeof createSubmissionSchema>
 /* ── Device API ──────────────────────────────────────────────────────────── */
 
 export const captureItemSchema = z.object({
-  local_id: z.string().trim().min(1).max(64),
+  local_id: safeText(64).min(1),
   source: z.enum(
     CAPTURE_SOURCES.filter((s) => s === 'notification' || s === 'sms') as ['notification', 'sms'],
   ),
-  package: z.string().trim().max(128).optional().nullable(),
+  package: safeText(128).optional().nullable(),
   /**
    * The message, verbatim. Stored before anything tries to parse it, so the
    * schema deliberately imposes no shape beyond a length ceiling.
@@ -111,7 +153,7 @@ export const heartbeatSchema = z.object({
   network: z.enum(['wifi', 'mobile', 'none', 'unknown']).optional().nullable(),
   queue_depth: z.number().int().min(0).optional().nullable(),
   permissions: z.record(z.string(), z.boolean()).optional().nullable(),
-  app_version: z.string().trim().max(32).optional().nullable(),
+  app_version: safeText(32).optional().nullable(),
 })
 
 /**
@@ -130,6 +172,6 @@ export const captureSettingsSchema = z.object({
 
 export const deviceEventSchema = z.object({
   kind: z.enum(DEVICE_REPORTABLE_EVENT_KINDS),
-  detail: z.string().trim().max(500).optional().nullable(),
+  detail: safeText(500).optional().nullable(),
   payload: z.record(z.string(), z.unknown()).optional(),
 })
