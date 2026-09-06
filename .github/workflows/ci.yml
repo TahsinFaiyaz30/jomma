@@ -24,6 +24,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, because the version guard diffs this push against the
+          # commit before it. The default shallow clone does not contain that
+          # commit, so the guard would find nothing to compare and skip — which
+          # is worse than not having it, since it would look like it passed.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
@@ -38,6 +44,20 @@ jobs:
       # that produces a *working* build that lies about what it is.
       - name: Version is consistent
         run: pnpm version:check
+
+      # Everything shipped is versioned
+      #
+      # Nine commits of tenancy, device approval and multi-number support once
+      # went out with VERSION untouched, so no tag was cut and no APK was ever
+      # built for any of it. A phone reporting 1.3.2 was running code that
+      # 1.3.2 never contained.
+      #
+      # This is the check that would have caught it, and it is deliberately
+      # about *shippable* paths only. Docs, workflows and scratch do not need a
+      # version; anything that lands on a phone or in the database does.
+      - name: Shippable changes carry a version bump
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: node scripts/version-guard.mjs ${{ github.event.before }} ${{ github.sha }}
 
       - run: pnpm lint
       - run: pnpm typecheck
