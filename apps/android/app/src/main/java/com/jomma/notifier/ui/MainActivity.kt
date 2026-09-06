@@ -110,8 +110,8 @@ class MainActivity : ComponentActivity() {
                         onFlush = viewModel::flushNow,
                         onHeartbeat = viewModel::heartbeatNow,
                         onTestCapture = viewModel::sendTestCapture,
-                        onReprovision = viewModel::reprovision,
                         onCaptureChange = viewModel::setCapture,
+                        onRemovePairing = viewModel::removePairing,
                     )
                 }
 

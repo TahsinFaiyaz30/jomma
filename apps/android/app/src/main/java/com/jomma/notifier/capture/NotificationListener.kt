@@ -5,7 +5,9 @@ import android.content.Context
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import com.jomma.notifier.data.Attribution
 import com.jomma.notifier.data.CaptureRepository
+import com.jomma.notifier.data.Prefs
 import com.jomma.notifier.work.FlushWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +32,22 @@ class NotificationListener : NotificationListenerService() {
         val text = extractText(sbn.notification) ?: return
 
         scope.launch {
-            val stored = repository.enqueue(source = "notification", raw = text, pkg = sbn.packageName)
+            /*
+             * Which number this belongs to, decided now: the posting package is
+             * the only evidence, and it is gone by the time the queue flushes.
+             * No confident answer means no capture — see Attribution.
+             */
+            val pairing = Attribution.forNotification(
+                Prefs.get(applicationContext).pairings,
+                sbn.packageName,
+            ) ?: return@launch
+
+            val stored = repository.enqueue(
+                pairing = pairing,
+                source = "notification",
+                raw = text,
+                pkg = sbn.packageName,
+            )
             // Flush immediately. The scheduled flush is the backstop, not the
             // primary path — a buyer is watching a pay page right now.
             if (stored) FlushWorker.enqueueNow(applicationContext)
@@ -60,7 +77,9 @@ class NotificationListener : NotificationListenerService() {
          * Nagad's package id must be verified on a real device before being
          * added — docs/android.md is explicit about not guessing it.
          */
-        val WATCHED_PACKAGES = setOf("com.bKash.customerapp")
+        // Nagad joins bKash here so a phone watching both gets both streams.
+        // Attribution keys off exactly these, so the two lists cannot drift.
+        val WATCHED_PACKAGES = setOf("com.bKash.customerapp", "com.konasl.nagad")
 
         /** There is no runtime permission for this; it is a settings toggle. */
         fun hasAccess(context: Context): Boolean {

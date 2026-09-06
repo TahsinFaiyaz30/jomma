@@ -4,7 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
+import com.jomma.notifier.data.Attribution
 import com.jomma.notifier.data.CaptureRepository
+import com.jomma.notifier.data.Prefs
 import com.jomma.notifier.work.FlushWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,10 +43,23 @@ class SmsReceiver : BroadcastReceiver() {
         scope.launch {
             try {
                 var stored = false
+                val pairings = Prefs.get(appContext).pairings
+                val subscriptionId = intent.getIntExtra("subscription", -1)
+
                 for ((sender, parts) in bySender) {
                     if (!isWatched(sender)) continue
+
+                    /*
+                     * The SIM first, then the sender. Only the subscription can
+                     * separate two accounts with the same provider on one phone,
+                     * which is the case the settings screen asks about.
+                     */
+                    val pairing = Attribution.forSms(pairings, sender, subscriptionId) ?: continue
+
                     val body = parts.joinToString("") { it.messageBody.orEmpty() }
-                    if (repository.enqueue(source = "sms", raw = body, pkg = null)) stored = true
+                    if (repository.enqueue(pairing = pairing, source = "sms", raw = body)) {
+                        stored = true
+                    }
                 }
                 if (stored) FlushWorker.enqueueNow(appContext)
             } finally {

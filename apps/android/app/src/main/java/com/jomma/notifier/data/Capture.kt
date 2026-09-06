@@ -22,10 +22,27 @@ import java.util.UUID
  */
 @Entity(
     tableName = "captures",
-    indices = [Index(value = ["sent", "capturedAt"]), Index(value = ["raw"], unique = true)],
+    indices = [
+        Index(value = ["sent", "capturedAt"]),
+        Index(value = ["deviceId", "sent"]),
+        // Unique on the message *within a number*, not globally. Two SIMs on one
+        // phone can legitimately receive the same text — an identical amount to
+        // two accounts in the same minute — and a global unique index would
+        // silently drop the second one, which is money nobody would know about.
+        Index(value = ["deviceId", "raw"], unique = true),
+    ],
 )
 data class Capture(
     @PrimaryKey val localId: String = UUID.randomUUID().toString(),
+    /**
+     * Which pairing this belongs to, and therefore which token reports it.
+     *
+     * Decided when the message is captured rather than when the queue is
+     * flushed: attribution depends on what arrived — the sender, the app that
+     * posted the notification, the SIM it came in on — and none of that is
+     * still available later.
+     */
+    val deviceId: String,
     /** notification | sms */
     val source: String,
     val pkg: String? = null,

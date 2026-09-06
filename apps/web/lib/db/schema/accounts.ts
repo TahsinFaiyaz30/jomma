@@ -87,7 +87,20 @@ export const devices = pgTable(
     receivingAccountId: fkId('receiving_account_id')
       .notNull()
       .references(() => receivingAccounts.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
+    /**
+     * What to call this phone. Cosmetic, and only cosmetic.
+     *
+     * Deliberately not unique — not per account, not per business, not
+     * globally. Two shops both calling a phone "Counter" is normal, and so is
+     * one shop with two phones called "Shop phone" because somebody has not got
+     * round to renaming the second. Identity is the device id and the token;
+     * a name that had to be unique would be an identifier wearing a label's
+     * clothes, and renaming would start failing for reasons nobody could see.
+     *
+     * Defaulted because the phone supplies it at pairing — the operator
+     * generating a QR has not met the device yet.
+     */
+    name: text('name').notNull().default('New phone'),
     platform: text('platform').notNull().default('android'),
 
     /**

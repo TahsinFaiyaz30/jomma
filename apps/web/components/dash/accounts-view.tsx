@@ -8,6 +8,7 @@ import {
   addAccountAction,
   addDeviceAction,
   approveDeviceAction,
+  renameDeviceAction,
   revokeDeviceAction,
   rotateTokenAction,
   setAccountStatusAction,
@@ -161,7 +162,6 @@ function NewAccount({ firstOne }: { firstOne: boolean }) {
 function AccountCard({ account }: { account: AccountView }) {
   const { amount, elapsed, percent } = useI18n()
   const [pending, startTransition] = useTransition()
-  const [deviceName, setDeviceName] = useState('')
   const [reveal, setReveal] = useState<
     | { kind: 'qr'; dataUrl: string; expiresAt: string; appLinksReady: boolean }
     | { kind: 'token'; value: string }
@@ -316,32 +316,31 @@ function AccountCard({ account }: { account: AccountView }) {
               onRotate={() => run(() => rotateTokenAction(device.id))}
               onRevoke={() => run(() => revokeDeviceAction(device.id))}
               onApprove={() => run(() => approveDeviceAction(device.id))}
+              onRename={(name) => run(() => renameDeviceAction(device.id, name))}
             />
           ))
         )}
 
+        {/*
+          One button, no form. Naming the phone here was a required field
+          standing between the operator and the only thing this control exists
+          to produce — and a name guessed before meeting the device is worse
+          than the model the phone reports for itself when it pairs. Rename it
+          afterwards, when it is in front of you.
+        */}
         <div className="flex items-center gap-2 pt-1">
-          <Input
-            value={deviceName}
-            onChange={(event) => setDeviceName(event.target.value)}
-            placeholder="New device name"
-            className="h-7 max-w-56 text-small"
-          />
           <Button
             size="sm"
             variant="outline"
-            disabled={pending || !deviceName.trim()}
-            onClick={() =>
-              run(async () => {
-                const result = await addDeviceAction(account.id, deviceName)
-                if (result.ok) setDeviceName('')
-                return result
-              })
-            }
+            disabled={pending}
+            onClick={() => run(() => addDeviceAction(account.id))}
           >
             {pending ? <Spinner /> : null}
-            Add device
+            Pair a phone
           </Button>
+          <span className="text-micro text-muted-foreground">
+            Shows a QR. The phone names itself when it scans.
+          </span>
         </div>
       </div>
 
@@ -523,12 +522,14 @@ function DeviceActions({
   onRotate,
   onRevoke,
   onApprove,
+  onRename,
 }: {
   device: DeviceRow
   pending: boolean
   onRotate: () => void
   onRevoke: () => void
   onApprove: () => void
+  onRename: (name: string) => void
 }) {
   if (device.status === 'awaiting_approval') {
     return (
@@ -551,6 +552,23 @@ function DeviceActions({
 
   return (
     <>
+      {/*
+        Renaming is offered here rather than at pairing, because this is the
+        first moment the phone is actually in front of somebody — it has told
+        the dashboard its model, and now it can be called whatever the shop
+        calls it. Names are cosmetic and need not be unique.
+      */}
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={pending}
+        onClick={() => {
+          const next = window.prompt('What should this phone be called?', device.name)?.trim()
+          if (next && next !== device.name) onRename(next)
+        }}
+      >
+        Rename
+      </Button>
       <Button size="sm" variant="ghost" disabled={pending} onClick={onRotate}>
         Rotate token
       </Button>
@@ -568,6 +586,7 @@ function DeviceRowView({
   onRotate,
   onRevoke,
   onApprove,
+  onRename,
 }: {
   device: DeviceRow
   pending: boolean
@@ -575,6 +594,7 @@ function DeviceRowView({
   onRotate: () => void
   onRevoke: () => void
   onApprove: () => void
+  onRename: (name: string) => void
 }) {
   const awaiting = device.status === 'awaiting_approval'
 
@@ -603,6 +623,7 @@ function DeviceRowView({
           onRotate={onRotate}
           onRevoke={onRevoke}
           onApprove={onApprove}
+          onRename={onRename}
         />
       </span>
     </div>

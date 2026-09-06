@@ -17,17 +17,35 @@ import java.time.format.DateTimeFormatter
  */
 class CaptureRepository(context: Context) {
 
+    private val appContext = context.applicationContext
     private val dao = JommaDatabase.get(context).captureDao()
-    private val api = JommaApi(context)
     private val prefs = Prefs.get(context)
 
-    /** Step 1, and the only step that must never fail. */
-    suspend fun enqueue(source: String, raw: String, pkg: String? = null): Boolean {
+    /**
+     * Step 1, and the only step that must never fail.
+     *
+     * Takes the pairing rather than working it out, because attribution depends
+     * on what arrived — see [Attribution] — and the caller is the only thing
+     * still holding it.
+     */
+    suspend fun enqueue(
+        pairing: Pairing,
+        source: String,
+        raw: String,
+        pkg: String? = null,
+    ): Boolean {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return false
 
         return try {
-            dao.insert(Capture(source = source, raw = trimmed, pkg = pkg)) != -1L
+            dao.insert(
+                Capture(
+                    deviceId = pairing.deviceId,
+                    source = source,
+                    raw = trimmed,
+                    pkg = pkg,
+                ),
+            ) != -1L
         } catch (error: Exception) {
             // Nothing recoverable to do, but never crash the listener — a crash
             // takes the whole capture path down with it.
@@ -52,10 +70,41 @@ class CaptureRepository(context: Context) {
      * so.
      */
     suspend fun flush(): FlushOutcome {
-        if (!prefs.isProvisioned || prefs.revoked) return FlushOutcome.NotReady
+        val live = prefs.livePairings
+        if (live.isEmpty()) return FlushOutcome.NotReady
 
-        val pending = dao.pending()
+        /*
+         * One batch per number, because each goes under its own credential.
+         * Combining them would mean choosing a token for a request carrying
+         * another number's messages, which is the exact mistake this whole
+         * refactor exists to make impossible.
+         */
+        var acknowledged = 0
+        var stillQueued = 0
+        var failure: FlushOutcome? = null
+
+        for (pairing in live) {
+            when (val outcome = flushOne(pairing)) {
+                is FlushOutcome.Sent -> {
+                    acknowledged += outcome.acknowledged
+                    stillQueued += outcome.stillQueued
+                }
+                FlushOutcome.Empty, FlushOutcome.NotReady -> Unit
+                // Remembered, not returned: one number being revoked or offline
+                // must not stop the others from flushing.
+                else -> failure = outcome
+            }
+        }
+
+        if (acknowledged > 0 || stillQueued > 0) return FlushOutcome.Sent(acknowledged, stillQueued)
+        return failure ?: FlushOutcome.Empty
+    }
+
+    private suspend fun flushOne(pairing: Pairing): FlushOutcome {
+        val pending = dao.pendingFor(pairing.deviceId)
         if (pending.isEmpty()) return FlushOutcome.Empty
+
+        val api = JommaApi(appContext, pairing)
 
         val batch = CaptureBatch(
             captures = pending.map { capture ->
@@ -89,6 +138,11 @@ class CaptureRepository(context: Context) {
 
             JommaApi.Result.Revoked -> FlushOutcome.Revoked
 
+            // Nothing is marked failed: the messages are fine and the token is
+            // fine, a person simply has not pressed Approve yet. Leaving them
+            // untouched means the attempt count does not climb while waiting.
+            JommaApi.Result.AwaitingApproval -> FlushOutcome.AwaitingApproval
+
             is JommaApi.Result.Failed -> {
                 dao.markFailed(pending.map { it.localId }, result.message)
                 FlushOutcome.Failed(result.message, result.retryable)
@@ -107,6 +161,7 @@ class CaptureRepository(context: Context) {
         data object Empty : FlushOutcome
         data class Sent(val acknowledged: Int, val stillQueued: Int) : FlushOutcome
         data object Revoked : FlushOutcome
+        data object AwaitingApproval : FlushOutcome
         data class Failed(val message: String, val retryable: Boolean) : FlushOutcome
     }
 

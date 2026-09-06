@@ -1,0 +1,1 @@
+ALTER TABLE "devices" ALTER COLUMN "name" SET DEFAULT 'New phone';

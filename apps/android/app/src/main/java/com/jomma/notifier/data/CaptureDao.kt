@@ -23,6 +23,22 @@ interface CaptureDao {
     @Query("SELECT * FROM captures WHERE sent = 0 ORDER BY capturedAt ASC LIMIT :limit")
     suspend fun pending(limit: Int = 200): List<Capture>
 
+    /**
+     * What is queued for one number.
+     *
+     * Flushing is per pairing, because each batch travels under its own token —
+     * see CaptureRepository.
+     */
+    @Query(
+        "SELECT * FROM captures WHERE sent = 0 AND deviceId = :deviceId " +
+            "ORDER BY capturedAt ASC LIMIT :limit",
+    )
+    suspend fun pendingFor(deviceId: String, limit: Int = 200): List<Capture>
+
+    /** Drops a removed pairing's queue, so unsendable rows do not accumulate. */
+    @Query("DELETE FROM captures WHERE deviceId = :deviceId")
+    suspend fun deleteFor(deviceId: String): Int
+
     @Query("SELECT COUNT(*) FROM captures WHERE sent = 0")
     suspend fun pendingCount(): Int
 

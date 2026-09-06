@@ -68,8 +68,16 @@ export function pairUrl(code: string, origin: string = env().APP_URL): string {
 
 export async function createDeviceWithProvisioning(options: {
   receivingAccountId: string
-  name: string
-  actorId: string
+  /**
+   * Optional, and usually absent.
+   *
+   * The phone sends its own model when it pairs, which is a better name than
+   * anything the person generating the QR could guess — they have not met the
+   * device yet. Naming it here first was a required field standing between the
+   * operator and the only thing this screen exists to produce.
+   */
+  name?: string | null
+  actorId: string | null
 }): Promise<{ deviceId: string; qrDataUrl: string; payload: ProvisioningPayload }> {
   const account = await db.query.receivingAccounts.findFirst({
     where: eq(receivingAccounts.id, options.receivingAccountId),
@@ -92,7 +100,9 @@ export async function createDeviceWithProvisioning(options: {
     .insert(devices)
     .values({
       receivingAccountId: options.receivingAccountId,
-      name: options.name,
+      // Left to the column default when absent — the phone names itself on
+      // pairing, which is later than this and better informed.
+      ...(options.name?.trim() ? { name: options.name.trim() } : {}),
       platform: 'android',
       status: 'pending',
       provisioningHash: hash,
@@ -140,7 +150,12 @@ export async function createDeviceWithProvisioning(options: {
  * verified hash, conditional burn, short TTL — plus IP rate limiting at the
  * route.
  */
-export async function claimPairingCode(options: { code: string; ip: string | null }): Promise<{
+export async function claimPairingCode(options: {
+  code: string
+  ip: string | null
+  /** What the phone calls itself. Cosmetic — see `devices.name`. */
+  deviceName?: string
+}): Promise<{
   deviceToken: string
   deviceId: string
   account: { msisdn: string; provider: string }
@@ -159,6 +174,7 @@ export async function claimPairingCode(options: { code: string; ip: string | nul
     deviceId: device.id,
     provisioningToken: options.code,
     ip: options.ip,
+    deviceName: options.deviceName,
   })
 }
 
@@ -199,6 +215,7 @@ async function claimProvisioning(options: {
   deviceId: string
   provisioningToken: string
   ip: string | null
+  deviceName?: string
 }): Promise<{
   deviceToken: string
   deviceId: string
@@ -243,6 +260,9 @@ async function claimProvisioning(options: {
         provisionedAt: new Date(),
         tokenIssuedAt: new Date(),
         lastSeenIp: options.ip,
+        // Only when the phone offered one, so a rename from the dashboard is
+        // not undone by the next thing the device says about itself.
+        ...(options.deviceName ? { name: options.deviceName } : {}),
       })
       .where(and(eq(devices.id, options.deviceId), eq(devices.status, 'pending')))
       .returning({ id: devices.id })
@@ -394,6 +414,38 @@ export async function approveDevice(options: { deviceId: string; actorId: string
       actorType: 'admin',
       payload: { device_id: device.id, stage: 'approved' },
     })
+  })
+}
+
+/**
+ * Renaming a phone.
+ *
+ * Free-form and non-unique on purpose — see `devices.name`. Two phones with the
+ * same name in one account is allowed, because the alternative is a rename that
+ * fails for a reason the operator cannot see and does not care about.
+ */
+export async function renameDevice(options: {
+  deviceId: string
+  name: string
+  actorId: string
+}): Promise<void> {
+  const name = options.name.trim()
+  if (!name) throw new Error('Give the phone a name.')
+  if (name.length > 60) throw new Error('That name is too long.')
+
+  const [device] = await db
+    .update(devices)
+    .set({ name })
+    .where(eq(devices.id, options.deviceId))
+    .returning({ id: devices.id })
+
+  if (!device) throw new Error('Unknown device')
+
+  await audit(db, {
+    action: 'device.provisioned',
+    actorId: options.actorId,
+    actorType: 'admin',
+    payload: { device_id: options.deviceId, stage: 'renamed', name },
   })
 }
 

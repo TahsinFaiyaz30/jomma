@@ -88,7 +88,7 @@ object RestartAlarm {
     class Receiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val prefs = Prefs.get(context)
-            if (prefs.isProvisioned && !prefs.revoked && !NotifierService.isRunning) {
+            if (prefs.livePairings.isNotEmpty() && !NotifierService.isRunning) {
                 Log.i(TAG, "service was not running — restarting it")
                 runCatching { NotifierService.start(context) }
             }

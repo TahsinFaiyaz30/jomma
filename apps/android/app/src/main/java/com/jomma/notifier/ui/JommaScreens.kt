@@ -107,8 +107,8 @@ fun JommaScreens(
     onFlush: () -> Unit,
     onHeartbeat: () -> Unit,
     onTestCapture: () -> Unit,
-    onReprovision: () -> Unit,
-    onCaptureChange: (CaptureSettings) -> Unit,
+    onCaptureChange: (String, CaptureSettings) -> Unit,
+    onRemovePairing: (String) -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -146,7 +146,7 @@ fun JommaScreens(
     ) { padding ->
         Box(Modifier.padding(padding)) {
             when (destination) {
-                0 -> StatusScreen(state, onScan, onFlush, onHeartbeat, onTestCapture, onReprovision)
+                0 -> StatusScreen(state, onScan, onFlush, onHeartbeat, onTestCapture)
                 1 -> LogScreen(captures)
                 else -> SettingsScreen(
                     state = state,
@@ -156,6 +156,7 @@ fun JommaScreens(
                     onOpenAutoStart = onOpenAutoStart,
                     onScan = onScan,
                     onCaptureChange = onCaptureChange,
+                    onRemovePairing = onRemovePairing,
                     onIntervalChange = onIntervalChange,
                     onAutoDownloadChange = onAutoDownloadChange,
                     onUnmeteredOnlyChange = onUnmeteredOnlyChange,
@@ -176,7 +177,6 @@ private fun StatusScreen(
     onFlush: () -> Unit,
     onHeartbeat: () -> Unit,
     onTestCapture: () -> Unit,
-    onReprovision: () -> Unit,
 ) {
     val status = LocalStatusColors.current
 
@@ -228,11 +228,18 @@ private fun StatusScreen(
                     )
                     Text(
                         when {
-                            state.revoked -> "Revoked — re-provision this device"
                             !state.provisioned -> "Not provisioned yet"
+                            // Named while there is one, counted after that: with
+                            // three numbers the list belongs on Settings, not in
+                            // a status line.
+                            state.awaitingApproval.isNotEmpty() && state.livePairings.isEmpty() ->
+                                "Waiting for approval on the dashboard"
+                            state.livePairings.isEmpty() -> "Revoked — pair this phone again"
                             !state.hasNotificationAccess -> "Notification access is off"
                             state.queueDepth > 0 -> "${state.queueDepth} waiting to send"
-                            else -> "Watching ${state.accountMsisdn ?: "this account"}"
+                            state.livePairings.size == 1 ->
+                                "Watching ${state.livePairings.first().accountMsisdn}"
+                            else -> "Watching ${state.livePairings.size} numbers"
                         },
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -294,7 +301,13 @@ private fun StatusScreen(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = onHeartbeat, modifier = Modifier.weight(1f)) { Text("Heartbeat") }
-            OutlinedButton(onClick = onReprovision, modifier = Modifier.weight(1f)) { Text("Re-provision") }
+            /*
+             * "Add a number" where "Re-provision" used to be. Tearing the phone
+             * down wholesale is no longer a sensible action when it may be
+             * watching three numbers; removing one specifically lives on
+             * Settings, beside the number it would remove.
+             */
+            OutlinedButton(onClick = onScan, modifier = Modifier.weight(1f)) { Text("Add a number") }
         }
     }
 }

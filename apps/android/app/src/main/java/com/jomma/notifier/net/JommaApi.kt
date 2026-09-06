@@ -1,6 +1,8 @@
 package com.jomma.notifier.net
 
 import android.content.Context
+import android.os.Build
+import com.jomma.notifier.data.Pairing
 import com.jomma.notifier.data.Prefs
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -13,13 +15,22 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
- * The HTTP client.
+ * The HTTP client, for one pairing.
  *
  * Deliberately small: capture, heartbeat, event, provision. No interceptors that
  * log bodies — messages contain buyer phone numbers and this device is treated
  * as holding customer data.
+ *
+ * An instance is bound to a single [Pairing] rather than reading whichever
+ * credential happens to be in prefs. With several numbers on one phone that
+ * distinction is the whole thing: "the token" stopped being a meaningful phrase
+ * the moment there were three of them, and a call that picked one up implicitly
+ * would post one number's captures under another's credential.
+ *
+ * Pairing is the exception and is why [context] is still needed — it happens
+ * before there is a pairing to be bound to.
  */
-class JommaApi(context: Context) {
+class JommaApi(context: Context, private val pairing: Pairing? = null) {
 
     private val prefs = Prefs.get(context)
 
@@ -53,6 +64,9 @@ class JommaApi(context: Context) {
         data class Ok<T>(val value: T) : Result<T>
         /** The token is gone. The app must stop and ask to be re-provisioned. */
         data object Revoked : Result<Nothing>
+
+        /** Scanned, but nobody has approved this phone on the dashboard yet. */
+        data object AwaitingApproval : Result<Nothing>
         data class Failed(val message: String, val retryable: Boolean) : Result<Nothing>
     }
 
@@ -115,7 +129,10 @@ class JommaApi(context: Context) {
      */
     suspend fun pair(link: PairingLink): Result<ProvisionResponse> =
         withContext(Dispatchers.IO) {
-            val payload = json.encodeToString(PairRequest.serializer(), PairRequest(link.code))
+            val payload = json.encodeToString(
+                PairRequest.serializer(),
+                PairRequest(code = link.code, deviceName = deviceName()),
+            )
             val request = Request.Builder()
                 .url("${link.serverUrl.trimEnd('/')}/device/v1/pair")
                 .post(payload.toRequestBody(JSON_MEDIA))
@@ -149,18 +166,13 @@ class JommaApi(context: Context) {
         parse: (String) -> T,
         method: (Request.Builder) -> Request.Builder,
     ): Result<T> = withContext(Dispatchers.IO) {
-        val baseUrl = prefs.serverUrl
-        val token = prefs.deviceToken
-        val deviceId = prefs.deviceId
-
-        if (baseUrl.isNullOrBlank() || token.isNullOrBlank() || deviceId.isNullOrBlank()) {
-            return@withContext Result.Failed("Device is not provisioned", retryable = false)
-        }
+        val bound = pairing
+            ?: return@withContext Result.Failed("No number selected", retryable = false)
 
         val builder = Request.Builder()
-            .url("${baseUrl.trimEnd('/')}$path")
-            .header("Authorization", "Bearer $token")
-            .header("X-Device-Id", deviceId)
+            .url("${bound.serverUrl.trimEnd('/')}$path")
+            .header("Authorization", "Bearer ${bound.deviceToken}")
+            .header("X-Device-Id", bound.deviceId)
 
         execute(method(builder).build(), parse = parse)
     }
@@ -185,9 +197,23 @@ class JommaApi(context: Context) {
                     // just hammer the endpoint; the app shows a re-provision
                     // screen instead of failing silently.
                     response.code == 401 -> {
-                        if (latchRevocation) prefs.revoked = true
+                        // Latched against this pairing alone. One number being
+                        // revoked from the dashboard must leave the others on
+                        // the phone reporting — the old app-wide flag took the
+                        // whole device down with it.
+                        if (latchRevocation) {
+                            pairing?.let { prefs.updatePairing(it.deviceId) { p -> p.copy(revoked = true) } }
+                        }
                         Result.Revoked
                     }
+
+                    /*
+                     * Waiting for the dashboard to approve this phone. Not a
+                     * failure and emphatically not a revocation: the token is
+                     * real and will start working the moment somebody presses
+                     * Approve, so nothing here may latch or give up.
+                     */
+                    response.code == 403 -> Result.AwaitingApproval
 
                     // 4xx other than 401 is our bug, not a transient fault.
                     response.code in 400..499 ->
@@ -201,6 +227,23 @@ class JommaApi(context: Context) {
         } catch (error: Exception) {
             Result.Failed(error.message ?: "Unexpected error", retryable = false)
         }
+
+    /**
+     * A human-readable name for this handset.
+     *
+     * `MANUFACTURER MODEL` where the model does not already repeat the make —
+     * "Samsung SM-A155F" rather than "samsung samsung SM-A155F". Best effort:
+     * it is a label somebody will probably change, not an identifier.
+     */
+    private fun deviceName(): String {
+        val make = Build.MANUFACTURER.orEmpty().trim()
+        val model = Build.MODEL.orEmpty().trim()
+        return when {
+            model.isEmpty() -> make.ifEmpty { "Android phone" }
+            make.isEmpty() || model.startsWith(make, ignoreCase = true) -> model
+            else -> "${make.replaceFirstChar { it.uppercase() }} $model"
+        }.take(60)
+    }
 
     companion object {
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()

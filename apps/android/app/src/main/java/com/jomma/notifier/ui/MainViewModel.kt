@@ -7,6 +7,7 @@ import com.jomma.notifier.capture.NotificationListener
 import com.jomma.notifier.data.Capture
 import com.jomma.notifier.data.CaptureRepository
 import com.jomma.notifier.data.JommaDatabase
+import com.jomma.notifier.data.Pairing
 import com.jomma.notifier.data.Prefs
 import com.jomma.notifier.net.CaptureSettings
 import com.jomma.notifier.net.JommaApi
@@ -35,10 +36,15 @@ import kotlinx.serialization.json.Json
 enum class Health { Connected, Degraded, Down }
 
 data class UiState(
-    val provisioned: Boolean = false,
-    val revoked: Boolean = false,
-    val accountMsisdn: String? = null,
-    val serverUrl: String? = null,
+    /**
+     * Every number this phone watches, each with its own credential, capture
+     * settings and approval state.
+     *
+     * A list rather than a set of nullable fields, because "the account" and
+     * "the token" stopped being meaningful phrases the moment a phone could
+     * hold three of them.
+     */
+    val pairings: List<Pairing> = emptyList(),
     val queueDepth: Int = 0,
     val lastCaptureAt: Long? = null,
     val lastHeartbeatAt: Long = 0,
@@ -50,8 +56,8 @@ data class UiState(
     /** Whether this phone ships a vendor background-app killer worth warning about. */
     val aggressiveVendor: Boolean = false,
     val vendorLabel: String = "",
-    val capture: CaptureSettings = CaptureSettings(),
-    val captureSaving: Boolean = false,
+    /** Which number's settings are mid-save, so only that row shows a spinner. */
+    val captureSavingFor: String? = null,
     /* Updates. `availableUpdate` is the version string, or null when current. */
     val updateInterval: String = "Daily",
     val autoDownloadUpdates: Boolean = false,
@@ -64,10 +70,18 @@ data class UiState(
     val busy: Boolean = false,
     val message: String? = null,
 ) {
+    val provisioned: Boolean get() = pairings.isNotEmpty()
+    val livePairings: List<Pairing> get() = pairings.filter { it.live }
+    val awaitingApproval: List<Pairing> get() = pairings.filter { it.awaitingApproval }
+
     val health: Health
         get() = when {
-            !provisioned || revoked -> Health.Down
+            // Down only when *nothing* works. One revoked number among three is
+            // a problem on that row, not a dead phone.
+            pairings.isEmpty() || livePairings.isEmpty() -> Health.Down
             !hasNotificationAccess -> Health.Down
+            // Some numbers working and some not is exactly "degraded".
+            livePairings.size < pairings.size -> Health.Degraded
             // A backing queue or a stale beat means it is working but falling
             // behind — worth noticing, not worth panicking about.
             queueDepth > 0 -> Health.Degraded
@@ -124,23 +138,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         val app = getApplication<Application>()
         _state.value = _state.value.copy(
-            provisioned = prefs.isProvisioned,
-            revoked = prefs.revoked,
-            accountMsisdn = prefs.accountMsisdn,
-            serverUrl = prefs.serverUrl,
+            pairings = prefs.pairings,
             lastHeartbeatAt = prefs.lastHeartbeatAt,
             hasNotificationAccess = NotificationListener.hasAccess(app),
             hasSmsPermission = HeartbeatWorker.hasSmsPermission(app),
             batteryExempt = KeepAlive.isBatteryOptimisationDisabled(app),
             aggressiveVendor = KeepAlive.isAggressiveVendor,
             vendorLabel = KeepAlive.vendorLabel,
-            capture = prefs.capture,
             updateInterval = prefs.updateInterval,
             autoDownloadUpdates = prefs.autoDownloadUpdates,
             updatesOnUnmeteredOnly = prefs.updatesOnUnmeteredOnly,
         )
 
-        if (prefs.isProvisioned && !prefs.revoked) refreshCaptureSettings()
+        // Each live number separately: they are different accounts on the
+        // server with different settings.
+        for (pairing in prefs.livePairings) refreshCaptureSettings(pairing)
     }
 
     /**
@@ -154,12 +166,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Silent on failure. This runs on every launch, and an offline phone
      * showing an error banner about a setting nobody was looking at is noise.
      */
-    private fun refreshCaptureSettings() {
+    private fun refreshCaptureSettings(pairing: Pairing) {
         viewModelScope.launch {
-            val result = JommaApi(getApplication()).captureSettings()
+            val result = JommaApi(getApplication(), pairing).captureSettings()
             if (result is JommaApi.Result.Ok) {
-                prefs.capture = result.value.capture
-                _state.value = _state.value.copy(capture = result.value.capture)
+                prefs.updatePairing(pairing.deviceId) { it.copy(capture = result.value.capture) }
+                _state.value = _state.value.copy(pairings = prefs.pairings)
             }
         }
     }
@@ -172,33 +184,51 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * account, so this is the same setting the dashboard edits — last write
      * wins, and the loser sees it on the next heartbeat.
      */
-    fun setCapture(settings: CaptureSettings) {
-        val previous = _state.value.capture
-        _state.value = _state.value.copy(capture = settings, captureSaving = true)
+    fun setCapture(deviceId: String, settings: CaptureSettings) {
+        val pairing = prefs.pairing(deviceId) ?: return
+        val previous = pairing.capture
+
+        // Optimistic, and per number — the other rows must not freeze because
+        // this one is saving.
+        prefs.updatePairing(deviceId) { it.copy(capture = settings) }
+        _state.value = _state.value.copy(pairings = prefs.pairings, captureSavingFor = deviceId)
 
         viewModelScope.launch {
-            when (val result = JommaApi(getApplication()).updateCaptureSettings(settings)) {
+            val api = JommaApi(getApplication(), pairing)
+            when (val result = api.updateCaptureSettings(settings)) {
                 is JommaApi.Result.Ok -> {
-                    prefs.capture = result.value.capture
+                    prefs.updatePairing(deviceId) { it.copy(capture = result.value.capture) }
                     _state.value = _state.value.copy(
-                        capture = result.value.capture,
-                        captureSaving = false,
+                        pairings = prefs.pairings,
+                        captureSavingFor = null,
                     )
                 }
 
                 JommaApi.Result.Revoked -> {
+                    prefs.updatePairing(deviceId) { it.copy(capture = previous, revoked = true) }
                     _state.value = _state.value.copy(
-                        capture = previous,
-                        captureSaving = false,
-                        revoked = true,
-                        message = "This device was revoked. Re-provision it.",
+                        pairings = prefs.pairings,
+                        captureSavingFor = null,
+                        message = "${pairing.accountMsisdn} was revoked. Pair it again.",
+                    )
+                }
+
+                JommaApi.Result.AwaitingApproval -> {
+                    prefs.updatePairing(deviceId) {
+                        it.copy(capture = previous, awaitingApproval = true)
+                    }
+                    _state.value = _state.value.copy(
+                        pairings = prefs.pairings,
+                        captureSavingFor = null,
+                        message = "Approve ${pairing.accountMsisdn} on the dashboard first.",
                     )
                 }
 
                 is JommaApi.Result.Failed -> {
+                    prefs.updatePairing(deviceId) { it.copy(capture = previous) }
                     _state.value = _state.value.copy(
-                        capture = previous,
-                        captureSaving = false,
+                        pairings = prefs.pairings,
+                        captureSavingFor = null,
                         message = "Could not save: ${result.message}",
                     )
                 }
@@ -214,18 +244,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * third-party scanner hands the identical URL to Android, which routes it
      * here as an App Link. Neither path is privileged over the other.
      *
-     * Ignored once the device is already provisioned. Re-opening an old link
-     * from a notification or browser history must not tear down a working
-     * device — the code would fail anyway, having been burned, but the failure
-     * would show as an alarming message on a phone that is working fine.
+     * Scanning again *adds a number* rather than being refused. That is the
+     * whole point of the plus button: one phone can hold a bKash account and a
+     * Nagad account, or two SIMs, and each is a separate device row on the
+     * server with its own token. Nothing is asked of the person holding the
+     * phone — the code says which number it is and the server answers with the
+     * rest.
+     *
+     * What is still refused is the same *number* twice, which would create a
+     * second device row for one account and double every capture from it.
      */
     fun provision(scanned: String) {
         val app = getApplication<Application>()
-
-        if (prefs.isProvisioned && !prefs.revoked) {
-            _state.value = _state.value.copy(message = "This device is already set up.")
-            return
-        }
 
         val link = PairingLink.parse(scanned)
         if (link == null) {
@@ -238,14 +268,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             when (val result = JommaApi(app).pair(link)) {
                 is JommaApi.Result.Ok -> {
+                    val msisdn = result.value.account.msisdn
+
+                    if (prefs.watches(msisdn)) {
+                        _state.value = _state.value.copy(
+                            busy = false,
+                            message = "$msisdn is already set up on this phone.",
+                        )
+                        return@launch
+                    }
+
                     // The server URL comes from the QR, so it is stored only
                     // after that server has answered — a link to somewhere else
                     // never gets written down.
-                    prefs.serverUrl = link.serverUrl
-                    prefs.deviceToken = result.value.deviceToken
-                    prefs.deviceId = result.value.deviceId
-                    prefs.accountMsisdn = result.value.account.msisdn
-                    prefs.revoked = false
+                    prefs.upsertPairing(
+                        Pairing(
+                            deviceId = result.value.deviceId,
+                            deviceToken = result.value.deviceToken,
+                            serverUrl = link.serverUrl,
+                            accountMsisdn = msisdn,
+                            provider = result.value.account.provider,
+                            // Scanning is no longer the last step: the phone is
+                            // inert until the dashboard approves it.
+                            awaitingApproval = true,
+                        ),
+                    )
 
                     NotifierService.start(app)
                     HeartbeatWorker.schedule(app)
@@ -254,11 +301,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     // something worth recovering.
                     RestartAlarm.schedule(app)
 
-                    _state.value = _state.value.copy(busy = false, message = "Provisioned.")
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        message = "$msisdn added. Approve it on the dashboard to start capturing.",
+                    )
                     refresh()
                 }
 
                 JommaApi.Result.Revoked ->
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        message = "That code has expired or was already used.",
+                    )
+
+                JommaApi.Result.AwaitingApproval ->
                     _state.value = _state.value.copy(
                         busy = false,
                         message = "That code has expired or was already used.",
@@ -277,15 +333,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun heartbeatNow() {
         viewModelScope.launch {
-            HeartbeatWorker.beat(getApplication())
+            for (pairing in prefs.livePairings) HeartbeatWorker.beat(getApplication(), pairing)
             refresh()
         }
     }
 
-    /** Writes a capture through the real path, so the whole chain is exercised. */
+    /**
+     * Writes a capture through the real path, so the whole chain is exercised.
+     *
+     * Against the first live number, because the point is to prove the pipe
+     * works at all rather than to test a particular account — and sending one
+     * per number would put a test message in every merchant's feed.
+     */
     fun sendTestCapture() {
+        val pairing = prefs.livePairings.firstOrNull()
+        if (pairing == null) {
+            _state.value = _state.value.copy(message = "No approved number to test with.")
+            return
+        }
+
         viewModelScope.launch {
             repository.enqueue(
+                pairing = pairing,
                 source = "notification",
                 raw = "Jomma test capture at ${System.currentTimeMillis()}",
                 pkg = "com.jomma.notifier",
@@ -295,9 +364,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun reprovision() {
-        prefs.clearCredentials()
-        refresh()
+    /**
+     * Forgets one number.
+     *
+     * Its queued captures go too. They can only be sent under a credential this
+     * phone no longer holds, so keeping them would be keeping rows that can
+     * never leave — and the operator would be looking at a queue depth that
+     * never falls.
+     */
+    fun removePairing(deviceId: String) {
+        val pairing = prefs.pairing(deviceId) ?: return
+
+        viewModelScope.launch {
+            dao.deleteFor(deviceId)
+            prefs.removePairing(deviceId)
+            _state.value = _state.value.copy(
+                pairings = prefs.pairings,
+                message = "${pairing.accountMsisdn} removed from this phone.",
+            )
+            refresh()
+        }
+    }
+
+    /**
+     * Which SIM a number's SMS arrives on.
+     *
+     * Only ever asked when two pairings share a provider and are otherwise
+     * indistinguishable — see Attribution.
+     */
+    fun setSubscriptionId(deviceId: String, subscriptionId: Int?) {
+        prefs.updatePairing(deviceId) { it.copy(subscriptionId = subscriptionId) }
+        _state.value = _state.value.copy(pairings = prefs.pairings)
     }
 
     fun dismissMessage() {

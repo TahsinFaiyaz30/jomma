@@ -45,6 +45,12 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Warning
+import com.jomma.notifier.data.Attribution
+import com.jomma.notifier.data.Pairing
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,7 +90,9 @@ fun SettingsScreen(
     onRequestBatteryExemption: () -> Unit,
     onOpenAutoStart: () -> Unit,
     onScan: () -> Unit,
-    onCaptureChange: (CaptureSettings) -> Unit,
+    /** Keyed by device id: settings belong to a number, not to the app. */
+    onCaptureChange: (String, CaptureSettings) -> Unit,
+    onRemovePairing: (String) -> Unit,
     onIntervalChange: (UpdateInterval) -> Unit,
     onAutoDownloadChange: (Boolean) -> Unit,
     onUnmeteredOnlyChange: (Boolean) -> Unit,
@@ -151,38 +159,39 @@ fun SettingsScreen(
             }
         }
 
-        SectionHeader("What to capture")
+        SectionHeader(
+            if (state.pairings.size == 1) "Number" else "Numbers (${state.pairings.size})",
+        )
+
+        /*
+         * One card per watched number, each with its own capture settings.
+         *
+         * Per number and not per app, because the settings live on the account
+         * on the server — two numbers on one phone are two accounts, and one of
+         * them keeping cash-in has nothing to do with the other.
+         */
+        for (pairing in state.pairings) {
+            NumberCard(
+                pairing = pairing,
+                saving = state.captureSavingFor == pairing.deviceId,
+                needsSim = Attribution.needsSubscriptionId(state.pairings, pairing),
+                onCaptureChange = { onCaptureChange(pairing.deviceId, it) },
+                onRemove = { onRemovePairing(pairing.deviceId) },
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+
         SettingsCard {
             ListItem(
-                leadingContent = { Icon(Icons.Outlined.FilterAlt, contentDescription = null) },
-                headlineContent = { Text("Incoming Send Money") },
-                supportingContent = { Text("The only type that can settle an order.") },
-                trailingContent = { Text("always", style = MaterialTheme.typography.labelLarge) },
+                leadingContent = { Icon(Icons.Outlined.Add, contentDescription = null) },
+                headlineContent = {
+                    Text(if (state.pairings.isEmpty()) "Pair this phone" else "Add another number")
+                },
+                supportingContent = {
+                    Text("Scan the code from the Jomma dashboard. Nothing else to fill in.")
+                },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
-            HorizontalDivider()
-            SwitchRow(
-                title = "Cash In",
-                subtitle = "Top-ups from an agent or your bank.",
-                checked = state.capture.cashIn,
-                enabled = !state.captureSaving,
-                onChange = { onCaptureChange(state.capture.copy(cashIn = it)) },
-            )
-            HorizontalDivider()
-            SwitchRow(
-                title = "Money you sent",
-                subtitle = "A ledger of outgoing transfers. Never matched to an order.",
-                checked = state.capture.outgoing,
-                enabled = !state.captureSaving,
-                onChange = { onCaptureChange(state.capture.copy(outgoing = it)) },
-            )
-            HorizontalDivider()
-            SwitchRow(
-                title = "Everything else",
-                subtitle = "Promotions and balance notices. Usually noise.",
-                checked = state.capture.other,
-                enabled = !state.captureSaving,
-                onChange = { onCaptureChange(state.capture.copy(other = it)) },
+                modifier = Modifier.clickable(onClick = onScan),
             )
         }
 
@@ -195,17 +204,6 @@ fun SettingsScreen(
             onCheckForUpdates = onCheckForUpdates,
             onInstallUpdate = onInstallUpdate,
         )
-
-        SectionHeader("Device")
-        SettingsCard {
-            StatusRow(
-                icon = Icons.Outlined.QrCodeScanner,
-                title = "Provisioning",
-                subtitle = state.serverUrl ?: "Not paired with a server yet",
-                granted = state.provisioned && !state.revoked,
-                onClick = onScan,
-            )
-        }
 
         SectionHeader("About")
         SettingsCard {
@@ -373,6 +371,104 @@ private fun UpdatesSection(
             confirmButton = {
                 TextButton(onClick = { pickingInterval = false }) { Text("Done") }
             },
+        )
+    }
+}
+
+/**
+ * One watched number: what it is, whether it is working, and what it keeps.
+ *
+ * The status line is the important part. A number that has been scanned but not
+ * approved looks identical to a working one from inside the app — it just
+ * silently captures nothing — so it has to say so, and say what to do about it.
+ */
+@Composable
+private fun NumberCard(
+    pairing: Pairing,
+    saving: Boolean,
+    needsSim: Boolean,
+    onCaptureChange: (CaptureSettings) -> Unit,
+    onRemove: () -> Unit,
+) {
+    SettingsCard {
+        ListItem(
+            leadingContent = {
+                Icon(
+                    if (pairing.live) Icons.Outlined.CheckCircle else Icons.Outlined.Schedule,
+                    contentDescription = null,
+                    tint = if (pairing.live) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error,
+                )
+            },
+            headlineContent = { Text(pairing.accountMsisdn) },
+            supportingContent = {
+                Text(
+                    when {
+                        pairing.revoked ->
+                            "Revoked from the dashboard. Remove it and scan a new code."
+                        pairing.awaitingApproval ->
+                            "Scanned. Approve this phone on the dashboard to start capturing."
+                        else -> pairing.provider.replaceFirstChar { it.uppercase() }
+                    },
+                )
+            },
+            trailingContent = {
+                TextButton(onClick = onRemove) { Text("Remove") }
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
+
+        if (needsSim) {
+            HorizontalDivider()
+            ListItem(
+                leadingContent = { Icon(Icons.Outlined.Warning, contentDescription = null) },
+                headlineContent = { Text("Which SIM is this?") },
+                supportingContent = {
+                    Text(
+                        "Two numbers here use the same provider, so an SMS cannot be told " +
+                            "apart by its sender alone.",
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+        }
+
+        // Only a live number's settings can be written: the server refuses the
+        // call otherwise, and a switch that silently fails is worse than one
+        // that is visibly unavailable.
+        val editable = pairing.live && !saving
+
+        HorizontalDivider()
+        ListItem(
+            leadingContent = { Icon(Icons.Outlined.FilterAlt, contentDescription = null) },
+            headlineContent = { Text("Incoming Send Money") },
+            supportingContent = { Text("The only type that can settle an order.") },
+            trailingContent = { Text("always", style = MaterialTheme.typography.labelLarge) },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
+        HorizontalDivider()
+        SwitchRow(
+            title = "Cash In",
+            subtitle = "Top-ups from an agent or your bank.",
+            checked = pairing.capture.cashIn,
+            enabled = editable,
+            onChange = { onCaptureChange(pairing.capture.copy(cashIn = it)) },
+        )
+        HorizontalDivider()
+        SwitchRow(
+            title = "Money you sent",
+            subtitle = "A ledger of outgoing transfers. Never matched to an order.",
+            checked = pairing.capture.outgoing,
+            enabled = editable,
+            onChange = { onCaptureChange(pairing.capture.copy(outgoing = it)) },
+        )
+        HorizontalDivider()
+        SwitchRow(
+            title = "Everything else",
+            subtitle = "Promotions and balance notices. Usually noise.",
+            checked = pairing.capture.other,
+            enabled = editable,
+            onChange = { onCaptureChange(pairing.capture.copy(other = it)) },
         )
     }
 }

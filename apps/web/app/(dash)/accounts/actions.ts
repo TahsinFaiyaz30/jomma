@@ -18,6 +18,7 @@ import {
 import {
   approveDevice,
   createDeviceWithProvisioning,
+  renameDevice,
   requestTokenRotation,
   revokeDevice,
 } from '@/lib/services/devices'
@@ -63,17 +64,19 @@ export async function addAccountAction(
 
 export async function addDeviceAction(
   receivingAccountId: string,
-  name: string,
+  /**
+   * Optional, and normally omitted. The phone reports its own model when it
+   * scans, which is a better name than one guessed before meeting it.
+   */
+  name?: string,
 ): Promise<DeviceActionResult> {
   const { user: admin, business } = await requireWriteAccess()
-
-  if (!name.trim()) return { ok: false, message: 'Give the device a name.' }
 
   try {
     await assertOwnsReceivingAccount(business.id, receivingAccountId)
     const { qrDataUrl, payload } = await createDeviceWithProvisioning({
       receivingAccountId,
-      name: name.trim(),
+      name: name?.trim() || null,
       actorId: admin.id,
     })
     revalidatePath('/accounts')
@@ -122,6 +125,22 @@ export async function rotateTokenAction(deviceId: string): Promise<DeviceActionR
     }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Could not rotate.' }
+  }
+}
+
+export async function renameDeviceAction(
+  deviceId: string,
+  name: string,
+): Promise<DeviceActionResult> {
+  const { user: admin, business } = await requireWriteAccess()
+
+  try {
+    await assertOwnsDevice(business.id, deviceId)
+    await renameDevice({ deviceId, name, actorId: admin.id })
+    revalidatePath('/accounts')
+    return { ok: true, message: 'Renamed.' }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not rename.' }
   }
 }
 

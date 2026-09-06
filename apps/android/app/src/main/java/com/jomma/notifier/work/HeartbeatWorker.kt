@@ -16,6 +16,7 @@ import androidx.work.WorkerParameters
 import com.jomma.notifier.BuildConfig
 import com.jomma.notifier.capture.NotificationListener
 import com.jomma.notifier.data.CaptureRepository
+import com.jomma.notifier.data.Pairing
 import com.jomma.notifier.data.Prefs
 import com.jomma.notifier.net.HeartbeatRequest
 import com.jomma.notifier.net.JommaApi
@@ -37,13 +38,21 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
 
     override suspend fun doWork(): Result {
         val prefs = Prefs.get(applicationContext)
-        if (!prefs.isProvisioned || prefs.revoked) return Result.success()
+        if (prefs.livePairings.isEmpty()) return Result.success()
 
-        return when (val outcome = beat(applicationContext)) {
-            is JommaApi.Result.Ok -> Result.success()
-            JommaApi.Result.Revoked -> Result.success()
-            is JommaApi.Result.Failed -> if (outcome.retryable) Result.retry() else Result.success()
+        /*
+         * Every number beats, and one failing does not stop the rest. A silent
+         * device raises a critical alert on the server, so skipping the others
+         * because the first was offline would report two numbers as dead when
+         * only one is.
+         */
+        var retry = false
+        for (pairing in prefs.livePairings) {
+            val outcome = beat(applicationContext, pairing)
+            if (outcome is JommaApi.Result.Failed && outcome.retryable) retry = true
         }
+
+        return if (retry) Result.retry() else Result.success()
     }
 
     companion object {
@@ -69,10 +78,10 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
          * Unknown command types are ignored on purpose so the server can add new
          * ones without an app update.
          */
-        suspend fun beat(context: Context): JommaApi.Result<*> {
+        suspend fun beat(context: Context, pairing: Pairing): JommaApi.Result<*> {
             val prefs = Prefs.get(context)
             val repository = CaptureRepository(context)
-            val api = JommaApi(context)
+            val api = JommaApi(context, pairing)
 
             val result = api.heartbeat(
                 HeartbeatRequest(
@@ -88,13 +97,31 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                 ),
             )
 
+            /*
+             * A phone that has scanned but not been approved is not broken and
+             * has nothing to report. Recording the beat would also be a lie —
+             * the server rejected it.
+             */
+            if (result is JommaApi.Result.AwaitingApproval) {
+                prefs.updatePairing(pairing.deviceId) { it.copy(awaitingApproval = true) }
+                return result
+            }
+
             if (result is JommaApi.Result.Ok) {
-                prefs.lastHeartbeatAt = System.currentTimeMillis()
+                val now = System.currentTimeMillis()
+                prefs.lastHeartbeatAt = now
+                prefs.updatePairing(pairing.deviceId) {
+                    // A successful beat is proof of approval, so this is also
+                    // how a phone learns it was approved while it was waiting.
+                    it.copy(lastHeartbeatAt = now, awaitingApproval = false)
+                }
 
                 // Null when talking to a server too old to send them. Leaving the
                 // cache alone is right: overwriting it with defaults would flip
                 // the settings screen to "keep nothing" on a downgrade.
-                result.value.capture?.let { prefs.capture = it }
+                result.value.capture?.let { settings ->
+                    prefs.updatePairing(pairing.deviceId) { it.copy(capture = settings) }
+                }
 
                 for (command in result.value.commands) {
                     when (command.type) {
@@ -108,15 +135,21 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                          */
                         "rotate_token" -> {
                             when (val rotated = api.rotateToken()) {
-                                is JommaApi.Result.Ok -> {
-                                    prefs.deviceToken = rotated.value.deviceToken
-                                }
-                                JommaApi.Result.Revoked -> prefs.revoked = true
+                                is JommaApi.Result.Ok ->
+                                    prefs.updatePairing(pairing.deviceId) {
+                                        it.copy(deviceToken = rotated.value.deviceToken)
+                                    }
+                                JommaApi.Result.Revoked ->
+                                    prefs.updatePairing(pairing.deviceId) { it.copy(revoked = true) }
+                                JommaApi.Result.AwaitingApproval -> Unit
                                 is JommaApi.Result.Failed -> Unit // Try again next beat.
                             }
                         }
 
-                        "stop" -> prefs.revoked = true
+                        // Scoped to this number. The old app-wide flag stopped
+                        // every number on the phone.
+                        "stop" ->
+                            prefs.updatePairing(pairing.deviceId) { it.copy(revoked = true) }
 
                         else -> Unit // Unknown command — ignore, do not crash.
                     }

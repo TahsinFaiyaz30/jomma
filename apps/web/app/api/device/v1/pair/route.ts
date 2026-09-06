@@ -19,6 +19,16 @@ const pairSchema = z.object({
     .min(20)
     .max(200)
     .regex(/^[A-Za-z0-9_-]+$/, 'A pairing code is url-safe base64.'),
+
+  /*
+   * What the phone calls itself, usually its model.
+   *
+   * Sent by the app rather than typed on the dashboard, because the person
+   * generating a QR has not met the phone yet and "Samsung A15" is a better
+   * default than whatever they would guess. Optional so an older app still
+   * pairs, and purely cosmetic — nothing identifies a device by name.
+   */
+  device_name: z.string().trim().min(1).max(60).optional(),
 })
 
 /**
@@ -48,7 +58,11 @@ export const POST = route(async (request, context) => {
   const body = await parseBody(request, pairSchema)
 
   try {
-    const result = await claimPairingCode({ code: body.code, ip: context.ip })
+    const result = await claimPairingCode({
+      code: body.code,
+      ip: context.ip,
+      deviceName: body.device_name,
+    })
 
     context.log.info({ deviceId: result.deviceId }, 'device paired')
 

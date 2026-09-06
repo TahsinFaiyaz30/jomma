@@ -99,7 +99,17 @@ data class DeviceEventRequest(
 )
 
 @Serializable
-data class PairRequest(val code: String)
+data class PairRequest(
+    val code: String,
+    /**
+     * What this phone calls itself, so the dashboard does not have to guess.
+     *
+     * The operator generating a QR has not met the device; "SM-A155F" is a
+     * better starting point than anything they would type, and it can be
+     * renamed afterwards. Cosmetic only — nothing is identified by it.
+     */
+    @SerialName("device_name") val deviceName: String? = null,
+)
 
 @Serializable
 data class ProvisionAccount(val msisdn: String, val provider: String)

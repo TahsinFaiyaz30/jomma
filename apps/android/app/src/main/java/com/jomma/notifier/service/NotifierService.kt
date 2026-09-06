@@ -46,9 +46,13 @@ class NotifierService : LifecycleService() {
                 val queued = runCatching { repository.pendingCount() }.getOrDefault(0)
                 updateNotification(queued)
 
-                if (prefs.isProvisioned && !prefs.revoked) {
-                    runCatching { HeartbeatWorker.beat(applicationContext) }
-                    if (queued > 0) FlushWorker.enqueueNow(applicationContext)
+                // Every live number beats. One being revoked or waiting for
+                // approval leaves the others reporting.
+                for (pairing in prefs.livePairings) {
+                    runCatching { HeartbeatWorker.beat(applicationContext, pairing) }
+                }
+                if (queued > 0 && prefs.livePairings.isNotEmpty()) {
+                    FlushWorker.enqueueNow(applicationContext)
                 }
 
                 delay(HEARTBEAT_INTERVAL_MS)
@@ -75,7 +79,7 @@ class NotifierService : LifecycleService() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         val prefs = Prefs.get(applicationContext)
-        if (prefs.isProvisioned && !prefs.revoked) {
+        if (prefs.livePairings.isNotEmpty()) {
             RestartAlarm.schedule(applicationContext)
             runCatching { start(applicationContext) }
         }
@@ -96,11 +100,19 @@ class NotifierService : LifecycleService() {
     private fun updateNotification(queueDepth: Int) {
         val lastBeat = prefs.lastHeartbeatAt
         val ago = if (lastBeat == 0L) "never" else "${(System.currentTimeMillis() - lastBeat) / 1000}s ago"
+        val pairings = prefs.pairings
+        val live = pairings.count { it.live }
+
         val text = when {
-            prefs.revoked -> "Revoked — re-provision this device"
-            !prefs.isProvisioned -> "Not provisioned"
+            pairings.isEmpty() -> "Not provisioned"
+            // Named rather than counted when there is one, because "1 number"
+            // tells the operator nothing they did not already know.
+            live == 0 && pairings.any { it.awaitingApproval } ->
+                "Waiting for approval on the dashboard"
+            live == 0 -> "Revoked — re-provision this device"
             queueDepth > 0 -> "$queueDepth queued · beat $ago"
-            else -> "Watching · beat $ago"
+            live == 1 -> "Watching ${pairings.first { it.live }.accountMsisdn} · beat $ago"
+            else -> "Watching $live numbers · beat $ago"
         }
 
         val manager = getSystemService(NotificationManager::class.java)

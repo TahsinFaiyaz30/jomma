@@ -39,6 +39,14 @@ class FlushWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
             CaptureRepository.FlushOutcome.NotReady,
             -> Result.success()
 
+            /*
+             * Waiting on a person, not on the network. Retrying would hammer a
+             * 403 until somebody wandered over to the dashboard; the periodic
+             * flush picks these up once approval lands, and nothing is lost
+             * because the captures stay queued.
+             */
+            CaptureRepository.FlushOutcome.AwaitingApproval -> Result.success()
+
             is CaptureRepository.FlushOutcome.Failed ->
                 if (outcome.retryable) Result.retry() else Result.retry()
         }
