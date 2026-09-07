@@ -13,6 +13,7 @@ import {
   approveDevice,
   createDeviceWithProvisioning,
   createPhoneProvisioning,
+  revokeDevice,
 } from '@/lib/services/devices'
 import { getSetupState, markSetupComplete, type SetupState } from '@/lib/services/onboarding'
 import { addAccountFromSim, listSimOptions, type SimOption } from '@/lib/services/sim-accounts'
@@ -168,6 +169,31 @@ export async function setupApproveDeviceAction(deviceId: string): Promise<SetupR
     return reply(true, 'Approved. It will report its SIMs on the next heartbeat.')
   } catch (error) {
     return reply(false, error instanceof Error ? error.message : 'Could not approve it.')
+  }
+}
+
+/**
+ * Turning away a phone that scanned and should not have.
+ *
+ * The wrong handset, somebody else's, or a code shown on a screen a stranger
+ * walked past. Without this the step had one button and no way back: a phone
+ * waiting for approval keeps waiting, and scanning again only adds a second
+ * one behind it.
+ *
+ * `revokeDevice` is what does it, the same call the Accounts screen uses — the
+ * token hash is cleared, so the credential that phone is holding stops
+ * verifying immediately rather than merely being ignored. Once revoked it is no
+ * longer `awaiting_approval`, so the step goes back to offering a fresh code.
+ */
+export async function setupDeclineDeviceAction(deviceId: string): Promise<SetupResult> {
+  const { user: admin, business } = await requireWriteAccess()
+
+  try {
+    await assertOwnsDevice(business.id, deviceId)
+    await revokeDevice({ deviceId, actorId: admin.id })
+    return reply(true, 'Turned away. Show a new code when the right phone is in front of you.')
+  } catch (error) {
+    return reply(false, error instanceof Error ? error.message : 'Could not decline it.')
   }
 }
 

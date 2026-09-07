@@ -10,6 +10,7 @@ import {
   setupApproveDeviceAction,
   setupCreateAppAction,
   setupCreateKeyAction,
+  setupDeclineDeviceAction,
   setupEnableAccountAction,
   setupListSimsAction,
   setupPairPhoneAction,
@@ -376,36 +377,67 @@ function StepForm({
   switch (step) {
     case 'phone':
       /*
-       * Two states, because scanning is not the end of this step.
+       * All of them, not the first one.
        *
-       * A provisioning QR is a bearer credential — it gets screenshotted and
-       * forwarded — so a phone that has scanned lands `awaiting_approval` and
-       * captures nothing until somebody says yes. That approval had no control
-       * anywhere on this page: the wizard promised it "checks itself every few
-       * seconds" while the phone said it was waiting for something the screen
-       * never offered.
+       * A business runs more than one phone — a till phone and a back-office
+       * phone, or one per SIM — and this step showed a single one and moved on,
+       * so connecting another was something you had to know to do elsewhere.
+       *
+       * Scanning is also not the end of it: a provisioning QR is a bearer
+       * credential that gets screenshotted and forwarded, so each phone that
+       * has scanned needs approving or turning away. Approval alone was a
+       * one-way door — the wrong handset kept waiting, and scanning again only
+       * queued a second one behind it.
        */
-      return state.pendingDeviceId ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            disabled={pending}
-            onClick={() => run(() => setupApproveDeviceAction(state.pendingDeviceId as string))}
-          >
-            {busy}Approve {state.pendingDeviceName ?? 'this phone'}
-          </Button>
-          <span className="text-micro text-muted-foreground">
-            It scanned the code. Approving lets it report its SIMs.
-          </span>
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" disabled={pending} onClick={() => run(() => setupPairPhoneAction())}>
-            {busy}Show pairing code
-          </Button>
-          <span className="text-micro text-muted-foreground">
-            This checks itself every few seconds once you scan.
-          </span>
+      return (
+        <div className="space-y-3">
+          {state.connectedPhones.length > 0 ? (
+            <ul className="space-y-1">
+              {state.connectedPhones.map((phone) => (
+                <li key={phone.id} className="text-micro text-muted-foreground">
+                  <span className="text-matched">✓</span> {phone.name} — connected
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {state.pendingPhones.map((phone) => (
+            <div key={phone.id} className="flex flex-wrap items-center gap-2">
+              <span className="text-micro">{phone.name} scanned.</span>
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={() => run(() => setupApproveDeviceAction(phone.id))}
+              >
+                {busy}Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => run(() => setupDeclineDeviceAction(phone.id))}
+              >
+                Not this phone
+              </Button>
+            </div>
+          ))}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant={state.connectedPhones.length > 0 ? 'outline' : 'default'}
+              disabled={pending}
+              onClick={() => run(() => setupPairPhoneAction())}
+            >
+              {busy}
+              {state.connectedPhones.length > 0 ? 'Connect another phone' : 'Show pairing code'}
+            </Button>
+            <span className="text-micro text-muted-foreground">
+              {state.pendingPhones.length > 0
+                ? 'Approving lets a phone report its SIMs.'
+                : 'This checks itself every few seconds once you scan.'}
+            </span>
+          </div>
         </div>
       )
 

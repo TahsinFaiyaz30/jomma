@@ -64,14 +64,19 @@ export interface SetupState {
   /** The paired phone whose SIMs the number is chosen from, once there is one. */
   firstDeviceId: string | null
   /**
-   * A phone that has scanned and is waiting to be approved, if any.
+   * The phones, so the first step can be about all of them rather than one.
    *
-   * Here so the wizard can offer the approval. Scanning deliberately earns
-   * nothing on its own — a QR gets screenshotted and forwarded — but the step
-   * that follows has to be reachable from the screen that is waiting for it.
+   * A business runs more than one — a till phone and a back-office phone, or
+   * one per SIM — and the schema has always allowed it. The wizard showed a
+   * single phone and moved on, which made "connect another" something you had
+   * to know to do somewhere else.
+   *
+   * `pending` are phones that have scanned and are waiting: scanning earns
+   * nothing on its own, because a QR gets screenshotted and forwarded, so each
+   * one needs approving or turning away.
    */
-  pendingDeviceId: string | null
-  pendingDeviceName: string | null
+  connectedPhones: { id: string; name: string }[]
+  pendingPhones: { id: string; name: string }[]
 }
 
 /**
@@ -88,9 +93,9 @@ function partitionPhones(all: (typeof devices.$inferSelect)[]) {
   )
 
   return {
-    provisioned,
     phone: provisioned.find((device) => device.status === 'active') ?? null,
-    awaitingApproval: all.find((device) => device.status === 'awaiting_approval') ?? null,
+    connected: provisioned.filter((device) => device.status === 'active'),
+    pending: all.filter((device) => device.status === 'awaiting_approval'),
   }
 }
 
@@ -138,7 +143,7 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
 
   // A device only counts once it has exchanged its provisioning code for a
   // real token. A `pending` row is a QR nobody has scanned yet.
-  const { provisioned, phone, awaitingApproval } = partitionPhones(allDevices)
+  const { phone, connected, pending } = partitionPhones(allDevices)
 
   const enabled = accounts.filter((candidate) => candidate.status === 'active')
   const keysForApp = app ? allKeys.filter((key) => key.appId === app.id) : []
@@ -152,9 +157,9 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
       done: phone !== null,
       required: true,
       detail: phone
-        ? `${provisioned.filter((d) => d.status === 'active').length} connected`
-        : awaitingApproval
-          ? `${awaitingApproval.name} scanned — approve it below`
+        ? `${connected.length} connected`
+        : pending.length > 0
+          ? `${pending.length} scanned — approve below`
           : null,
     },
     {
@@ -209,8 +214,8 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
     currentStepId: steps.find((step) => !step.done)?.id ?? null,
     firstAccountId: account?.id ?? null,
     firstDeviceId: phone?.id ?? null,
-    pendingDeviceId: awaitingApproval?.id ?? null,
-    pendingDeviceName: awaitingApproval?.name ?? null,
+    connectedPhones: connected.map((device) => ({ id: device.id, name: device.name })),
+    pendingPhones: pending.map((device) => ({ id: device.id, name: device.name })),
     firstAppId: app?.id ?? null,
   }
 }

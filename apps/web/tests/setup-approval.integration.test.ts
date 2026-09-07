@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db, pool } from '@/lib/db/client'
 import { businesses, devices, users } from '@/lib/db/schema'
+import { revokeDevice } from '@/lib/services/devices'
 import { getSetupState } from '@/lib/services/onboarding'
 
 /**
@@ -57,7 +58,7 @@ describe('the first step of setup', () => {
   it('offers nothing to approve before a phone has scanned', async () => {
     const state = await getSetupState(businessId)
 
-    expect(state.pendingDeviceId).toBeNull()
+    expect(state.pendingPhones).toHaveLength(0)
     expect(state.steps.find((s) => s.id === 'phone')?.done).toBe(false)
   })
 
@@ -67,26 +68,70 @@ describe('the first step of setup', () => {
     const deviceId = await scanned('awaiting_approval')
     const state = await getSetupState(businessId)
 
-    expect(state.pendingDeviceId).toBe(deviceId)
-    expect(state.pendingDeviceName).toBe('Counter phone')
+    expect(state.pendingPhones.map((p) => p.id)).toEqual([deviceId])
+    expect(state.pendingPhones[0]?.name).toBe('Counter phone')
     expect(state.steps.find((s) => s.id === 'phone')?.done).toBe(false)
-    expect(state.steps.find((s) => s.id === 'phone')?.detail).toMatch(/approve it below/i)
+    expect(state.steps.find((s) => s.id === 'phone')?.detail).toMatch(/scanned .* approve below/i)
   })
 
   it('counts the phone once it is approved, and stops offering approval', async () => {
     await scanned('active')
     const state = await getSetupState(businessId)
 
-    expect(state.pendingDeviceId).toBeNull()
+    expect(state.pendingPhones).toHaveLength(0)
     expect(state.steps.find((s) => s.id === 'phone')?.done).toBe(true)
     expect(state.firstDeviceId).not.toBeNull()
   })
 
+  it('lets a declined phone be replaced by a fresh code', async () => {
+    /*
+     * The wrong handset, or a code a stranger walked past. Revoking clears the
+     * token hash — the credential that phone holds stops verifying rather than
+     * merely being ignored — and drops it out of `awaiting_approval`, so the
+     * step goes back to offering a new code instead of waiting forever on one
+     * nobody wants.
+     */
+    const deviceId = await scanned('awaiting_approval')
+    expect((await getSetupState(businessId)).pendingPhones.map((p) => p.id)).toEqual([deviceId])
+
+    await revokeDevice({ deviceId, actorId })
+
+    const state = await getSetupState(businessId)
+    expect(state.pendingPhones).toHaveLength(0)
+    expect(state.steps.find((s) => s.id === 'phone')?.done).toBe(false)
+
+    const revoked = await db.query.devices.findFirst({ where: eq(devices.id, deviceId) })
+    expect(revoked?.status).toBe('revoked')
+    expect(revoked?.tokenHash).toBeNull()
+  })
+
+  it('carries every phone waiting, not just the first', async () => {
+    /*
+     * A business runs more than one — a till phone and a back-office phone, or
+     * one per SIM. Surfacing only the first meant the second could not be
+     * approved from here at all, and scanning again just queued another behind
+     * it.
+     */
+    await db.delete(devices).where(eq(devices.businessId, businessId))
+    for (const name of ['Till phone', 'Back office']) {
+      await db.insert(devices).values({
+        businessId,
+        name,
+        status: 'awaiting_approval',
+        provisionedAt: new Date(),
+        tokenHash: `hash-${randomBytes(6).toString('hex')}`,
+      })
+    }
+
+    const state = await getSetupState(businessId)
+    expect(state.pendingPhones.map((p) => p.name).sort()).toEqual(['Back office', 'Till phone'])
+  })
+
   it('does not offer another business’s phone for approval', async () => {
-    // `pendingDeviceId` is handed to a server action that approves whatever it
-    // names, so it must never carry somebody else's device.
+    // These ids are handed to a server action that approves whatever they
+    // name, so the list must never carry somebody else's device.
     await scanned('awaiting_approval')
 
-    expect((await getSetupState(randomUUID())).pendingDeviceId).toBeNull()
+    expect((await getSetupState(randomUUID())).pendingPhones).toHaveLength(0)
   })
 })
