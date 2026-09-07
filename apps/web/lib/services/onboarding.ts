@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, eq, getTableColumns } from 'drizzle-orm'
+import { and, eq, getTableColumns, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import {
   apiKeys,
@@ -63,6 +63,35 @@ export interface SetupState {
   firstAppId: string | null
   /** The paired phone whose SIMs the number is chosen from, once there is one. */
   firstDeviceId: string | null
+  /**
+   * A phone that has scanned and is waiting to be approved, if any.
+   *
+   * Here so the wizard can offer the approval. Scanning deliberately earns
+   * nothing on its own — a QR gets screenshotted and forwarded — but the step
+   * that follows has to be reachable from the screen that is waiting for it.
+   */
+  pendingDeviceId: string | null
+  pendingDeviceName: string | null
+}
+
+/**
+ * The phones, split by what the wizard needs to say about each.
+ *
+ * A device only counts as connected once it has exchanged its provisioning code
+ * for a real token — a row without one is a QR nobody has scanned. Of those, an
+ * `awaiting_approval` phone has scanned and is waiting to be let in, which is a
+ * state the wizard has to offer an action for rather than merely describe.
+ */
+function partitionPhones(all: (typeof devices.$inferSelect)[]) {
+  const provisioned = all.filter(
+    (device) => device.provisionedAt !== null && device.tokenHash !== null,
+  )
+
+  return {
+    provisioned,
+    phone: provisioned.find((device) => device.status === 'active') ?? null,
+    awaitingApproval: all.find((device) => device.status === 'awaiting_approval') ?? null,
+  }
 }
 
 export async function getSetupState(businessId: string): Promise<SetupState> {
@@ -87,7 +116,21 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
        * joining through `receiving_accounts` would make it invisible.
        */
       .from(devices)
-      .where(and(eq(devices.status, 'active'), eq(devices.businessId, businessId))),
+      /*
+       * Both statuses, because a phone that has scanned is not yet `active`.
+       *
+       * Approval is a deliberate second step — a QR is a bearer credential, so
+       * scanning one earns nothing until somebody says so. Selecting only
+       * `active` made that phone invisible here, and the wizard sat on "this
+       * checks itself every few seconds once you scan" forever while the phone
+       * said it was waiting for an approval the wizard never offered.
+       */
+      .where(
+        and(
+          inArray(devices.status, ['active', 'awaiting_approval']),
+          eq(devices.businessId, businessId),
+        ),
+      ),
   ])
 
   const account = accounts[0] ?? null
@@ -95,10 +138,7 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
 
   // A device only counts once it has exchanged its provisioning code for a
   // real token. A `pending` row is a QR nobody has scanned yet.
-  const provisioned = allDevices.filter(
-    (device) => device.provisionedAt !== null && device.tokenHash !== null,
-  )
-  const phone = provisioned[0] ?? null
+  const { provisioned, phone, awaitingApproval } = partitionPhones(allDevices)
 
   const enabled = accounts.filter((candidate) => candidate.status === 'active')
   const keysForApp = app ? allKeys.filter((key) => key.appId === app.id) : []
@@ -111,7 +151,11 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
       blurb: 'Install the app and scan the code. It reads the SIMs in the phone.',
       done: phone !== null,
       required: true,
-      detail: phone ? `${provisioned.length} connected` : null,
+      detail: phone
+        ? `${provisioned.filter((d) => d.status === 'active').length} connected`
+        : awaitingApproval
+          ? `${awaitingApproval.name} scanned — approve it below`
+          : null,
     },
     {
       id: 'account',
@@ -165,6 +209,8 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
     currentStepId: steps.find((step) => !step.done)?.id ?? null,
     firstAccountId: account?.id ?? null,
     firstDeviceId: phone?.id ?? null,
+    pendingDeviceId: awaitingApproval?.id ?? null,
+    pendingDeviceName: awaitingApproval?.name ?? null,
     firstAppId: app?.id ?? null,
   }
 }

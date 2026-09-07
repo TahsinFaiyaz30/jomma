@@ -281,10 +281,15 @@ fun SettingsScreen(
             ListItem(
                 leadingContent = { Icon(Icons.Outlined.Add, contentDescription = null) },
                 headlineContent = {
-                    Text(if (state.pairings.isEmpty()) "Pair this phone" else "Add another number")
+                    Text(if (state.pairings.isEmpty()) "Pair this phone" else "Scan another code")
                 },
                 supportingContent = {
-                    Text("Scan the code from the Jomma dashboard. Nothing else to fill in.")
+                    // Says what scanning does. It connects the phone; the number
+                    // it watches is chosen afterwards, in the dashboard.
+                    Text(
+                        "Scan the code from the Jomma dashboard. You choose which SIM it is " +
+                            "paid on there, so there is nothing to fill in here.",
+                    )
                 },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier.clickable(onClick = onScan),

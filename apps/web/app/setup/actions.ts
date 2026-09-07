@@ -4,8 +4,16 @@ import { revalidatePath } from 'next/cache'
 import { requireBusiness, requireWriteAccess } from '@/lib/auth/tenancy'
 import { createReceivingAccount, setAccountStatus } from '@/lib/services/account-admin'
 import { createApiKey, createApp, createWebhookEndpoint } from '@/lib/services/app-admin'
-import { assertOwnsApp, assertOwnsReceivingAccount } from '@/lib/services/businesses'
-import { createDeviceWithProvisioning, createPhoneProvisioning } from '@/lib/services/devices'
+import {
+  assertOwnsApp,
+  assertOwnsDevice,
+  assertOwnsReceivingAccount,
+} from '@/lib/services/businesses'
+import {
+  approveDevice,
+  createDeviceWithProvisioning,
+  createPhoneProvisioning,
+} from '@/lib/services/devices'
 import { getSetupState, markSetupComplete, type SetupState } from '@/lib/services/onboarding'
 import { addAccountFromSim, listSimOptions, type SimOption } from '@/lib/services/sim-accounts'
 import { assertDeliverableUrl, WebhookTargetError } from '@/lib/services/webhook-targets'
@@ -133,6 +141,32 @@ export async function setupAddAccountFromSimAction(
     return reply(true, `${added.msisdn} added. The phone will pick it up shortly.`)
   } catch (error) {
     return reply(false, error instanceof Error ? error.message : 'Could not add the number.')
+  }
+}
+
+/**
+ * Approving the phone that has just scanned.
+ *
+ * Scanning earns nothing on its own — a provisioning QR is a bearer credential
+ * that gets screenshotted and forwarded, so the phone lands `awaiting_approval`
+ * and captures nothing until somebody says yes. That is deliberate, and it was
+ * unreachable from here: the wizard waited for a device it filtered out of its
+ * own query, telling people it "checks itself every few seconds" while the
+ * phone told them it was waiting for an approval no screen offered.
+ *
+ * Ownership is checked rather than trusted. This is a server action, so the id
+ * arrives from a browser and is a claim; without the check anyone signed in
+ * could approve a phone that scanned somebody else's code.
+ */
+export async function setupApproveDeviceAction(deviceId: string): Promise<SetupResult> {
+  const { user: admin, business } = await requireWriteAccess()
+
+  try {
+    await assertOwnsDevice(business.id, deviceId)
+    await approveDevice({ deviceId, actorId: admin.id })
+    return reply(true, 'Approved. It will report its SIMs on the next heartbeat.')
+  } catch (error) {
+    return reply(false, error instanceof Error ? error.message : 'Could not approve it.')
   }
 }
 

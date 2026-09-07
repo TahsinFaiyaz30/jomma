@@ -392,9 +392,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     // something worth recovering.
                     RestartAlarm.schedule(app)
 
+                    /*
+                     * Two outcomes, two sentences.
+                     *
+                     * Interpolating the msisdn was right when every code
+                     * carried one. A business code does not, so this said
+                     * "null added" — and the next step is not the same either:
+                     * an account still has to be chosen before there is
+                     * anything to approve.
+                     */
                     _state.value = _state.value.copy(
                         busy = false,
-                        message = "$msisdn added. Approve it on the dashboard to start capturing.",
+                        message = if (msisdn == null) {
+                            "Phone connected. Choose the SIM it is paid on, in the dashboard."
+                        } else {
+                            "$msisdn added. Approve it on the dashboard to start capturing."
+                        },
                     )
                     refresh()
                 }

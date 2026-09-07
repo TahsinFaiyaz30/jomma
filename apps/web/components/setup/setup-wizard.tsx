@@ -7,6 +7,7 @@ import {
   type SetupResult,
   setupAddAccountFromSimAction,
   setupAddEndpointAction,
+  setupApproveDeviceAction,
   setupCreateAppAction,
   setupCreateKeyAction,
   setupEnableAccountAction,
@@ -374,7 +375,30 @@ function StepForm({
 
   switch (step) {
     case 'phone':
-      return (
+      /*
+       * Two states, because scanning is not the end of this step.
+       *
+       * A provisioning QR is a bearer credential — it gets screenshotted and
+       * forwarded — so a phone that has scanned lands `awaiting_approval` and
+       * captures nothing until somebody says yes. That approval had no control
+       * anywhere on this page: the wizard promised it "checks itself every few
+       * seconds" while the phone said it was waiting for something the screen
+       * never offered.
+       */
+      return state.pendingDeviceId ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            disabled={pending}
+            onClick={() => run(() => setupApproveDeviceAction(state.pendingDeviceId as string))}
+          >
+            {busy}Approve {state.pendingDeviceName ?? 'this phone'}
+          </Button>
+          <span className="text-micro text-muted-foreground">
+            It scanned the code. Approving lets it report its SIMs.
+          </span>
+        </div>
+      ) : (
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" disabled={pending} onClick={() => run(() => setupPairPhoneAction())}>
             {busy}Show pairing code

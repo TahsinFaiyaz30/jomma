@@ -310,12 +310,18 @@ private fun StatusScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = onHeartbeat, modifier = Modifier.weight(1f)) { Text("Heartbeat") }
             /*
-             * "Add a number" where "Re-provision" used to be. Tearing the phone
-             * down wholesale is no longer a sensible action when it may be
-             * watching three numbers; removing one specifically lives on
-             * Settings, beside the number it would remove.
+             * "Scan a code", not "Add a number".
+             *
+             * Scanning does not add a number any more — it connects this phone
+             * to a business. Which number it watches is chosen afterwards, in
+             * the dashboard, from the SIMs this phone reports. Labelling the
+             * scanner "Add a number" promised something the QR behind it cannot
+             * do, and opened a camera at somebody expecting a form.
+             *
+             * Removing a number specifically lives on Settings, beside the
+             * number it would remove.
              */
-            OutlinedButton(onClick = onScan, modifier = Modifier.weight(1f)) { Text("Add a number") }
+            OutlinedButton(onClick = onScan, modifier = Modifier.weight(1f)) { Text("Scan a code") }
         }
     }
 }
