@@ -17,6 +17,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -45,6 +46,9 @@ object Updater {
     private const val SESSION_NAME = "jomma-update"
     private const val RELEASES_URL =
         "https://api.github.com/repos/TahsinFaiyaz30/jomma/releases/latest"
+
+    /** What `release.yml` names the checksum file it publishes beside the APKs. */
+    private const val CHECKSUMS_ASSET = "SHA256SUMS.txt"
 
     /** Where the downloaded APK lives. Cache, so Android can reclaim it. */
     private fun downloadDir(context: Context) = File(context.cacheDir, "updates").apply { mkdirs() }
@@ -103,17 +107,25 @@ object Updater {
                 var url: String? = null
                 var size = 0L
                 var name = ""
+                var checksums = ""
 
-                // Matched on the variant suffix rather than position: the two
-                // APKs and the checksum file are in no guaranteed order.
+                /*
+                 * Matched on the variant suffix rather than position: the two
+                 * APKs and the checksum file are in no guaranteed order.
+                 *
+                 * No `break` any more. The loop has to see every asset now,
+                 * because the checksum file may come after the APK and skipping
+                 * out early was how it stayed unread.
+                 */
                 for (i in 0 until (assets?.length() ?: 0)) {
                     val asset = assets!!.getJSONObject(i)
                     val assetName = asset.optString("name")
-                    if (assetName.endsWith("-$variant.apk")) {
+                    if (assetName.endsWith("-$variant.apk") && url == null) {
                         url = asset.optString("browser_download_url")
                         size = asset.optLong("size")
                         name = assetName
-                        break
+                    } else if (assetName == CHECKSUMS_ASSET) {
+                        checksums = asset.optString("browser_download_url")
                     }
                 }
 
@@ -132,6 +144,8 @@ object Updater {
                         sizeBytes = size,
                         notes = json.optString("body").take(500),
                         variant = variant,
+                        assetName = name,
+                        checksumsUrl = checksums,
                     ),
                 )
             }
@@ -214,18 +228,30 @@ object Updater {
                 val body = response.body ?: return@withContext null
                 val total = body.contentLength()
 
+                // Hashed on the way past, so verifying costs no second read of
+                // twelve megabytes off a cheap phone's flash.
+                val digest = MessageDigest.getInstance("SHA-256")
+                var written = 0L
+
                 body.byteStream().use { input ->
                     target.outputStream().use { output ->
                         val buffer = ByteArray(64 * 1024)
-                        var written = 0L
                         while (true) {
                             val read = input.read(buffer)
                             if (read < 0) break
                             output.write(buffer, 0, read)
+                            digest.update(buffer, 0, read)
                             written += read
                             if (total > 0) onProgress(((written * 100) / total).toInt())
                         }
                     }
+                }
+
+                val problem = verify(target, written, update, digest)
+                if (problem != null) {
+                    Log.w(TAG, "discarding download: $problem")
+                    target.delete()
+                    return@withContext null
                 }
             }
             target
@@ -237,6 +263,89 @@ object Updater {
             null
         }
     }
+
+    /**
+     * Whether what landed on disk is what the release says it published.
+     *
+     * Returns the reason it is not, or null when it is good.
+     *
+     * Two checks, cheapest first. The length comes free from the release
+     * metadata and catches the common failure on a shop's wi-fi — a connection
+     * that drops mid-body and leaves a short file that is still a file. The
+     * SHA-256 comes from the release's own `SHA256SUMS.txt` and catches
+     * corruption that happens to land on the right length.
+     *
+     * A release with no checksum file still installs. Every one the workflow
+     * builds has published one since it was written, but refusing to update a
+     * phone because an older release predates the file would be a worse
+     * outcome than the check it skips.
+     *
+     * Worth being precise about what this is not: it does not decide whether an
+     * APK is trustworthy. Android does that at install time, by refusing any
+     * package whose signing certificate differs from the installed one — and
+     * against an attacker who could replace the APK on the release, a checksum
+     * published next to it would be replaced in the same breath.
+     */
+    private fun verify(
+        target: File,
+        written: Long,
+        update: AvailableUpdate,
+        digest: MessageDigest,
+    ): String? {
+        if (update.sizeBytes > 0 && written != update.sizeBytes) {
+            return "expected ${update.sizeBytes} bytes, got $written"
+        }
+
+        if (update.checksumsUrl.isBlank() || update.assetName.isBlank()) return null
+
+        val published = runCatching {
+            val request = Request.Builder().url(update.checksumsUrl).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                response.body?.string()
+            }
+        }.getOrNull()
+
+        // Unreachable checksum file: the APK is already downloaded and its
+        // length agreed. Failing here would strand a phone on an old build over
+        // a second request that has nothing to do with the bytes it holds.
+        if (published.isNullOrBlank()) {
+            Log.w(TAG, "could not read ${update.assetName} checksum; installing on length alone")
+            return null
+        }
+
+        val expected = expectedSha256(published, update.assetName)
+            ?: return null.also { Log.w(TAG, "${update.assetName} is not listed in $CHECKSUMS_ASSET") }
+
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        return if (actual.equals(expected, ignoreCase = true)) {
+            null
+        } else {
+            "sha256 mismatch: expected $expected, got $actual"
+        }
+    }
+
+    /**
+     * The hash `sha256sum` recorded for one file, or null if it did not list it.
+     *
+     * Its output is `<hex>  <filename>` — two spaces in text mode, and a space
+     * then `*` in binary mode, which is what `sha256sum -b` and most Windows
+     * ports write. Splitting on runs of whitespace and stripping a leading `*`
+     * reads both, so a release built on a different runner does not silently
+     * stop being checkable.
+     *
+     * Internal rather than private so the parsing can be tested without a
+     * network call or a twelve-megabyte file; it is the only part of `verify`
+     * with anything to get wrong.
+     */
+    internal fun expectedSha256(published: String, assetName: String): String? =
+        published.lineSequence()
+            .mapNotNull { line ->
+                val parts = line.trim().split(Regex("\\s+"), limit = 2)
+                if (parts.size != 2) return@mapNotNull null
+                if (parts[1].trimStart('*') == assetName) parts[0] else null
+            }
+            .firstOrNull()
 
     /** An already-downloaded APK for this version, if there is one. */
     fun downloadedFile(context: Context, update: AvailableUpdate): File? =

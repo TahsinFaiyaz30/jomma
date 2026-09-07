@@ -42,6 +42,25 @@ data class AvailableUpdate(
     val sizeBytes: Long,
     val notes: String,
     val variant: String,
+    /** The asset's exact filename, which is the key in `SHA256SUMS.txt`. */
+    val assetName: String = "",
+    /**
+     * Where the release's `SHA256SUMS.txt` lives, or blank on a release that
+     * predates it.
+     *
+     * Every release the workflow builds publishes one — `release.yml` runs
+     * `sha256sum *.apk > SHA256SUMS.txt` — and until now nothing ever read it.
+     * A download was written to disk and offered for install on the strength of
+     * having been more than zero bytes long.
+     *
+     * This is not what stops a hostile APK. Android decides that, by refusing
+     * any package whose signature does not match the installed one, and no
+     * checksum published beside a tampered file would help anyway. What it
+     * catches is the ordinary case: a truncated or corrupted download being
+     * handed to the installer, which fails with a parse error that reads like a
+     * broken release rather than a bad transfer.
+     */
+    val checksumsUrl: String = "",
 ) {
     val sizeLabel: String
         get() = if (sizeBytes <= 0) "unknown size" else "${sizeBytes / 1_048_576} MB"
