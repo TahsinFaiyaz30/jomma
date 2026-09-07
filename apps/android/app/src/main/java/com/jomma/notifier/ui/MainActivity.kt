@@ -116,6 +116,7 @@ class MainActivity : ComponentActivity() {
                         onHeartbeat = viewModel::heartbeatNow,
                         onTestCapture = viewModel::sendTestCapture,
                         onCaptureChange = viewModel::setCapture,
+                        onSendingChange = viewModel::setSendingEnabled,
                         onRemovePairing = viewModel::removePairing,
                     )
                 }

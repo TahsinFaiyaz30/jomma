@@ -110,6 +110,7 @@ fun JommaScreens(
     onHeartbeat: () -> Unit,
     onTestCapture: () -> Unit,
     onCaptureChange: (String, CaptureSettings) -> Unit,
+    onSendingChange: (String, Boolean) -> Unit,
     onRemovePairing: (String) -> Unit,
 ) {
     Scaffold(
@@ -158,6 +159,7 @@ fun JommaScreens(
                     onOpenAutoStart = onOpenAutoStart,
                     onScan = onScan,
                     onCaptureChange = onCaptureChange,
+                    onSendingChange = onSendingChange,
                     onRemovePairing = onRemovePairing,
                     onIntervalChange = onIntervalChange,
                     onAutoDownloadChange = onAutoDownloadChange,

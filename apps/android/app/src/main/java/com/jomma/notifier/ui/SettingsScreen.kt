@@ -52,6 +52,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Warning
 import com.jomma.notifier.data.Attribution
 import com.jomma.notifier.data.Pairing
+import com.jomma.notifier.data.SimCard
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -94,6 +95,8 @@ fun SettingsScreen(
     onScan: () -> Unit,
     /** Keyed by device id: settings belong to a number, not to the app. */
     onCaptureChange: (String, CaptureSettings) -> Unit,
+    /** Keyed by device id: pausing is per number, never for the whole phone. */
+    onSendingChange: (String, Boolean) -> Unit,
     onRemovePairing: (String) -> Unit,
     onIntervalChange: (UpdateInterval) -> Unit,
     onAutoDownloadChange: (Boolean) -> Unit,
@@ -183,11 +186,66 @@ fun SettingsScreen(
                 pairing = pairing,
                 saving = state.captureSavingFor == pairing.deviceId,
                 needsSim = Attribution.needsSubscriptionId(state.pairings, pairing),
+                sims = state.sims,
                 onCaptureChange = { onCaptureChange(pairing.deviceId, it) },
+                onSendingChange = { onSendingChange(pairing.deviceId, it) },
                 onRemove = { onRemovePairing(pairing.deviceId) },
             )
             Spacer(Modifier.height(8.dp))
         }
+
+        /*
+         * What this phone can see, whether or not anything is bound to it.
+         *
+         * Here because the dashboard shows the same list when somebody is
+         * choosing a number, and the two disagreeing is exactly the failure
+         * this whole flow exists to prevent — so it has to be checkable from
+         * the phone as well as from a browser.
+         */
+        SectionHeader("SIMs in this phone")
+        SettingsCard {
+            if (!state.hasPhoneStatePermission) {
+                ListItem(
+                    leadingContent = { Icon(Icons.Outlined.Warning, contentDescription = null) },
+                    headlineContent = { Text("Phone permission not granted") },
+                    supportingContent = {
+                        Text("Without it the SIMs cannot be read, and the dashboard has none to offer.")
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            } else if (state.sims.isEmpty()) {
+                ListItem(
+                    leadingContent = { Icon(Icons.Outlined.Sms, contentDescription = null) },
+                    headlineContent = { Text("No SIMs found") },
+                    supportingContent = { Text("Nothing to report. Check a SIM is inserted.") },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            } else {
+                state.sims.forEachIndexed { index, sim ->
+                    if (index > 0) HorizontalDivider()
+                    ListItem(
+                        leadingContent = { Icon(Icons.Outlined.Sms, contentDescription = null) },
+                        headlineContent = {
+                            Text("SIM ${sim.slotIndex + 1} · ${sim.carrierName}")
+                        },
+                        supportingContent = {
+                            Text(
+                                if (sim.msisdn != null) {
+                                    "${sim.msisdn} · ${sim.networkGeneration} · from ${sim.numberSource}"
+                                } else {
+                                    // Not a fault to fix. The carrier never wrote
+                                    // the number to the SIM, and no API invents it.
+                                    "Number not available · ${sim.networkGeneration}"
+                                },
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
 
         SettingsCard {
             ListItem(
@@ -444,7 +502,9 @@ private fun NumberCard(
     pairing: Pairing,
     saving: Boolean,
     needsSim: Boolean,
+    sims: List<SimCard>,
     onCaptureChange: (CaptureSettings) -> Unit,
+    onSendingChange: (Boolean) -> Unit,
     onRemove: () -> Unit,
 ) {
     SettingsCard {
@@ -465,6 +525,7 @@ private fun NumberCard(
                             "Revoked from the dashboard. Remove it and scan a new code."
                         pairing.awaitingApproval ->
                             "Scanned. Approve this phone on the dashboard to start capturing."
+                        !pairing.sendingEnabled -> "Paused on this phone. The dashboard is told."
                         else -> pairing.provider.replaceFirstChar { it.uppercase() }
                     },
                 )
@@ -474,6 +535,52 @@ private fun NumberCard(
             },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         )
+
+        HorizontalDivider()
+        SwitchRow(
+            title = "Report for this number",
+            subtitle = if (pairing.sendingEnabled) {
+                "Messages for it are captured and sent."
+            } else {
+                "Paused. Nothing is captured, and nothing is held back to send later."
+            },
+            checked = pairing.sendingEnabled,
+            // Deliberately available even when the pairing is not live. Somebody
+            // whose approval is still pending should be able to decide in
+            // advance whether this phone will report at all.
+            enabled = !saving,
+            onChange = onSendingChange,
+            icon = Icons.Outlined.Sms,
+        )
+
+        /*
+         * Which SIM this number arrives on, when the phone knows.
+         *
+         * Shown rather than asked. The binding is made when the number is
+         * chosen, and this is how somebody checks the phone agrees with what
+         * the dashboard thinks — the case that used to fail silently.
+         */
+        val boundSim = sims.firstOrNull { it.subscriptionId == pairing.subscriptionId }
+        if (boundSim != null) {
+            HorizontalDivider()
+            ListItem(
+                leadingContent = { Icon(Icons.Outlined.Sms, contentDescription = null) },
+                headlineContent = { Text("SIM ${boundSim.slotIndex + 1} · ${boundSim.carrierName}") },
+                supportingContent = {
+                    Text(
+                        if (boundSim.msisdn == pairing.accountMsisdn) {
+                            "Messages on this SIM belong to this number."
+                        } else {
+                            // The failsafe, surfaced. Captures are already being
+                            // refused; saying why beats silence.
+                            "This SIM now reports ${boundSim.msisdn ?: "no number"}, not " +
+                                "${pairing.accountMsisdn}. Captures are refused until it matches."
+                        },
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+        }
 
         if (needsSim) {
             HorizontalDivider()
