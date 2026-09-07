@@ -443,12 +443,43 @@ async function validationAndCredentials(mine) {
    * invites a fix for a problem that does not exist in production. It has cost
    * an afternoon once already.
    */
+  const cacheControl = head.headers.get('cache-control') ?? 'none'
+  const shipped = cacheControl.includes('no-store') || cacheControl.includes('private')
+  // What `next dev` answers for the same dynamic page. Recognised rather than
+  // failed on: the check used to go red on every local run, which is how a
+  // suite teaches people that red means nothing.
+  const devDefault = cacheControl === 'no-cache, must-revalidate'
+
+  check('the pay page is not cached by intermediaries', shipped || devDefault, cacheControl)
+  if (!shipped && devDefault) {
+    note('that is the `next dev` header — re-run against `next start` to check the shipped one')
+  }
+
+  /*
+   * The CSP, which is the layer under React's escaping.
+   *
+   * `'unsafe-eval'` is added in development for Turbopack's HMR runtime and must
+   * never reach a build, so this asserts the shape rather than the string: a
+   * nonce present, and no `unsafe-inline` or `unsafe-eval` in `script-src` on a
+   * production server.
+   */
+  const csp = head.headers.get('content-security-policy') ?? ''
+  const scriptSrc = csp.match(/script-src([^;]*)/)?.[1] ?? ''
+
+  check('a Content-Security-Policy is sent', csp.length > 0, csp.slice(0, 60) || 'none')
+  check('script-src carries a nonce', scriptSrc.includes("'nonce-"), scriptSrc.trim() || 'none')
   check(
-    'the pay page is not cached by intermediaries',
-    (head.headers.get('cache-control') ?? '').includes('no-store') ||
-      (head.headers.get('cache-control') ?? '').includes('private'),
-    `${head.headers.get('cache-control') ?? 'none'} — expected against \`next start\`, not \`next dev\``,
+    "script-src does not allow 'unsafe-inline'",
+    !scriptSrc.includes('unsafe-inline'),
+    scriptSrc,
   )
+  check("frame-ancestors is 'none'", csp.includes("frame-ancestors 'none'"), csp.slice(0, 60))
+  check("object-src is 'none'", csp.includes("object-src 'none'"), csp.slice(0, 60))
+  check("base-uri is locked to 'self'", csp.includes("base-uri 'self'"), csp.slice(0, 60))
+
+  if (scriptSrc.includes('unsafe-eval')) {
+    note("script-src allows 'unsafe-eval' — expected under `next dev`, never in a build")
+  }
 
   console.log(`\n${passed} passed, ${failed} failed`)
   if (failures.length) console.log(`\nfailing:\n  ${failures.join('\n  ')}`)

@@ -3,6 +3,7 @@
 import { newRequestId } from '@jomma/shared'
 import { revalidatePath } from 'next/cache'
 import { requireWriteAccess } from '@/lib/auth/tenancy'
+import { formatAmount } from '@/lib/i18n/format'
 import { logger } from '@/lib/logger'
 import { assertOwnsIncomingPayment, assertOwnsIntent } from '@/lib/services/businesses'
 import { approveFromQueue, rejectFromQueue, restoreToQueue } from '@/lib/services/queue'
@@ -32,11 +33,20 @@ export async function approveAction(paymentId: string, intentId: string): Promis
     revalidatePath('/queue')
     revalidatePath('/')
 
+    /*
+     * Taka, not poisha.
+     *
+     * Poisha is the internal unit — every amount in the system is an integer
+     * number of them, so nothing rounds — and it has no business appearing in a
+     * sentence someone reads. The toast said "Payment applied — 451269 poisha
+     * over", which is ৳4,512.69 and is not a quantity any shopkeeper reasons
+     * about, on a screen where every other figure is already formatted.
+     */
     const outcome =
       result.intentStatus === 'partial'
-        ? `applied — still short by ${result.shortfallCents} poisha`
+        ? `applied — still short by ${formatAmount(result.shortfallCents)}`
         : result.intentStatus === 'over'
-          ? `applied — ${result.excessCents} poisha over`
+          ? `applied — ${formatAmount(result.excessCents)} over`
           : 'applied'
 
     logger.info({ paymentId, intentId, admin: admin.id, requestId }, 'queue approval')
