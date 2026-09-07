@@ -402,6 +402,31 @@ to allow this app to install packages, per app, and then confirms the install
 itself. Both prompts are the point. The app deep-links to the exact settings
 screen rather than failing with a permission error.
 
+**A download is checked before it is offered.** Two ways, cheapest first: the
+byte count against the size in the release metadata, and the SHA-256 against the
+`SHA256SUMS.txt` the release workflow publishes beside the APKs. The hash is
+computed while the body streams past, so verifying costs no second read of
+twelve megabytes off a cheap phone's flash. Either check failing deletes the
+file and reports no download.
+
+That file had been published beside every release since the workflow was
+written and nothing read it: bytes were written to disk and anything longer than
+zero was offered as ready to install. A connection dropping mid-body — a shop's
+wi-fi, a phone carried out of range — left a short APK that reached the
+installer and came back as a parse error looking like a corrupt release rather
+than a bad transfer.
+
+Both checks are deliberately lenient about their own absence: a release with no
+checksum file, or one whose checksum file cannot be fetched, installs on the
+length check alone. Stranding a phone on an old build is the worse outcome, and
+the APK on disk is unaffected by a second request failing.
+
+Worth being exact about what this is **not**. It does not decide whether an APK
+can be trusted — Android does that at install time by refusing any package whose
+signing certificate differs from the installed one, and an attacker able to
+replace the APK on a release would replace the checksum in the same breath. This
+catches accidents, which are the failure that actually happens.
+
 **Installing goes through `PackageInstaller`, not `ACTION_VIEW`.** The intent
 handoff every tutorial shows — a `FileProvider` URI with the
 `application/vnd.android.package-archive` type — does not work for an *update*

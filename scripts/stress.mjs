@@ -87,6 +87,20 @@ async function createIntent(amount, extra = {}) {
       client_reference: `STRESS-${Date.now()}-${randomBytes(2).toString('hex')}`,
       ttl_seconds: 900,
       payer_msisdn: '01712345678',
+      /*
+       * Pinned, because `message()` below writes a bKash notification.
+       *
+       * Without it checkout routes to whichever account is least utilised,
+       * which on a seeded instance is often the Nagad one — and then every
+       * capture is handed to the Nagad parser, stored `unparsed`, and matched
+       * to nothing. Eleven of the sixteen assertions failed that way, all
+       * reading "got 0", which looks like broken concurrency handling rather
+       * than a fixture asking the wrong question. `smoke-ingest` had the same
+       * defect; `smoke-checkout` has always pinned it.
+       *
+       * Overridable, so a caller can still ask for the other provider.
+       */
+      provider: 'bkash',
       ...extra,
     }),
   })

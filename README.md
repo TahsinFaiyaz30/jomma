@@ -606,7 +606,7 @@ independently; run both.
 
 ### Pairing a phone
 
-Accounts → Add device shows a QR. It contains one thing, a URL:
+Accounts → **Pair another phone** shows a QR. It contains one thing, a URL:
 
 ```
 https://<your-host>/pair/<one-time-code>
@@ -639,6 +639,54 @@ You are not asked to name the phone first. Generating a QR is one button; the
 phone reports its own model when it scans, and you rename it afterwards, when it
 is actually in front of you. Names are cosmetic and need not be unique — two
 shops both calling a phone "Counter" is fine, and so is one shop with two.
+
+### Choosing the number
+
+**You never type a bKash number.** The code above pairs a phone to the
+*business*, not to a number — nothing about which account it watches is known or
+asked for at that point.
+
+Once the phone is approved it reports the SIMs it can see on every heartbeat,
+and Accounts lists them exactly as the phone does:
+
+```
+SIM 1 · Grameenphone · 4G     8801799887766 · from sim      Already set up
+SIM 2 · Banglalink  · 4G      8801914205878 · from ims      [ Use this SIM ]
+SIM 3 · Teletalk    · 2G      Number not available from this SIM
+```
+
+Picking one is the whole act. The number comes off the SIM, so there is nothing
+to mistype and nothing to keep in step.
+
+What this replaces: somebody typed a number into the dashboard, minted a QR for
+it, scanned that, and then — separately, on another screen — told the app which
+SIM that number was on. Two hand-entered facts that had to agree, with nothing
+checking that they did. When they disagreed, messages routed to the wrong
+account or to none, and the only symptom was payments quietly not arriving.
+
+**Android will not always say.** The number lives in a file on the SIM that the
+carrier has to have written, and plenty never do. Four sources are tried, best
+first — the SIM itself, the carrier config, the IMS registration (usually the
+one that answers on a modern Bangladeshi SIM), and the pre-Android-13 path. A
+SIM none of them answer for is shown greyed with the reason rather than hidden,
+because a row missing from a list is not something anyone can act on.
+
+**A swapped SIM is caught.** A subscription id is Android's handle for a SIM,
+not the SIM itself, and handles get reused — pull one out, put another in the
+same slot, and messages from a stranger's number could arrive under an id the
+phone still trusts. So the binding records the number too, and every capture
+re-reads what that SIM says it is now. Disagreement refuses the capture and the
+app says which two numbers disagree.
+
+One account per provider per business. A phone can hold several — two SIMs, or
+a bKash and a Nagad number, or numbers for two different shops — each as its own
+credential, so revoking one leaves the rest working.
+
+**Pausing.** Each number has a switch in the app: *Report for this number*. Off
+means nothing is captured for it — not queued and sent later, not held, because
+a backlog arriving in a burst when the switch goes back on is a worse surprise
+than the gap. The heartbeat keeps running and carries the flag, so the dashboard
+says the phone has paused this rather than showing a phone that went silent.
 
 ### What it keeps
 
@@ -749,35 +797,50 @@ around rather than blocking checkout.
 ```bash
 pnpm lint              # Biome
 pnpm typecheck         # all five workspaces
-pnpm test              # 139 unit tests — no database or .env needed
-pnpm test:integration  # needs a live database
+pnpm test              # 185 unit tests — no database or .env needed
+pnpm test:integration  # 102 tests — needs a live database, seeded
 pnpm build             # production build
+```
+
+The Android app is a separate toolchain:
+
+```bash
+cd apps/android && ./gradlew testDebugUnitTest   # 78 tests, no device needed
 ```
 
 Against a running server, with the credentials the seed printed:
 
 ```bash
-pnpm smoke <api_key> <device_token> <device_id> [<token_2> <id_2>]
-pnpm smoke:checkout <api_key>     # the buyer's flow, 51 assertions
-pnpm smoke:ingest <api_key>       # signed webhook ingest
-pnpm smoke:audit <api_key>        # 46 adversarial checks — run against `next start`
-pnpm smoke:stress <api_key>       # concurrency: races, double-spend, idempotency
+pnpm smoke <api_key> <device_token> <device_id> [<token_2> <id_2>]   # 55
+pnpm smoke:checkout <api_key>     # the buyer's flow end to end        51
+pnpm smoke:ingest <api_key>       # signed webhook ingest              14
+pnpm smoke:audit <api_key>        # adversarial                        59
+pnpm smoke:stress <api_key>       # races, double-spend, idempotency    16
 ```
 
-Roughly 300 assertions over the real HTTP surface. A few notes that will save you
-an afternoon:
+Roughly 560 assertions, most of them over the real HTTP surface. A few notes
+that will save you an afternoon:
 
 - **Run the suites a minute apart.** They share a per-IP rate limit, so
-  back-to-back runs throttle each other — that is the limiter working.
-- **Run `pnpm smoke:audit` against `next start`, not `next dev`.** The dev server
-  reports a different `Cache-Control` and one check fails spuriously.
+  back-to-back runs throttle each other — that is the limiter working. It is
+  worth recognising, because a throttled run fails in the shape of a broken
+  feature: eighteen assertions went red once and every one of them was a 429.
 - **`pnpm smoke` deliberately degrades an account** to exercise drift detection.
-  Re-run `pnpm db:seed` afterwards.
+  Re-run `pnpm db:seed` afterwards, or the next suite reports
+  `no_healthy_account` and looks like a routing bug.
+- **`pnpm test:integration` needs the database *seeded*, not just migrated.**
+  Three files read rows the seed creates and say so when they are missing.
 
 The unit suites need no configuration — no database, no `.env`. That is enforced
 rather than hoped for: `vitest.config.ts` supplies a fake environment and stubs
 the database client so a test that reaches for a real connection fails loudly.
 Integration tests want both and are separate (`pnpm test:integration`).
+
+CI runs all of it: lint, typecheck, unit, and the integration suite against a
+Postgres service container with a dev server in front of it, plus the Android
+tests and a debug APK. The integration suite used to run on developer machines
+only, which meant every check that one business cannot read, cancel or re-key
+another's rows was absent from the one place that gates a merge.
 
 ---
 

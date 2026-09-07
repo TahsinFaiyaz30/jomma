@@ -109,8 +109,12 @@ shadcn/ui                        Base UI base: npx shadcn init --base base
 motion                  13.1.x   import from "motion/react". Used sparingly.
 @tanstack/react-table            The payment feed and queues are tables.
 @tanstack/react-virtual          Feed can run to thousands of rows.
-recharts                         Volume and match-rate charts only.
 ```
+
+There is deliberately no charting library. One was installed and never
+imported, and it carried the only `dangerouslySetInnerHTML` in the tree — so it
+went, along with two copies of recharts on disk. Add one back when a screen
+actually needs a chart, not before.
 
 ### Android notifier
 
@@ -131,6 +135,7 @@ See `docs/android.md`.
 ```
 apps/
   web/                    Next.js — API routes + dashboard
+    proxy.ts              CSP with a per-request nonce (Next 16's `middleware`)
     app/
       (dash)/             Dashboard UI
       api/v1/             Client API
@@ -141,6 +146,7 @@ apps/
       parsers/            Per-provider message parsers + fixtures
       webhooks/           Signing, delivery, retry
       db/schema/
+    tests/                Integration — real Postgres, needs `pnpm db:seed`
   worker/                 pg-boss job definitions
   android/                Kotlin notifier app
 packages/
@@ -309,6 +315,26 @@ be red.
 - `raw_message` contains buyer phone numbers. Treat the table as PII: no raw
   messages in logs, redact msisdns in anything shipped to an error tracker.
 - The dashboard is admin-only. No public signup.
+
+### In the browser
+
+- `next.config.ts` sets `X-Content-Type-Options`, `X-Frame-Options: DENY` and
+  `Referrer-Policy` on every response.
+- `apps/web/proxy.ts` adds a Content-Security-Policy with a per-request nonce.
+  It is the layer under React's escaping, and it matters here because the
+  dashboard renders `raw_message` — text from a stranger's SMS, relayed by a
+  phone nobody at Jomma controls — beside a session that can approve payments
+  and mint API keys.
+
+  The nonce is set on the **request** headers as well as the response. Next
+  reads it back from there to stamp its own inline RSC scripts; setting only the
+  response sends a correct-looking header and silently blocks the framework's
+  bootstrap. `'unsafe-eval'` is added outside production only, for Turbopack's
+  HMR runtime, and must never appear in a build — `pnpm smoke:audit` asserts
+  that.
+- Anything rendering user-supplied text stays in JSX. There is no
+  `dangerouslySetInnerHTML` anywhere in the tree; if you need one, that is the
+  moment to stop and ask.
 
 ---
 

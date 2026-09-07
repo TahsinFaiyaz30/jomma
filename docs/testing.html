@@ -59,7 +59,7 @@
   <p class="eyebrow">Operating it</p>
   <h1>Testing &amp; status</h1>
   <p class="lede">
-    Roughly 300 assertions, most of them over the real HTTP surface rather than
+    Roughly 560 assertions, most of them over the real HTTP surface rather than
     against mocks. Plus an honest account of what is not finished.
   </p>
 </section>
@@ -69,8 +69,8 @@
   <p>These need nothing running but a database:</p>
   <div class="code" data-lang="bash"><pre>pnpm lint              # Biome, across the whole workspace
 pnpm typecheck         # all five packages
-pnpm test              # 139 unit tests, no database or .env needed
-pnpm test:integration  # needs a live database
+pnpm test              # 185 unit tests, no database or .env needed
+pnpm test:integration  # 102 tests, needs a live database <em>seeded</em>
 pnpm build             # production build</pre></div>
 
   <p>These drive a running server with the credentials the seed printed:</p>
@@ -80,15 +80,19 @@ pnpm smoke:ingest &lt;api_key&gt;
 pnpm smoke:audit &lt;api_key&gt;
 pnpm smoke:stress &lt;api_key&gt;</pre></div>
 
+  <p>The Android app is a separate toolchain and needs no device:</p>
+  <div class="code" data-lang="bash"><pre>cd apps/android &amp;&amp; ./gradlew testDebugUnitTest</pre></div>
+
   <div class="tw"><table>
     <thead><tr><th>Suite</th><th>Checks</th><th>What it covers</th></tr></thead>
     <tbody>
-      <tr><td><code>test</code></td><td>139</td><td>The matcher, every parser, capture filtering, pairing-link parsing, CSV import, webhook signatures, the QR service, id encoding.</td></tr>
-      <tr><td><code>test:integration</code></td><td>9</td><td>Statement import, device commands, submission account scoping &mdash; against real Postgres.</td></tr>
-      <tr><td><code>smoke</code></td><td>54</td><td>Intent lifecycle, idempotent replay, auth, validation, device capture, automatic matching, every submission outcome, underpayment, two-account failover, balance drift.</td></tr>
+      <tr><td><code>test</code></td><td>185</td><td>The matcher, every parser, capture filtering, pairing-link parsing, CSV import, webhook signatures, the QR service, id encoding.</td></tr>
+      <tr><td><code>test:integration</code></td><td>102</td><td>Tenant isolation at both the service and the HTTP layer, SIM-to-account binding, suspended-business blocking, device commands, statement import, business slug collisions, webhook targets, and every dashboard page’s queries &mdash; against real Postgres.</td></tr>
+      <tr><td><code>smoke</code></td><td>55</td><td>Intent lifecycle, idempotent replay, auth, validation, device capture, automatic matching, every submission outcome, underpayment, two-account failover, balance drift.</td></tr>
       <tr><td><code>smoke:checkout</code></td><td>51</td><td>The buyer's flow end to end: method choice, declaring a payer, split payments, refunds, overpayment, the QR route decoded and verified.</td></tr>
       <tr><td><code>smoke:ingest</code></td><td>14</td><td>The signed webhook ingest path, including replay and signature rejection.</td></tr>
-      <tr><td><code>smoke:audit</code></td><td>46</td><td>Adversarial: cross-tenant access, enumeration, SQL-shaped input, header injection, burst throttling, response headers.</td></tr>
+      <tr><td><code>smoke:audit</code></td><td>59</td><td>Adversarial: cross-tenant access, enumeration, SQL-shaped input, header injection, burst throttling, response headers, and the Content-Security-Policy’s shape.</td></tr>
+      <tr><td><code>gradlew testDebugUnitTest</code></td><td>78</td><td>Pairing-link parsing, SIM number canonicalisation, capture attribution and the SIM-swap failsafe, pairing storage, update caching and checksum parsing, and the settings screen&rsquo;s per-number rows rendered under Robolectric &mdash; no device needed.</td></tr>
       <tr><td><code>smoke:stress</code></td><td>16</td><td>Genuine concurrency &mdash; simultaneous instalments, twenty claims on one TrxID, one TrxID across two orders, duplicate deliveries, parallel idempotent creates.</td></tr>
     </tbody>
   </table></div>
@@ -102,10 +106,21 @@ pnpm smoke:stress &lt;api_key&gt;</pre></div>
     limiter working, not a failure.
   </p></div>
   <div class="note warn"><p>
-    <strong>Run <code>smoke:audit</code> against <code>next start</code>, not
-    <code>next dev</code>.</strong> The dev server answers dynamic pages with a
-    different <code>Cache-Control</code> than production does, so one check fails
-    spuriously and sends you looking for a leak that is not there.
+    <strong><code>smoke:audit</code> answers differently against
+    <code>next dev</code>, and says so.</strong> The dev server sends a weaker
+    <code>Cache-Control</code> on dynamic pages and needs
+    <code>'unsafe-eval'</code> in the CSP for its HMR runtime. Both are correct
+    there and wrong in a build, so the suite recognises each and prints a
+    <code>note</code> rather than a failure. It used to fail on both, and a check
+    that is always red is one people learn to skip. Run it against
+    <code>next start</code> to see the shipped headers asserted properly.
+  </p></div>
+  <div class="note warn"><p>
+    <strong><code>pnpm test:integration</code> wants the database seeded, not
+    just migrated.</strong> Three files read rows <code>pnpm db:seed</code>
+    creates and say so plainly when they are missing. Migrating alone passes on
+    a machine that was seeded last week and fails on the first empty database it
+    meets, which is how it reached CI.
   </p></div>
   <div class="note warn"><p>
     <strong><code>pnpm smoke</code> deliberately degrades an account</strong> to
