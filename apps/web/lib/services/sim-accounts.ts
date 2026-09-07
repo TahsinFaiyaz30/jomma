@@ -159,7 +159,16 @@ export async function addAccountFromSim(options: {
   subscriptionId: number
   provider: Provider
   label?: string
-  actorId: string
+  /** Null when the phone itself added it. See `actorType`. */
+  actorId: string | null
+  /**
+   * Who is adding it.
+   *
+   * A phone may, once it has been approved. Approval is the trust boundary —
+   * somebody at the dashboard said yes to this handset — and after it the phone
+   * manages the numbers on its own business rather than asking for each one.
+   */
+  actorType?: 'admin' | 'device'
 }): Promise<{ accountId: string; msisdn: string }> {
   const device = await db.query.devices.findFirst({
     where: and(eq(devices.id, options.deviceId), eq(devices.businessId, options.businessId)),
@@ -214,6 +223,7 @@ export async function addAccountFromSim(options: {
     msisdn: sim.msisdn,
     label: options.label?.trim() || `${sim.carrier_name || 'SIM'} · ${sim.msisdn}`,
     actorId: options.actorId,
+    actorType: options.actorType,
   })
 
   /*

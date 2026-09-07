@@ -66,10 +66,21 @@ export const receivingAccounts = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
-    // Globally unique, not per business. One physical bKash number cannot be
-    // watched by two merchants at once: the captures would be indistinguishable
-    // and each would see the other's incoming money.
-    uniqueIndex('ux_receiving_accounts_msisdn').on(table.msisdn),
+    /*
+     * Unique per number *and provider*, globally.
+     *
+     * One physical bKash number still cannot be watched by two merchants at
+     * once — the captures would be indistinguishable and each would see the
+     * other's incoming money — and that is what this prevents.
+     *
+     * What it used to prevent as well, by accident, is one number being both a
+     * bKash and a Nagad account. That is ordinary in Bangladesh: the same SIM
+     * holds both wallets, and a shop using one number for both was told the
+     * number was already taken. The two are genuinely different accounts —
+     * separate balances, separate confirmations, and a notification names its
+     * provider, so the phone can tell them apart.
+     */
+    uniqueIndex('ux_receiving_accounts_msisdn_provider').on(table.msisdn, table.provider),
 
     /*
      * One account per provider, per business.

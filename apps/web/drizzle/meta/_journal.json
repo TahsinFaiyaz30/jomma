@@ -183,6 +183,13 @@
       "when": 1788726420129,
       "tag": "0025_panoramic_peter_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788807512647,
+      "tag": "0026_closed_sersi",
+      "breakpoints": true
     }
   ]
 }

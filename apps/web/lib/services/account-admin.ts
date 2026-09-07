@@ -86,20 +86,36 @@ export async function createReceivingAccount(options: {
   provider: 'bkash' | 'nagad'
   msisdn: string
   label: string
-  actorId: string
+  /** Null when a phone added it rather than somebody at a dashboard. */
+  actorId: string | null
+  actorType?: 'admin' | 'device'
 }): Promise<{ id: string; msisdn: string }> {
   const msisdn = normalizeMsisdn(options.msisdn)
   if (!msisdn) {
     throw new Error('Not a Bangladeshi mobile number. Expected 11 digits starting 01.')
   }
 
+  /*
+   * By number *and provider*, matching `ux_receiving_accounts_msisdn_provider`.
+   *
+   * Still global rather than per business: one physical bKash number cannot be
+   * watched by two merchants, because the captures would be indistinguishable
+   * and each would see the other's incoming money.
+   *
+   * What it must not refuse is the same number holding a bKash *and* a Nagad
+   * wallet, which is ordinary — one SIM, two accounts, and a notification names
+   * its provider so the phone can tell them apart. Checking the number alone
+   * told those shops the number was already taken.
+   */
   const existing = await db.query.receivingAccounts.findFirst({
-    where: eq(receivingAccounts.msisdn, msisdn),
+    where: and(
+      eq(receivingAccounts.msisdn, msisdn),
+      eq(receivingAccounts.provider, options.provider),
+    ),
   })
-  // Globally, not just within this business: one physical number cannot be
-  // watched by two merchants, because the captures would be indistinguishable
-  // and each would see the other's incoming money.
-  if (existing) throw new Error(`${msisdn} is already being watched.`)
+  if (existing) {
+    throw new Error(`${msisdn} is already being watched for ${options.provider}.`)
+  }
 
   return db.transaction(async (tx) => {
     const [account] = await tx
@@ -110,7 +126,10 @@ export async function createReceivingAccount(options: {
         msisdn,
         label: options.label.trim(),
         status: 'disabled',
-        statusReason: 'Added from the dashboard. Provision a phone, then enable it.',
+        statusReason:
+          options.actorType === 'device'
+            ? 'Added from the phone. Enable it when you are ready to take payments.'
+            : 'Added from the dashboard. Provision a phone, then enable it.',
       })
       .returning()
 
@@ -119,7 +138,7 @@ export async function createReceivingAccount(options: {
     await audit(tx, {
       action: 'account.created',
       actorId: options.actorId,
-      actorType: 'admin',
+      actorType: options.actorType ?? 'admin',
       payload: { account_id: account.id, msisdn, provider: options.provider },
     })
 
