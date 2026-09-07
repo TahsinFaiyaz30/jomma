@@ -250,7 +250,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     _state.value = _state.value.copy(
                         pairings = prefs.pairings,
                         captureSavingFor = null,
-                        message = "${pairing.accountMsisdn} was revoked. Pair it again.",
+                        message = "${pairing.label} was revoked. Pair it again.",
                     )
                 }
 
@@ -261,7 +261,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     _state.value = _state.value.copy(
                         pairings = prefs.pairings,
                         captureSavingFor = null,
-                        message = "Approve ${pairing.accountMsisdn} on the dashboard first.",
+                        message = "Approve ${pairing.label} on the dashboard first.",
                     )
                 }
 
@@ -351,9 +351,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             when (val result = JommaApi(app).pair(link)) {
                 is JommaApi.Result.Ok -> {
-                    val msisdn = result.value.account.msisdn
+                    /*
+                     * Null when the code paired this phone to a business rather
+                     * than to a number, which is the ordinary first step now.
+                     * The pairing is still stored: it holds a working
+                     * credential, and heartbeating with it is how the dashboard
+                     * learns which SIMs are in this phone. Choosing one there
+                     * sends down a second code that does carry an account.
+                     */
+                    val msisdn = result.value.account?.msisdn
 
-                    if (prefs.watches(msisdn)) {
+                    if (msisdn != null && prefs.watches(msisdn)) {
                         _state.value = _state.value.copy(
                             busy = false,
                             message = "$msisdn is already set up on this phone.",
@@ -370,7 +378,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             deviceToken = result.value.deviceToken,
                             serverUrl = link.serverUrl,
                             accountMsisdn = msisdn,
-                            provider = result.value.account.provider,
+                            provider = result.value.account?.provider,
                             // Scanning is no longer the last step: the phone is
                             // inert until the dashboard approves it.
                             awaitingApproval = true,
@@ -463,7 +471,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             prefs.removePairing(deviceId)
             _state.value = _state.value.copy(
                 pairings = prefs.pairings,
-                message = "${pairing.accountMsisdn} removed from this phone.",
+                message = "${pairing.label} removed from this phone.",
             )
             refresh()
         }

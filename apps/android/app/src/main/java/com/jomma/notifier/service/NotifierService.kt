@@ -111,7 +111,7 @@ class NotifierService : LifecycleService() {
                 "Waiting for approval on the dashboard"
             live == 0 -> "Revoked — re-provision this device"
             queueDepth > 0 -> "$queueDepth queued · beat $ago"
-            live == 1 -> "Watching ${pairings.first { it.live }.accountMsisdn} · beat $ago"
+            live == 1 -> "Watching ${pairings.first { it.live }.label} · beat $ago"
             else -> "Watching $live numbers · beat $ago"
         }
 

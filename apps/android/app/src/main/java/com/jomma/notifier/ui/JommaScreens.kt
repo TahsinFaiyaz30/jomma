@@ -246,7 +246,7 @@ private fun StatusScreen(
                             !state.hasNotificationAccess -> "Notification access is off"
                             state.queueDepth > 0 -> "${state.queueDepth} waiting to send"
                             state.livePairings.size == 1 ->
-                                "Watching ${state.livePairings.first().accountMsisdn}"
+                                "Watching ${state.livePairings.first().label}"
                             else -> "Watching ${state.livePairings.size} numbers"
                         },
                         style = MaterialTheme.typography.bodyMedium,

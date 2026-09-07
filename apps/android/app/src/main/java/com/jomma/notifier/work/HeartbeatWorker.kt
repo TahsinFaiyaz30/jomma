@@ -92,7 +92,11 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
             val prefs = Prefs.get(context)
             when (val result = JommaApi(context).pair(link)) {
                 is JommaApi.Result.Ok -> {
-                    val msisdn = result.value.account.msisdn
+                    // An `add_account` code is minted for an account that
+                    // exists, so this is never null in practice. Skipping
+                    // beats storing a pairing with no number, which would
+                    // heartbeat forever and watch nothing.
+                    val msisdn = result.value.account?.msisdn ?: return
                     // Guard the same way the scanner does: a second pairing for
                     // a number this phone already watches would double every
                     // capture from it.
@@ -104,7 +108,7 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                             deviceToken = result.value.deviceToken,
                             serverUrl = link.serverUrl,
                             accountMsisdn = msisdn,
-                            provider = result.value.account.provider,
+                            provider = result.value.account?.provider,
                             awaitingApproval = true,
                         ),
                     )

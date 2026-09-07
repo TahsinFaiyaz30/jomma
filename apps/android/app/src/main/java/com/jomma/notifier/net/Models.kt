@@ -173,7 +173,19 @@ data class ProvisionAccount(val msisdn: String, val provider: String)
 data class ProvisionResponse(
     @SerialName("device_token") val deviceToken: String,
     @SerialName("device_id") val deviceId: String,
-    val account: ProvisionAccount,
+    /**
+     * Null when the code paired this phone to a *business* rather than to a
+     * number, which is now the ordinary first step: the number is chosen
+     * afterwards, from the SIMs this phone reports.
+     *
+     * Declared non-null when the only kind of code was one minted for an
+     * account that already existed. The server has answered `"account": null`
+     * since that changed, and kotlinx.serialization refused the whole body —
+     * so scanning the code the dashboard actually shows failed with
+     * `Unexpected JSON token at offset 190`, which names neither the field nor
+     * the reason.
+     */
+    val account: ProvisionAccount? = null,
 )
 
 /**

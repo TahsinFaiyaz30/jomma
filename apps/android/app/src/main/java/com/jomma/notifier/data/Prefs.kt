@@ -142,7 +142,9 @@ class Prefs internal constructor(private val prefs: SharedPreferences) {
                 deviceId = deviceId,
                 deviceToken = token,
                 serverUrl = serverUrl,
-                accountMsisdn = msisdn.orEmpty(),
+                // Null rather than "" now the field is nullable: an empty string is a
+                // number this phone claims to watch and does not.
+                accountMsisdn = msisdn,
                 provider = "bkash",
                 capture = legacyCapture(),
                 revoked = prefs.getBoolean(KEY_REVOKED, false),

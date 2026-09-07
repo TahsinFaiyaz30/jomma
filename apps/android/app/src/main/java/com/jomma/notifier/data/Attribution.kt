@@ -130,7 +130,14 @@ object Attribution {
      * Whether two pairings are indistinguishable without a SIM to tell them
      * apart, so the settings screen knows to ask.
      */
-    fun needsSubscriptionId(pairings: List<Pairing>, pairing: Pairing): Boolean =
-        pairing.subscriptionId == null &&
-            pairings.count { it.provider == pairing.provider && it.deviceId != pairing.deviceId } > 0
+    fun needsSubscriptionId(pairings: List<Pairing>, pairing: Pairing): Boolean {
+        // A pairing with no account watches nothing, so it cannot be confused
+        // with anything. Without this, two of them both have `provider == null`
+        // and would count as sharing one — asking which SIM a phone that has
+        // not been given a number yet is paid on.
+        val provider = pairing.provider ?: return false
+
+        return pairing.subscriptionId == null &&
+            pairings.count { it.provider == provider && it.deviceId != pairing.deviceId } > 0
+    }
 }

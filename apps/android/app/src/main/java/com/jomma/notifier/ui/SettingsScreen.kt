@@ -547,7 +547,7 @@ private fun NumberCard(
                     else MaterialTheme.colorScheme.error,
                 )
             },
-            headlineContent = { Text(pairing.accountMsisdn) },
+            headlineContent = { Text(pairing.label) },
             supportingContent = {
                 Text(
                     when {
@@ -556,7 +556,12 @@ private fun NumberCard(
                         pairing.awaitingApproval ->
                             "Scanned. Approve this phone on the dashboard to start capturing."
                         !pairing.sendingEnabled -> "Paused on this phone. The dashboard is told."
-                        else -> pairing.provider.replaceFirstChar { it.uppercase() }
+                        // Paired to the business, waiting for a SIM to be
+                        // chosen on the dashboard. It heartbeats — that is how
+                        // the SIM list gets there — and captures nothing.
+                        pairing.accountMsisdn == null ->
+                            "Paired. Choose which SIM this phone is paid on, in the dashboard."
+                        else -> pairing.provider?.replaceFirstChar { it.uppercase() } ?: ""
                     },
                 )
             },

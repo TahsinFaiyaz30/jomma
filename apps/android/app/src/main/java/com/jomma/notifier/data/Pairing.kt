@@ -24,8 +24,17 @@ data class Pairing(
     val deviceToken: String,
     /** Taken from the QR that produced this pairing, so each may differ. */
     val serverUrl: String,
-    val accountMsisdn: String,
-    val provider: String,
+    /**
+     * The number this pairing watches, or null until one is chosen.
+     *
+     * Null is the ordinary state for a phone that has just scanned a business
+     * code. It has a working credential and heartbeats with it — that is how
+     * the dashboard learns which SIMs are in this phone and has anything to
+     * offer — but there is no account behind it yet, so nothing is captured
+     * for it. Picking a SIM creates a second pairing that does have one.
+     */
+    val accountMsisdn: String?,
+    val provider: String?,
     /** What the server says to keep for this number. Per number, not per app. */
     val capture: CaptureSettings = CaptureSettings(),
 
@@ -111,8 +120,8 @@ data class Pairing(
      * says so. Conflating them would make a phone that has been switched off
      * for one shop indistinguishable from one that has been thrown away.
      */
-    val capturing: Boolean get() = live && sendingEnabled
+    val capturing: Boolean get() = live && sendingEnabled && accountMsisdn != null
 
     /** What to show when there is no nicer label — the number itself will do. */
-    val label: String get() = accountMsisdn
+    val label: String get() = accountMsisdn ?: "Waiting for a number"
 }
