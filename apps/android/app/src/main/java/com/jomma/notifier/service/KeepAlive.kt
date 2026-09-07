@@ -73,11 +73,25 @@ object KeepAlive {
      */
     fun autoStartIntent(context: Context): Intent? {
         val candidates = listOf(
-            // Honor and Huawei — "App launch", the single most common cause of
-            // a foreground service dying on these phones despite every Android
-            // setting being correct.
+            /*
+             * Honor first, and as its own package.
+             *
+             * Honor separated from Huawei in 2020 and MagicOS ships
+             * `com.hihonor.systemmanager`. The Huawei package often still
+             * exists on those phones as a leftover, so matching it first
+             * resolved *something* and opened the wrong screen entirely —
+             * reported as "app launch goes to the wrong settings". The one
+             * people are told to find is Settings → Battery → App launch,
+             * which is `StartupNormalAppListActivity` under whichever of the
+             * two packages this phone actually uses.
+             */
+            "com.hihonor.systemmanager" to "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
+            "com.hihonor.systemmanager" to "com.hihonor.systemmanager.appcontrol.activity.StartupAppControlActivity",
+            // Huawei — EMUI, and pre-split Honor hardware.
             "com.huawei.systemmanager" to "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
             "com.huawei.systemmanager" to "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity",
+            // "Protected apps" — an older EMUI screen, and a different one.
+            // Last, so it never wins over App launch.
             "com.huawei.systemmanager" to "com.huawei.systemmanager.optimize.process.ProtectActivity",
             // Xiaomi / Redmi / POCO — "Autostart".
             "com.miui.securitycenter" to "com.miui.permcenter.autostart.AutoStartManagementActivity",
@@ -94,16 +108,30 @@ object KeepAlive {
             "com.asus.mobilemanager" to "com.asus.mobilemanager.autostart.AutoStartActivity",
         )
 
-        for ((pkg, cls) in candidates) {
+        /*
+         * Two passes, and the second one is the point.
+         *
+         * `resolveActivity` matches activities this app is not allowed to
+         * start, and launching one throws `SecurityException`. Returning the
+         * first *resolvable* candidate therefore let an unlaunchable entry beat
+         * the screen people actually need — the caller fell through to app
+         * details and the remaining candidates were never tried.
+         *
+         * Preferring an exported one fixes that. Requiring it would not: these
+         * are undocumented vendor internals on ROMs going back years, and an
+         * old phone that reports `exported = false` for an activity that starts
+         * perfectly well would be left with no vendor screen at all. Those
+         * phones are the ones that need this most, so the fallback keeps the
+         * original behaviour — hand back the best guess and let the caller's
+         * `runCatching` deal with a refusal.
+         */
+        val resolved = candidates.mapNotNull { (pkg, cls) ->
             val intent = Intent().setComponent(ComponentName(pkg, cls))
-            // resolveActivity rather than a try/catch around startActivity: a
-            // vendor activity that exists but refuses to launch should fall
-            // through to the next candidate, not throw at the user.
-            if (context.packageManager.resolveActivity(intent, 0) != null) {
-                return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+            context.packageManager.resolveActivity(intent, 0)?.activityInfo?.let { intent to it }
         }
-        return null
+
+        val best = resolved.firstOrNull { (_, info) -> info.exported } ?: resolved.firstOrNull()
+        return best?.first?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
     /** Where to send someone when this phone has no recognisable manager. */

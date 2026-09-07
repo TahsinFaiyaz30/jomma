@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import android.net.Uri
+import com.jomma.notifier.data.SimInventory
 import com.jomma.notifier.service.KeepAlive
 import com.jomma.notifier.update.UpdateCheckWorker
 import com.jomma.notifier.update.Updater
@@ -102,6 +103,7 @@ class MainActivity : ComponentActivity() {
                         onScan = { scanning = true },
                         onOpenNotificationSettings = ::openNotificationAccessSettings,
                         onRequestSms = ::requestSmsPermission,
+                        onRequestPhone = ::requestPhonePermission,
                         onRequestBatteryExemption = ::requestBatteryExemption,
                         onOpenAutoStart = ::openAutoStartSettings,
                         onIntervalChange = viewModel::setUpdateInterval,
@@ -276,6 +278,22 @@ class MainActivity : ComponentActivity() {
     /** There is no runtime permission for notification access — only settings. */
     private fun openNotificationAccessSettings() {
         startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+    }
+
+    /**
+     * Asks for the permission the SIM list needs.
+     *
+     * Its absence was invisible: `READ_PHONE_STATE` and `READ_PHONE_NUMBERS`
+     * were declared in the manifest and checked by `SimInventory`, and nothing
+     * anywhere ever asked for them. The settings screen offered rows for
+     * notification access and SMS and none for this, so the only way to reach
+     * the SIM list was to know to grant it by hand in Android's app info —
+     * which nothing told anyone to do. The phone reported no SIMs, and the
+     * dashboard had none to offer, on a build whose headline feature is
+     * choosing a number from the SIMs in the phone.
+     */
+    private fun requestPhonePermission() {
+        permissionLauncher.launch(SimInventory.permissions)
     }
 
     private fun requestSmsPermission() {

@@ -26,11 +26,13 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.FilterAlt
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.SimCard
 import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Wifi
@@ -90,6 +92,8 @@ fun SettingsScreen(
     state: UiState,
     onOpenNotificationSettings: () -> Unit,
     onRequestSms: () -> Unit,
+    /** Needed by the SIM list, and offered nowhere until it was missing. */
+    onRequestPhone: () -> Unit,
     onRequestBatteryExemption: () -> Unit,
     onOpenAutoStart: () -> Unit,
     onScan: () -> Unit,
@@ -134,6 +138,28 @@ fun SettingsScreen(
                 subtitle = "The second path. Catches what notifications miss.",
                 granted = state.hasSmsPermission,
                 onClick = onRequestSms,
+            )
+            HorizontalDivider()
+            /*
+             * The one that was missing.
+             *
+             * `READ_PHONE_STATE` and `READ_PHONE_NUMBERS` were in the manifest
+             * and checked by `SimInventory`, and no screen ever asked for them.
+             * Choosing which number a phone watches is done by picking one of
+             * its SIMs, so without this the list is empty, the dashboard has
+             * nothing to offer, and the only route through was knowing to grant
+             * it by hand in Android's app info.
+             */
+            StatusRow(
+                // A handset, not a SIM card. This is Android's *Phone*
+                // permission group, and a SIM icon here collided with the SIM
+                // list further down the same screen.
+                icon = Icons.Outlined.Phone,
+                title = "Phone permission",
+                subtitle = "Reads which SIMs are in this phone, and their numbers. " +
+                    "Without it there is no number to choose.",
+                granted = state.hasPhoneStatePermission,
+                onClick = onRequestPhone,
             )
         }
 
@@ -205,17 +231,21 @@ fun SettingsScreen(
         SectionHeader("SIMs in this phone")
         SettingsCard {
             if (!state.hasPhoneStatePermission) {
+                // Clickable, because the version that was not simply told
+                // somebody what was wrong and left them there.
                 ListItem(
                     leadingContent = { Icon(Icons.Outlined.Warning, contentDescription = null) },
                     headlineContent = { Text("Phone permission not granted") },
                     supportingContent = {
-                        Text("Without it the SIMs cannot be read, and the dashboard has none to offer.")
+                        Text("Without it the SIMs cannot be read, and the dashboard has none to " +
+                            "offer. Tap to grant it.")
                     },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable(onClick = onRequestPhone),
                 )
             } else if (state.sims.isEmpty()) {
                 ListItem(
-                    leadingContent = { Icon(Icons.Outlined.Sms, contentDescription = null) },
+                    leadingContent = { Icon(Icons.Outlined.SimCard, contentDescription = null) },
                     headlineContent = { Text("No SIMs found") },
                     supportingContent = { Text("Nothing to report. Check a SIM is inserted.") },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -224,7 +254,7 @@ fun SettingsScreen(
                 state.sims.forEachIndexed { index, sim ->
                     if (index > 0) HorizontalDivider()
                     ListItem(
-                        leadingContent = { Icon(Icons.Outlined.Sms, contentDescription = null) },
+                        leadingContent = { Icon(Icons.Outlined.SimCard, contentDescription = null) },
                         headlineContent = {
                             Text("SIM ${sim.slotIndex + 1} · ${sim.carrierName}")
                         },
@@ -564,7 +594,7 @@ private fun NumberCard(
         if (boundSim != null) {
             HorizontalDivider()
             ListItem(
-                leadingContent = { Icon(Icons.Outlined.Sms, contentDescription = null) },
+                leadingContent = { Icon(Icons.Outlined.SimCard, contentDescription = null) },
                 headlineContent = { Text("SIM ${boundSim.slotIndex + 1} · ${boundSim.carrierName}") },
                 supportingContent = {
                     Text(

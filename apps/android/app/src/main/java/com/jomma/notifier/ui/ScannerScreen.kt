@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -174,20 +176,35 @@ fun ScannerScreen(onResult: (String) -> Unit, onDismiss: () -> Unit) {
             NoCamera(onGrant = { permissionLauncher.launch(Manifest.permission.CAMERA) })
         }
 
+        /*
+         * Inset from the status bar, not just padded.
+         *
+         * `padding(16.dp)` measures from the top of the *window*, which on a
+         * full-screen camera surface is behind the clock and the cutout — so
+         * the title was drawn over the system bar. `statusBarsPadding` moves it
+         * below whatever that phone actually has there.
+         */
         Column(
-            Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(16.dp),
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Outlined.Close, contentDescription = "Close", tint = Color.White)
                 }
+                // Short, because it is read once while somebody is holding a
+                // phone up to a screen. The old line spelled out where the code
+                // comes from, which is the one thing they already know.
                 Text(
-                    "Scan the code from the Jomma dashboard",
+                    "Scan the pairing code",
                     color = Color.White,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                 )
                 // Balances the close button so the title sits centred.
                 Spacer(Modifier.width(48.dp))
@@ -195,7 +212,11 @@ fun ScannerScreen(onResult: (String) -> Unit, onDismiss: () -> Unit) {
         }
 
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(24.dp),
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

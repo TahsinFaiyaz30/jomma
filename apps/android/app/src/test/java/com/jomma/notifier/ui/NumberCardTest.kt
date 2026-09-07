@@ -85,6 +85,7 @@ class NumberCardTest {
                     state = state,
                     onOpenNotificationSettings = {},
                     onRequestSms = {},
+                    onRequestPhone = {},
                     onRequestBatteryExemption = {},
                     onOpenAutoStart = {},
                     onScan = {},
@@ -206,7 +207,12 @@ class NumberCardTest {
             ),
         )
 
-        compose.onNodeWithText("no number", substring = true).performScrollTo().assertIsDisplayed()
+        // The whole sentence, not a substring. "no number" also appears in the
+        // phone-permission row's subtitle, and a loose match that starts
+        // resolving to two nodes fails on ambiguity rather than on meaning.
+        compose.onNodeWithText(
+            "This SIM now reports no number, not $account. Captures are refused until it matches.",
+        ).performScrollTo().assertIsDisplayed()
     }
 
     @Test
