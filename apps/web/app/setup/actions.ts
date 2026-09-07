@@ -5,8 +5,9 @@ import { requireBusiness, requireWriteAccess } from '@/lib/auth/tenancy'
 import { createReceivingAccount, setAccountStatus } from '@/lib/services/account-admin'
 import { createApiKey, createApp, createWebhookEndpoint } from '@/lib/services/app-admin'
 import { assertOwnsApp, assertOwnsReceivingAccount } from '@/lib/services/businesses'
-import { createDeviceWithProvisioning } from '@/lib/services/devices'
+import { createDeviceWithProvisioning, createPhoneProvisioning } from '@/lib/services/devices'
 import { getSetupState, markSetupComplete, type SetupState } from '@/lib/services/onboarding'
+import { addAccountFromSim, listSimOptions, type SimOption } from '@/lib/services/sim-accounts'
 import { assertDeliverableUrl, WebhookTargetError } from '@/lib/services/webhook-targets'
 
 /**
@@ -59,6 +60,80 @@ export async function refreshSetupAction(): Promise<SetupResult> {
   // Read-only, and `reply` scopes the state it returns to the caller's business.
   await requireBusiness()
   return reply(true, '')
+}
+
+/**
+ * A code that pairs a phone to this business, with no number attached.
+ *
+ * The first step now, where adding a number used to be. Nothing about the
+ * business's bKash number is known or asked for here — the phone reports what
+ * SIMs it can see once it has paired, and the number is chosen from those.
+ */
+export async function setupPairPhoneAction(): Promise<SetupResult> {
+  const { user: admin, business } = await requireWriteAccess()
+
+  try {
+    const { qrDataUrl, payload } = await createPhoneProvisioning({
+      businessId: business.id,
+      actorId: admin.id,
+    })
+    return reply(true, 'Scan this from the Jomma app on that phone.', {
+      label: 'Pairing code',
+      value: qrDataUrl,
+      kind: 'qr',
+      expiresAt: payload.expires_at,
+    })
+  } catch (error) {
+    return reply(false, error instanceof Error ? error.message : 'Could not create the code.')
+  }
+}
+
+/** The SIMs a paired phone last reported, for the step that chooses one. */
+export async function setupListSimsAction(
+  deviceId: string,
+): Promise<{ ok: boolean; message: string; sims: SimOption[]; reportedAt: string | null }> {
+  const { business } = await requireWriteAccess()
+
+  const found = await listSimOptions({ businessId: business.id, deviceId })
+  if (!found)
+    return { ok: false, message: 'That phone is not paired here.', sims: [], reportedAt: null }
+
+  return {
+    ok: true,
+    message:
+      found.sims.length === 0
+        ? 'The phone has not reported any SIMs yet. Open the app and allow the phone permission.'
+        : `${found.sims.length} SIM${found.sims.length === 1 ? '' : 's'} in ${found.deviceName}.`,
+    sims: found.sims,
+    reportedAt: found.reportedAt?.toISOString() ?? null,
+  }
+}
+
+/**
+ * Turns a chosen SIM into the number this business gets paid on.
+ *
+ * Replaces typing one in. The phone is told to claim it on its next heartbeat,
+ * so nothing else is asked of whoever is holding it.
+ */
+export async function setupAddAccountFromSimAction(
+  deviceId: string,
+  subscriptionId: number,
+  provider: 'bkash' | 'nagad',
+): Promise<SetupResult> {
+  const { user: admin, business } = await requireWriteAccess()
+
+  try {
+    const added = await addAccountFromSim({
+      businessId: business.id,
+      deviceId,
+      subscriptionId,
+      provider,
+      actorId: admin.id,
+    })
+    return reply(true, `${added.msisdn} added. The phone will pick it up shortly.`)
+  } catch (error) {
+    return reply(false, error instanceof Error ? error.message : 'Could not add the number.')
+  }
 }
 
 export async function setupAddAccountAction(

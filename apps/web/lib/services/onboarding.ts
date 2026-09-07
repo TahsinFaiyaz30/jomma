@@ -25,14 +25,20 @@ import {
  *
  * The four required steps are the real dependency chain, in order:
  *
- *   number  ->  phone watching it  ->  account enabled  ->  business + key
+ *   phone paired  ->  number chosen from its SIMs  ->  enabled  ->  business + key
+ *
+ * The first two used to be the other way round: type a number, then connect a
+ * phone to it. That asked somebody to key in a bKash number before anything
+ * could check it against the SIM the messages would actually arrive on, and
+ * when the two disagreed the symptom was payments quietly not arriving. Pairing
+ * first means the phone reports its SIMs and the number is *chosen*, not typed.
  *
  * A webhook endpoint is listed but optional, because a store can poll
  * `GET /v1/intents/:id` instead. It is still the last card, because polling is
  * the worse choice and most people want to be told.
  */
 
-export type SetupStepId = 'account' | 'device' | 'enable' | 'app' | 'key' | 'endpoint'
+export type SetupStepId = 'phone' | 'account' | 'enable' | 'app' | 'key' | 'endpoint'
 
 export interface SetupStep {
   id: SetupStepId
@@ -55,6 +61,8 @@ export interface SetupState {
   /** Ids the wizard needs so a step can act without another round trip. */
   firstAccountId: string | null
   firstAppId: string | null
+  /** The paired phone whose SIMs the number is chosen from, once there is one. */
+  firstDeviceId: string | null
 }
 
 export async function getSetupState(businessId: string): Promise<SetupState> {
@@ -73,9 +81,13 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
       .where(and(eq(webhookEndpoints.status, 'active'), eq(apps.businessId, businessId))),
     db
       .select({ ...getTableColumns(devices) })
+      /*
+       * By business, not through an account. A phone paired to the business
+       * with no number bound yet is the whole point of the first step, and
+       * joining through `receiving_accounts` would make it invisible.
+       */
       .from(devices)
-      .innerJoin(receivingAccounts, eq(devices.receivingAccountId, receivingAccounts.id))
-      .where(and(eq(devices.status, 'active'), eq(receivingAccounts.businessId, businessId))),
+      .where(and(eq(devices.status, 'active'), eq(devices.businessId, businessId))),
   ])
 
   const account = accounts[0] ?? null
@@ -86,9 +98,7 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
   const provisioned = allDevices.filter(
     (device) => device.provisionedAt !== null && device.tokenHash !== null,
   )
-  const provisionedHere = account
-    ? provisioned.filter((device) => device.receivingAccountId === account.id)
-    : []
+  const phone = provisioned[0] ?? null
 
   const enabled = accounts.filter((candidate) => candidate.status === 'active')
   const keysForApp = app ? allKeys.filter((key) => key.appId === app.id) : []
@@ -96,20 +106,20 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
 
   const steps: SetupStep[] = [
     {
+      id: 'phone',
+      title: 'Connect a phone',
+      blurb: 'Install the app and scan the code. It reads the SIMs in the phone.',
+      done: phone !== null,
+      required: true,
+      detail: phone ? `${provisioned.length} connected` : null,
+    },
+    {
       id: 'account',
-      title: 'Add the number you get paid on',
-      blurb: 'The bKash number buyers send money to. Jomma watches it.',
+      title: 'Choose the SIM you get paid on',
+      blurb: 'The number comes off the SIM, so there is nothing to type.',
       done: account !== null,
       required: true,
       detail: account ? `${accounts.length} added` : null,
-    },
-    {
-      id: 'device',
-      title: 'Connect the phone that holds that SIM',
-      blurb: 'It forwards payment messages to Jomma. Nothing works without it.',
-      done: provisionedHere.length > 0,
-      required: true,
-      detail: provisionedHere.length > 0 ? `${provisionedHere.length} connected` : null,
     },
     {
       id: 'enable',
@@ -152,6 +162,7 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
     complete,
     currentStepId: steps.find((step) => !step.done)?.id ?? null,
     firstAccountId: account?.id ?? null,
+    firstDeviceId: phone?.id ?? null,
     firstAppId: app?.id ?? null,
   }
 }

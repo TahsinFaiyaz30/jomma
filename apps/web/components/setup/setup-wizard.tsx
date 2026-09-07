@@ -1,21 +1,23 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useCallback, useEffect, useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import {
   refreshSetupAction,
   type SetupResult,
-  setupAddAccountAction,
-  setupAddDeviceAction,
+  setupAddAccountFromSimAction,
   setupAddEndpointAction,
   setupCreateAppAction,
   setupCreateKeyAction,
   setupEnableAccountAction,
+  setupListSimsAction,
+  setupPairPhoneAction,
 } from '@/app/setup/actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import type { SetupState, SetupStepId } from '@/lib/services/onboarding'
+import type { SimOption } from '@/lib/services/sim-accounts'
 
 /**
  * First-run setup.
@@ -32,8 +34,8 @@ import type { SetupState, SetupStepId } from '@/lib/services/onboarding'
  */
 
 const HINT: Record<SetupStepId, string> = {
-  account: 'Use the number that will actually receive money. It cannot be changed later.',
-  device: 'Install the Jomma app on the phone holding that SIM, then scan this code.',
+  phone: 'Install the Jomma app on the phone holding your SIM, then scan this code.',
+  account: 'The number is read from the SIM. Nothing to type, nothing to mistype.',
   enable: 'Only once the phone is connected — an enabled account is live to buyers.',
   app: 'The storefront you are taking payments for.',
   key: 'Your server sends this with every request. Store it somewhere safe.',
@@ -68,12 +70,15 @@ export function SetupWizard({ initial }: { initial: SetupState }) {
     })
 
   /*
-   * The device step is the only one that completes off-screen: somebody walks
-   * to a phone and scans a code. Poll while that is the open step so the wizard
-   * moves on by itself instead of leaving them wondering whether it worked.
+   * Two steps complete off-screen, so poll while either is the open one.
+   *
+   * `phone` finishes when somebody walks to a handset and scans a code, and
+   * `account` needs that phone to report its SIMs on a heartbeat before there
+   * is anything to choose from — both leave a browser sitting on a screen that
+   * would otherwise never change by itself.
    */
   useEffect(() => {
-    if (state.currentStepId !== 'device') return
+    if (state.currentStepId !== 'phone' && state.currentStepId !== 'account') return
     const timer = setInterval(() => {
       startTransition(async () => setState((await refreshSetupAction()).state))
     }, 4000)
@@ -208,6 +213,111 @@ interface Fields {
   setEndpointUrl: (v: string) => void
 }
 
+/**
+ * Choosing which SIM this business gets paid on.
+ *
+ * The step that replaced a phone-number field. The list is whatever the phone
+ * last reported on a heartbeat, so it can be a minute or two behind the tray —
+ * hence the refresh, and hence the server re-checking the choice rather than
+ * trusting what this screen offered it.
+ *
+ * SIMs that cannot be used are shown greyed with the reason rather than left
+ * out. Somebody holding a phone with two SIMs in it, looking at a screen
+ * offering one, needs to be told which is missing and why.
+ */
+function SimPicker({
+  state,
+  pending,
+  run,
+  fields,
+}: {
+  state: SetupState
+  pending: boolean
+  run: (fn: () => Promise<SetupResult>) => void
+  fields: Fields
+}) {
+  const [sims, setSims] = useState<SimOption[]>([])
+  const [note, setNote] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const deviceId = state.firstDeviceId
+
+  const load = useCallback(() => {
+    if (!deviceId) return
+    setLoading(true)
+    void setupListSimsAction(deviceId)
+      .then((result) => {
+        setSims(result.sims)
+        setNote(result.message)
+      })
+      .finally(() => setLoading(false))
+  }, [deviceId])
+
+  // Once on arrival, then on demand. The phone beats every few minutes, so
+  // polling here would mostly re-fetch a list that has not changed.
+  useEffect(() => {
+    load()
+  }, [load])
+
+  if (!deviceId) {
+    return <p className="text-small text-muted-foreground">Connect a phone first.</p>
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={fields.provider}
+          onChange={(e) => fields.setProvider(e.target.value as 'bkash' | 'nagad')}
+          className="h-8 rounded-md border border-border bg-background px-2 text-small"
+          aria-label="Provider"
+        >
+          <option value="bkash">bKash</option>
+          <option value="nagad">Nagad (no parser yet)</option>
+        </select>
+        <Button size="sm" variant="outline" disabled={loading} onClick={load}>
+          {loading ? <Spinner /> : null}Refresh SIMs
+        </Button>
+        {note ? <span className="text-micro text-muted-foreground">{note}</span> : null}
+      </div>
+
+      <div className="space-y-2">
+        {sims.map((sim) => (
+          <div
+            key={sim.subscription_id}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+          >
+            <div className="min-w-0">
+              <p className="text-small">
+                <span className="font-medium">SIM {sim.slot_index + 1}</span>
+                {sim.carrier_name ? ` · ${sim.carrier_name}` : ''}
+                <span className="text-muted-foreground"> · {sim.network_generation}</span>
+              </p>
+              <p className="figure text-micro text-muted-foreground">
+                {sim.msisdn ?? 'Number not available from this SIM'}
+                {sim.number_source ? ` · from ${sim.number_source}` : ''}
+              </p>
+              {sim.blockedReason ? (
+                <p className="mt-0.5 text-micro text-muted-foreground">{sim.blockedReason}</p>
+              ) : null}
+            </div>
+            <Button
+              size="sm"
+              disabled={pending || sim.blockedReason !== null}
+              onClick={() =>
+                run(() =>
+                  setupAddAccountFromSimAction(deviceId, sim.subscription_id, fields.provider),
+                )
+              }
+            >
+              Use this SIM
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function StepForm({
   step,
   state,
@@ -224,61 +334,10 @@ function StepForm({
   const busy = pending ? <Spinner /> : null
 
   switch (step) {
-    case 'account':
+    case 'phone':
       return (
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={fields.provider}
-            onChange={(e) => fields.setProvider(e.target.value as 'bkash' | 'nagad')}
-            className="h-8 rounded-md border border-border bg-background px-2 text-small"
-            aria-label="Provider"
-          >
-            <option value="bkash">bKash</option>
-            <option value="nagad">Nagad (no parser yet)</option>
-          </select>
-          <Input
-            value={fields.msisdn}
-            onChange={(e) => fields.setMsisdn(e.target.value)}
-            placeholder="01712345678"
-            aria-label="Receiving number"
-            className="figure h-8 max-w-44 text-small"
-          />
-          <Input
-            value={fields.label}
-            onChange={(e) => fields.setLabel(e.target.value)}
-            placeholder="Shop bKash"
-            aria-label="Label"
-            className="h-8 max-w-44 text-small"
-          />
-          <Button
-            size="sm"
-            disabled={pending || !fields.msisdnValid || !fields.label.trim()}
-            onClick={() =>
-              run(() => setupAddAccountAction(fields.provider, fields.msisdn, fields.label))
-            }
-          >
-            {busy}Add number
-          </Button>
-        </div>
-      )
-
-    case 'device':
-      return (
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            value={fields.deviceName}
-            onChange={(e) => fields.setDeviceName(e.target.value)}
-            placeholder="Shop phone"
-            aria-label="Phone name"
-            className="h-8 max-w-44 text-small"
-          />
-          <Button
-            size="sm"
-            disabled={pending || !state.firstAccountId || !fields.deviceName.trim()}
-            onClick={() =>
-              run(() => setupAddDeviceAction(state.firstAccountId as string, fields.deviceName))
-            }
-          >
+          <Button size="sm" disabled={pending} onClick={() => run(() => setupPairPhoneAction())}>
             {busy}Show pairing code
           </Button>
           <span className="text-micro text-muted-foreground">
@@ -286,6 +345,9 @@ function StepForm({
           </span>
         </div>
       )
+
+    case 'account':
+      return <SimPicker state={state} pending={pending} run={run} fields={fields} />
 
     case 'enable':
       return (
