@@ -219,3 +219,81 @@ jobs:
               --notes-file notes.md \
               ${{ (github.event_name == 'workflow_dispatch' && inputs.prerelease) && '--prerelease' || '' }}
           fi
+
+  # ── The SDK, to npm ────────────────────────────────────────────────────────
+  #
+  # Separate from the release above rather than a step inside it, for one
+  # reason: npm publishes are permanent. A version cannot be replaced, and
+  # unpublishing is restricted after 72 hours, so this must not run until the
+  # GitHub release it belongs to has actually succeeded — hence `needs`.
+  #
+  # ## Before this can work
+  #
+  # `@jomma` is a scope, and npm only accepts a scoped publish from a scope you
+  # own. That means one of:
+  #
+  #   - an npm **organisation** named `jomma` (free for public packages), or
+  #   - renaming the package to `@<your-npm-username>/jomma-sdk`.
+  #
+  # Then create a token that is allowed to publish without a one-time code. A
+  # plain login cannot: npm answers an ordinary `pnpm publish` with
+  #
+  #     403 — Two-factor authentication or granular access token with bypass
+  #     2fa enabled is required to publish packages
+  #
+  # which reads like a permissions problem and is really a missing OTP. Either
+  # token type works:
+  #
+  #   - **Granular access token** — scoped to `@jomma`, read and write, with
+  #     **Bypass 2FA** switched on. Expires, so it has to be rotated.
+  #   - **Classic automation token** — skips 2FA by design, never expires.
+  #
+  # Add it to the repository as the `NPM_TOKEN` secret. Publishing by hand
+  # instead needs the code appended: `--otp=123456`.
+  #
+  # Until that secret exists this job skips rather than failing, so adding npm
+  # publishing does not retroactively break releases that were fine without it.
+  npm:
+    name: Publish @jomma/sdk to npm
+    needs: [release]
+    runs-on: ubuntu-latest
+    if: ${{ !failure() && !cancelled() }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          # Writes the registry into .npmrc so NODE_AUTH_TOKEN is used.
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Publish, if this version is not already on npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "No NPM_TOKEN secret set — skipping. See the comment above this job."
+            exit 0
+          fi
+
+          v="$(cat VERSION)"
+
+          # Idempotent, the same way the GitHub release above is. Re-running a
+          # release must not fail on the second attempt, and npm answers a
+          # duplicate version with a 403 that reads like an auth problem.
+          if npm view "@jomma/sdk@$v" version > /dev/null 2>&1; then
+            echo "@jomma/sdk@$v is already published — nothing to do."
+            exit 0
+          fi
+
+          # `--no-git-checks`: pnpm otherwise refuses to publish from a detached
+          # HEAD, which is exactly what a tag checkout is.
+          pnpm publish --filter @jomma/sdk --access public --no-git-checks

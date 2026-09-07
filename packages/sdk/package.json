@@ -3,6 +3,21 @@
   "version": "1.4.4",
   "description": "Typed client for the Jomma payment verification API.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TahsinFaiyaz30/jomma.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/TahsinFaiyaz30/jomma#readme",
+  "bugs": "https://github.com/TahsinFaiyaz30/jomma/issues",
+  "keywords": [
+    "bkash",
+    "nagad",
+    "bangladesh",
+    "payments",
+    "payment-verification",
+    "mobile-financial-services"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,10 +32,14 @@
     "README.md"
   ],
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "prepublishOnly": "pnpm run build"
   },
   "engines": {
     "node": ">=20"
