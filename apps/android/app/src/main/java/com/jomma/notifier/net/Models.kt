@@ -164,6 +164,13 @@ data class PairRequest(
      * renamed afterwards. Cosmetic only — nothing is identified by it.
      */
     @SerialName("device_name") val deviceName: String? = null,
+    /**
+     * Which handset this is, so re-scanning replaces rather than accumulates.
+     *
+     * See `Prefs.installId`. Cosmetic names cannot answer "same phone?" — two
+     * can share one — and every re-scan therefore added another waiting row.
+     */
+    @SerialName("install_id") val installId: String? = null,
 )
 
 @Serializable

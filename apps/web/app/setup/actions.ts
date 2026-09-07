@@ -168,6 +168,21 @@ export async function setupApproveDeviceAction(deviceId: string): Promise<SetupR
     await approveDevice({ deviceId, actorId: admin.id })
     return reply(true, 'Approved. It will report its SIMs on the next heartbeat.')
   } catch (error) {
+    /*
+     * A row that is no longer there is not a failure worth a red toast.
+     *
+     * The wizard holds its state until an action runs, so a phone approved in
+     * another tab, superseded by a fresh scan, or removed with the whole
+     * business is still on screen with live buttons. Pressing one produced
+     * "Unknown device", which names a database row rather than anything the
+     * person did. `reply` recomputes the state either way, so the stale entry
+     * disappears as the message is shown.
+     */
+    const missing =
+      error instanceof Error && /unknown device|not waiting for approval/i.test(error.message)
+
+    if (missing) return reply(true, 'That phone is no longer waiting — the list has been updated.')
+
     return reply(false, error instanceof Error ? error.message : 'Could not approve it.')
   }
 }
@@ -193,6 +208,21 @@ export async function setupDeclineDeviceAction(deviceId: string): Promise<SetupR
     await revokeDevice({ deviceId, actorId: admin.id })
     return reply(true, 'Turned away. Show a new code when the right phone is in front of you.')
   } catch (error) {
+    /*
+     * A row that is no longer there is not a failure worth a red toast.
+     *
+     * The wizard holds its state until an action runs, so a phone approved in
+     * another tab, superseded by a fresh scan, or removed with the whole
+     * business is still on screen with live buttons. Pressing one produced
+     * "Unknown device", which names a database row rather than anything the
+     * person did. `reply` recomputes the state either way, so the stale entry
+     * disappears as the message is shown.
+     */
+    const missing =
+      error instanceof Error && /unknown device|not waiting for approval/i.test(error.message)
+
+    if (missing) return reply(true, 'That phone is no longer waiting — the list has been updated.')
+
     return reply(false, error instanceof Error ? error.message : 'Could not decline it.')
   }
 }

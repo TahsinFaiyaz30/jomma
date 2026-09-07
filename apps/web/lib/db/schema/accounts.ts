@@ -156,6 +156,27 @@ export const devices = pgTable(
     platform: text('platform').notNull().default('android'),
 
     /**
+     * Which handset this is, as opposed to what it calls itself.
+     *
+     * A UUID the app generates once and keeps. Names are cosmetic and need not
+     * be unique — two shops can both have a "Counter" — so they cannot answer
+     * "is this the same phone that scanned a minute ago". Without an answer to
+     * that, every re-scan added another row: the same handset appeared six
+     * times, each with its own approve and decline, and nothing said which was
+     * live.
+     *
+     * Not a hardware identifier. `ANDROID_ID` and its relatives are either
+     * unavailable to ordinary apps, resettable anyway, or exactly the sort of
+     * cross-app fingerprint this product has no business collecting. A value
+     * the app makes up for itself answers the only question being asked and
+     * identifies the phone to nobody else.
+     *
+     * Null for a device row that predates this, and for one minted by the
+     * dashboard that no phone has scanned yet.
+     */
+    installId: text('install_id'),
+
+    /**
      * Null until the device claims its provisioning token. A `pending` device
      * has a QR waiting to be scanned and cannot authenticate yet.
      */

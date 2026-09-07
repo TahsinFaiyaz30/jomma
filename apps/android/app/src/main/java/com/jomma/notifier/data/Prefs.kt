@@ -114,6 +114,28 @@ class Prefs internal constructor(private val prefs: SharedPreferences) {
      * phone already watches would create a second device row on the server and
      * double every capture from it.
      */
+    /**
+     * What this installation calls itself, to the server, forever.
+     *
+     * Generated once and kept. The server uses it to recognise a phone that has
+     * already scanned — without it every re-scan created another waiting device
+     * row, so one handset appeared several times with no way to tell which was
+     * live. Names cannot do this job: they are cosmetic and two phones can
+     * share one.
+     *
+     * Deliberately made up rather than read off the hardware. Anything derived
+     * from the device would be a cross-app identifier this product has no
+     * business collecting, and would survive a reinstall the user performed
+     * precisely to start clean. This is meaningless to anyone but this server,
+     * and clearing the app's data retires it.
+     */
+    val installId: String
+        get() = synchronized(lock) {
+            prefs.getString(KEY_INSTALL_ID, null) ?: java.util.UUID.randomUUID().toString().also {
+                prefs.edit().putString(KEY_INSTALL_ID, it).apply()
+            }
+        }
+
     fun watches(msisdn: String): Boolean = pairings.any { it.accountMsisdn == msisdn }
 
     val isProvisioned: Boolean get() = pairings.isNotEmpty()
@@ -209,6 +231,7 @@ class Prefs internal constructor(private val prefs: SharedPreferences) {
     companion object {
         private const val FILE = "jomma_secure_prefs"
         private const val KEY_PAIRINGS = "pairings"
+        private const val KEY_INSTALL_ID = "install_id"
 
         /** Where a list that would not parse is kept. See `quarantine`. */
         private const val KEY_PAIRINGS_UNREADABLE = "pairings_unreadable"

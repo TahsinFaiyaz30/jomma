@@ -162,7 +162,11 @@ class JommaApi(context: Context, private val pairing: Pairing? = null) {
         withContext(Dispatchers.IO) {
             val payload = json.encodeToString(
                 PairRequest.serializer(),
-                PairRequest(code = link.code, deviceName = deviceName()),
+                PairRequest(
+                    code = link.code,
+                    deviceName = deviceName(),
+                    installId = prefs.installId,
+                ),
             )
             val request = Request.Builder()
                 .url("${link.serverUrl.trimEnd('/')}/device/v1/pair")

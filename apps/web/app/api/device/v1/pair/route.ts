@@ -30,6 +30,13 @@ const pairSchema = z.object({
    * pairs, and purely cosmetic — nothing identifies a device by name.
    */
   device_name: safeText(60).min(1).optional(),
+  /**
+   * Which handset this is, so re-scanning replaces rather than accumulates.
+   *
+   * Optional: an older build does not send one, and a phone that omits it just
+   * gets the old behaviour of a fresh row per scan.
+   */
+  install_id: safeText(64).min(1).optional(),
 })
 
 /**
@@ -63,6 +70,7 @@ export const POST = route(async (request, context) => {
       code: body.code,
       ip: context.ip,
       deviceName: body.device_name,
+      installId: body.install_id,
     })
 
     context.log.info({ deviceId: result.deviceId }, 'device paired')

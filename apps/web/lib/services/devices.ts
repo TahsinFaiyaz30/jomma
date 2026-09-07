@@ -3,7 +3,7 @@ import 'server-only'
 import { createHash, randomBytes } from 'node:crypto'
 import type { DeviceStatus } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
-import { and, desc, eq, gt, isNull } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull, ne } from 'drizzle-orm'
 import QRCode from 'qrcode'
 import { generateDeviceToken, verifyCredential } from '@/lib/auth/tokens'
 import { db } from '@/lib/db/client'
@@ -202,6 +202,8 @@ export async function claimPairingCode(options: {
   ip: string | null
   /** What the phone calls itself. Cosmetic — see `devices.name`. */
   deviceName?: string
+  /** Which handset it is. Not cosmetic — see `devices.installId`. */
+  installId?: string
 }): Promise<{
   deviceToken: string
   deviceId: string
@@ -230,6 +232,7 @@ export async function claimPairingCode(options: {
     provisioningToken: options.code,
     ip: options.ip,
     deviceName: options.deviceName,
+    installId: options.installId,
   })
 }
 
@@ -271,6 +274,7 @@ async function claimProvisioning(options: {
   provisioningToken: string
   ip: string | null
   deviceName?: string
+  installId?: string
 }): Promise<{
   deviceToken: string
   deviceId: string
@@ -326,11 +330,44 @@ async function claimProvisioning(options: {
         // Only when the phone offered one, so a rename from the dashboard is
         // not undone by the next thing the device says about itself.
         ...(options.deviceName ? { name: options.deviceName } : {}),
+        ...(options.installId ? { installId: options.installId } : {}),
       })
       .where(and(eq(devices.id, options.deviceId), eq(devices.status, 'pending')))
       .returning({ id: devices.id })
 
     if (!claimed) throw new Error('provisioning_invalid')
+
+    /*
+     * One waiting record per handset, not one per attempt.
+     *
+     * Every "Show pairing code" mints a device row and every scan turns one
+     * into `awaiting_approval`, so somebody who pressed it a few times — a code
+     * expired, or the first scan did not seem to do anything — ended up with
+     * the same phone listed six times, each with its own approve and decline,
+     * and nothing saying which was live.
+     *
+     * Keyed on `installId` rather than on the name. Names are cosmetic and two
+     * phones can share one, so matching on them would retire a different
+     * handset that happened to be called the same thing.
+     *
+     * Only rows with no account are retired. A phone legitimately holds one
+     * credential per number it watches; those are not duplicates, and revoking
+     * them would stop it reporting for numbers it is already live on.
+     */
+    if (options.installId) {
+      await tx
+        .update(devices)
+        .set({ status: 'revoked', revokedAt: new Date(), tokenHash: null, tokenPrefix: null })
+        .where(
+          and(
+            eq(devices.businessId, device.businessId),
+            eq(devices.installId, options.installId),
+            eq(devices.status, 'awaiting_approval'),
+            isNull(devices.receivingAccountId),
+            ne(devices.id, device.id),
+          ),
+        )
+    }
 
     await tx.insert(notifierEvents).values({
       receivingAccountId: device.receivingAccountId,
