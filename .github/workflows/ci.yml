@@ -34,6 +34,31 @@ jobs:
   web:
     name: Web — types, lint, tests
     runs-on: ubuntu-latest
+
+    # A real Postgres, because the integration suite is where tenant isolation
+    # is actually proved and it cannot run without one. It used to be skipped
+    # here entirely: `pnpm test` is unit-only, so every check that one business
+    # cannot read, cancel, re-key or re-point another's rows ran on developer
+    # machines and nowhere else. A regression in `assertOwnsApp` — which once
+    # handed a live API key for any app on the instance to any signed-in user —
+    # would have gone green through this workflow and shipped.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: jomma
+          POSTGRES_PASSWORD: jomma
+          POSTGRES_DB: jomma
+        ports:
+          - 5433:5432
+        # Without this the first migration races the server's startup, which
+        # fails as a connection error and reads like a broken test.
+        options: >-
+          --health-cmd "pg_isready -U jomma -d jomma"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,6 +99,20 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+      # The suite that needs the database above. Secrets are throwaway values
+      # for a container that lives and dies with this job — nothing here is a
+      # credential for anything, and the run fails without them because
+      # `packages/shared/src/env.ts` validates on import.
+      - name: Integration tests
+        env:
+          DATABASE_URL: postgres://jomma:jomma@localhost:5433/jomma
+          APP_URL: http://localhost:3000
+          AUTH_SECRET: ci_only_0000000000000000000000000000000000000000000000000000000000
+          WEBHOOK_SIGNING_SECRET: ci_only_1111111111111111111111111111111111111111111111111111
+        run: |
+          pnpm db:migrate
+          pnpm test:integration
 
   android:
     name: Android — tests, debug APK

@@ -102,6 +102,17 @@ async function createIntent(amount, reference) {
       // Required for an automatic match: the sender has to be a number the
       // intent declared. Matches the sender in bkashMessage below.
       payer_msisdn: '01712345678',
+      /*
+       * Pinned, because the fixture below is a bKash message.
+       *
+       * Without this, checkout routes to whichever account is least utilised,
+       * which on a seeded instance is often the Nagad one. The message is then
+       * posted to a Nagad number, parsed by the Nagad parser, and comes back
+       * `unparsed` — a correct answer to a nonsense question, reported as four
+       * failures that look like a broken ingest path. `smoke-checkout` already
+       * pins it for the same reason.
+       */
+      provider: 'bkash',
     }),
   })
   return response.json()

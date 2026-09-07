@@ -49,6 +49,22 @@ function check(label, condition, detail) {
 
 const section = (n) => console.log(`\n${n}`)
 
+/**
+ * An observation that is not a pass or a fail.
+ *
+ * Some answers here are only meaningful next to a deployment's mode. Two keys
+ * seeing the same numbers is correct in single-tenant mode and a routing bug
+ * across two businesses, and this script cannot tell which it is looking at.
+ * Saying so beats asserting the wrong half.
+ *
+ * It was called before it existed, which took the whole run down with a
+ * ReferenceError at the first cross-tenant comparison — so everything below it
+ * (what the pay page leaks, identifier handling, input validation, credentials,
+ * error bodies, rate limits, headers) never ran on any invocation that passed a
+ * second key.
+ */
+const note = (n) => console.log(`  note  ${n}`)
+
 const req = (method, path, { body, headers } = {}) =>
   fetch(`${BASE}${path}`, {
     method,
