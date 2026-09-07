@@ -99,10 +99,11 @@ export async function setupPairPhoneAction(): Promise<SetupResult> {
 /** The SIMs a paired phone last reported, for the step that chooses one. */
 export async function setupListSimsAction(
   deviceId: string,
+  provider?: 'bkash' | 'nagad',
 ): Promise<{ ok: boolean; message: string; sims: SimOption[]; reportedAt: string | null }> {
   const { business } = await requireWriteAccess()
 
-  const found = await listSimOptions({ businessId: business.id, deviceId })
+  const found = await listSimOptions({ businessId: business.id, deviceId, provider })
   if (!found)
     return { ok: false, message: 'That phone is not paired here.', sims: [], reportedAt: null }
 

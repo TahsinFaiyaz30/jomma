@@ -1,6 +1,6 @@
 import 'server-only'
 
-import type { DeviceCommand, Provider, SimCard } from '@jomma/shared'
+import { type DeviceCommand, PROVIDERS, type Provider, type SimCard } from '@jomma/shared'
 import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { devices, receivingAccounts } from '@/lib/db/schema'
@@ -38,6 +38,17 @@ export interface SimOption extends SimCard {
 export async function listSimOptions(options: {
   businessId: string
   deviceId: string
+  /**
+   * Which wallet is being added, if that is already known.
+   *
+   * "Taken" is a question about a number *and a provider*. One SIM holding both
+   * a bKash and a Nagad account is ordinary here, so blocking a number because
+   * it is watched at all would refuse the case this whole flow exists to allow.
+   *
+   * Absent, a SIM is only blocked once every provider is spoken for — there is
+   * genuinely nothing left to add it as.
+   */
+  provider?: Provider
 }): Promise<{ sims: SimOption[]; reportedAt: Date | null; deviceName: string } | null> {
   const device = await db.query.devices.findFirst({
     where: and(eq(devices.id, options.deviceId), eq(devices.businessId, options.businessId)),
@@ -55,17 +66,18 @@ export async function listSimOptions(options: {
       ),
     )
 
-  const takenNumbers = new Set(taken.map((row) => row.msisdn))
+  // Keyed by number *and* provider, because that is what uniqueness means now.
+  const takenPairs = new Set(taken.map((row) => `${row.msisdn}:${row.provider}`))
 
   const sims = (device.sims ?? []).map((sim) => ({
     ...sim,
-    blockedReason: blockedReason(sim, takenNumbers),
+    blockedReason: blockedReason(sim, takenPairs, options.provider),
   }))
 
   return { sims, reportedAt: device.simsReportedAt, deviceName: device.name }
 }
 
-function blockedReason(sim: SimCard, takenNumbers: Set<string>): string | null {
+function blockedReason(sim: SimCard, takenPairs: Set<string>, provider?: Provider): string | null {
   if (!sim.msisdn) {
     /*
      * The carrier never wrote the number to the SIM and IMS did not answer
@@ -74,8 +86,16 @@ function blockedReason(sim: SimCard, takenNumbers: Set<string>): string | null {
      */
     return 'This SIM does not report its own number, so it cannot be added automatically.'
   }
-  if (takenNumbers.has(sim.msisdn)) return 'Already set up on this business.'
-  return null
+  if (provider) {
+    return takenPairs.has(`${sim.msisdn}:${provider}`)
+      ? `Already set up for ${provider} on this business.`
+      : null
+  }
+
+  // No provider named, so this is only unusable if there is nothing left to add
+  // it as. A number already on bKash is still a perfectly good Nagad number.
+  const free = PROVIDERS.filter((each) => !takenPairs.has(`${sim.msisdn}:${each}`))
+  return free.length === 0 ? 'Already set up on this business.' : null
 }
 
 export interface PairedPhone {

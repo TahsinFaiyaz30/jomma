@@ -11,6 +11,7 @@ import com.jomma.notifier.data.Pairing
 import com.jomma.notifier.data.Prefs
 import com.jomma.notifier.data.SimCard
 import com.jomma.notifier.data.SimInventory
+import com.jomma.notifier.net.AddableSim
 import com.jomma.notifier.net.CaptureSettings
 import com.jomma.notifier.net.JommaApi
 import com.jomma.notifier.net.PairingLink
@@ -69,6 +70,18 @@ data class UiState(
      * not.
      */
     val sims: List<SimCard> = emptyList(),
+
+    /*
+     * The add-an-MFS flow, when it is open.
+     *
+     * `addingProvider` is which wallet is being added; `addableSims` is what
+     * the *server* says can be chosen for it. Asked rather than worked out from
+     * `sims`, because whether a number is free depends on what the business
+     * already has — which this phone may not be the one holding.
+     */
+    val addingProvider: String? = null,
+    val addableSims: List<AddableSim> = emptyList(),
+    val addBusy: Boolean = false,
     val hasPhoneStatePermission: Boolean = false,
     /* Updates. `availableUpdate` is the version string, or null when current. */
     val updateInterval: String = "Daily",
@@ -505,6 +518,92 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * switch still works on a phone with no signal, which is exactly when
      * somebody is most likely to reach for it.
      */
+    /**
+     * Opens the "add a wallet" flow for one provider, and asks what it could
+     * use.
+     *
+     * The list comes from the server rather than from `sims`: a number is free
+     * or not depending on what this *business* already watches, and the phone
+     * holding it is not necessarily the phone that added the others.
+     */
+    fun startAddingAccount(provider: String) {
+        val pairing = prefs.pairings.firstOrNull { it.live }
+        if (pairing == null) {
+            _state.value = _state.value.copy(
+                message = "Connect this phone first, and have it approved.",
+            )
+            return
+        }
+
+        _state.value = _state.value.copy(
+            addingProvider = provider,
+            addableSims = emptyList(),
+            addBusy = true,
+        )
+
+        viewModelScope.launch {
+            when (val result = JommaApi(getApplication(), pairing).addableSims(provider)) {
+                is JommaApi.Result.Ok -> _state.value = _state.value.copy(
+                    addableSims = result.value.sims,
+                    addBusy = false,
+                )
+
+                else -> _state.value = _state.value.copy(
+                    addBusy = false,
+                    addingProvider = null,
+                    message = "Could not read the numbers. Check the connection and try again.",
+                )
+            }
+        }
+    }
+
+    fun cancelAddingAccount() {
+        _state.value = _state.value.copy(addingProvider = null, addableSims = emptyList())
+    }
+
+    /**
+     * Adds the chosen number for the wallet being added.
+     *
+     * Nothing is stored locally on success. The server queues an `add_account`
+     * command, and the next heartbeat redeems it exactly as it redeems a
+     * scanned code — so there is one path that turns a code into a pairing, not
+     * two.
+     */
+    fun addAccount(subscriptionId: Int) {
+        val provider = _state.value.addingProvider ?: return
+        val pairing = prefs.pairings.firstOrNull { it.live } ?: return
+
+        _state.value = _state.value.copy(addBusy = true)
+
+        viewModelScope.launch {
+            when (val result = JommaApi(getApplication(), pairing).addAccount(subscriptionId, provider)) {
+                is JommaApi.Result.Ok -> {
+                    _state.value = _state.value.copy(
+                        addBusy = false,
+                        addingProvider = null,
+                        addableSims = emptyList(),
+                        message = "${result.value.msisdn} added for $provider. " +
+                            "Enable it on the dashboard when you are ready to take payments.",
+                    )
+                    // Pulls the queued command down now rather than at the next
+                    // scheduled beat, so the number appears while somebody is
+                    // still looking at the screen that added it.
+                    heartbeatNow()
+                }
+
+                is JommaApi.Result.Failed -> _state.value = _state.value.copy(
+                    addBusy = false,
+                    message = result.message,
+                )
+
+                else -> _state.value = _state.value.copy(
+                    addBusy = false,
+                    message = "Could not add that number.",
+                )
+            }
+        }
+    }
+
     fun setSendingEnabled(deviceId: String, enabled: Boolean) {
         prefs.updatePairing(deviceId) { it.copy(sendingEnabled = enabled) }
         _state.value = _state.value.copy(

@@ -59,6 +59,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.outlined.SimCard
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -94,6 +96,9 @@ fun JommaScreens(
     destination: Int,
     onDestinationChange: (Int) -> Unit,
     onScan: () -> Unit,
+    onAddAccount: (String) -> Unit,
+    onPickSim: (Int) -> Unit,
+    onCancelAdd: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     onRequestSms: () -> Unit,
     onRequestPhone: () -> Unit,
@@ -150,7 +155,21 @@ fun JommaScreens(
     ) { padding ->
         Box(Modifier.padding(padding)) {
             when (destination) {
-                0 -> StatusScreen(state, onScan, onFlush, onHeartbeat, onTestCapture)
+                0 -> StatusScreen(
+                    state = state,
+                    onScan = onScan,
+                    onFlush = onFlush,
+                    onHeartbeat = onHeartbeat,
+                    onTestCapture = onTestCapture,
+                    onAddAccount = onAddAccount,
+                    onPickSim = onPickSim,
+                    onCancelAdd = onCancelAdd,
+                    // Everything about one wallet already lives on its card in
+                    // Settings — what it keeps, whether it reports, which SIM it
+                    // is bound to. Manage goes there rather than growing a
+                    // second screen that has to be kept in step with it.
+                    onManage = { onDestinationChange(2) },
+                )
                 1 -> LogScreen(captures)
                 else -> SettingsScreen(
                     state = state,
@@ -178,6 +197,138 @@ fun JommaScreens(
 }
 
 /** One glance answers "is it working?". The status card is the whole product. */
+/**
+ * The wallets this phone is paid on, and how to add another.
+ *
+ * Here rather than buried in Settings because it is the thing somebody opens
+ * the app to check: which numbers are being watched, and are they working.
+ * Adding one is two decisions — which wallet, then which SIM — asked in that
+ * order because the answer to the second depends on the first: a number already
+ * used for bKash is still a perfectly good Nagad number.
+ */
+@Composable
+private fun MfsSection(
+    state: UiState,
+    onAddAccount: (String) -> Unit,
+    onPickSim: (Int) -> Unit,
+    onCancelAdd: () -> Unit,
+    onManage: (String) -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(vertical = 4.dp)) {
+            Text(
+                "Wallets",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+            )
+
+            if (state.pairings.none { it.accountMsisdn != null }) {
+                Text(
+                    "None yet. Add one below and pick the SIM it is paid on.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+
+            for (pairing in state.pairings.filter { it.accountMsisdn != null }) {
+                HorizontalDivider()
+                ListItem(
+                    leadingContent = { Icon(Icons.Outlined.SimCard, contentDescription = null) },
+                    headlineContent = {
+                        Text(pairing.provider?.replaceFirstChar { it.uppercase() } ?: "Wallet")
+                    },
+                    supportingContent = {
+                        Text(
+                            when {
+                                pairing.revoked -> "Revoked from the dashboard."
+                                pairing.awaitingApproval -> "Waiting for approval."
+                                !pairing.sendingEnabled -> "${pairing.label} · paused"
+                                else -> pairing.label
+                            },
+                        )
+                    },
+                    // Everything about one wallet lives behind its own button:
+                    // what it keeps, whether it reports, which SIM it is on.
+                    trailingContent = {
+                        TextButton(onClick = { onManage(pairing.deviceId) }) { Text("Manage") }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+
+            HorizontalDivider()
+
+            if (state.addingProvider == null) {
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { onAddAccount("bkash") },
+                        enabled = !state.addBusy,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Add bKash") }
+                    /*
+                     * Offered and refused rather than hidden. Nagad accounts can
+                     * be added — the whole ledger is provider-agnostic — but
+                     * `lib/parsers/nagad.ts` is a deliberate stub, so nothing
+                     * would ever be matched from one. Saying that beats a button
+                     * that quietly does nothing useful.
+                     */
+                    OutlinedButton(
+                        onClick = { },
+                        enabled = false,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Nagad — soon") }
+                }
+            } else {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Which SIM is your ${state.addingProvider} on?",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+
+                    if (state.addBusy && state.addableSims.isEmpty()) {
+                        Text(
+                            "Reading the SIMs…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    for (sim in state.addableSims) {
+                        val usable = sim.blockedReason == null && sim.msisdn != null
+                        ListItem(
+                            leadingContent = {
+                                Icon(Icons.Outlined.SimCard, contentDescription = null)
+                            },
+                            headlineContent = {
+                                Text("SIM ${sim.slotIndex + 1} · ${sim.carrierName}")
+                            },
+                            // A SIM that cannot be used is shown with the reason
+                            // rather than hidden: somebody comparing this list
+                            // against the tray in their hand needs to know why.
+                            supportingContent = {
+                                Text(sim.blockedReason ?: sim.msisdn ?: "No number on this SIM")
+                            },
+                            trailingContent = {
+                                TextButton(
+                                    onClick = { onPickSim(sim.subscriptionId) },
+                                    enabled = usable && !state.addBusy,
+                                ) { Text("Use") }
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+
+                    TextButton(onClick = onCancelAdd) { Text("Cancel") }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun StatusScreen(
     state: UiState,
@@ -185,6 +336,10 @@ private fun StatusScreen(
     onFlush: () -> Unit,
     onHeartbeat: () -> Unit,
     onTestCapture: () -> Unit,
+    onAddAccount: (String) -> Unit,
+    onPickSim: (Int) -> Unit,
+    onCancelAdd: () -> Unit,
+    onManage: (String) -> Unit,
 ) {
     val status = LocalStatusColors.current
 
@@ -273,6 +428,14 @@ private fun StatusScreen(
             }
             return@Column
         }
+
+        MfsSection(
+            state = state,
+            onAddAccount = onAddAccount,
+            onPickSim = onPickSim,
+            onCancelAdd = onCancelAdd,
+            onManage = onManage,
+        )
 
         Card(Modifier.fillMaxWidth()) {
             Column {

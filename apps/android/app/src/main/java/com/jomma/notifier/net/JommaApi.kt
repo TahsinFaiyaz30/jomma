@@ -114,6 +114,37 @@ class JommaApi(context: Context, private val pairing: Pairing? = null) {
             json.decodeFromString(SettingsResponse.serializer(), body)
         }
 
+    /**
+     * Which SIMs this phone could be paid on, for one wallet.
+     *
+     * `provider` narrows what "already taken" means: a number already used for
+     * bKash is still a perfectly good Nagad number, and the server answers
+     * accordingly rather than the phone guessing.
+     */
+    suspend fun addableSims(provider: String): Result<AddableSimsResponse> =
+        get("/device/v1/accounts?provider=$provider") { body ->
+            json.decodeFromString(AddableSimsResponse.serializer(), body)
+        }
+
+    /**
+     * Adds a number this phone can see, for one wallet.
+     *
+     * The account is created disabled — checkout will not route to a number
+     * until somebody enables it — and the credential for it arrives as an
+     * ordinary `add_account` command on the next heartbeat, redeemed the same
+     * way a scanned code is.
+     */
+    suspend fun addAccount(subscriptionId: Int, provider: String): Result<AddAccountResponse> =
+        post(
+            "/device/v1/accounts",
+            strictJson.encodeToString(
+                AddAccountRequest.serializer(),
+                AddAccountRequest(subscriptionId, provider),
+            ),
+        ) { body ->
+            json.decodeFromString(AddAccountResponse.serializer(), body)
+        }
+
     suspend fun reportEvent(kind: String, detail: String? = null): Result<Unit> =
         post(
             "/device/v1/events",

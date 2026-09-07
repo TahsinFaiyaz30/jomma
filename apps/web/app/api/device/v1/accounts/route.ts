@@ -26,7 +26,20 @@ export const GET = route(async (request, context) => {
   const device = await authenticateDevice(request, context)
   enforceRateLimit(context, 'device:heartbeat', device.rateKey)
 
-  const found = await listSimOptions({ businessId: device.businessId, deviceId: device.deviceId })
+  /*
+   * `?provider=` narrows what "already taken" means. One SIM can hold a bKash
+   * and a Nagad account, so a number is only unavailable for the wallet it is
+   * already used for — asked without one, a SIM is offered until every provider
+   * is spoken for.
+   */
+  const asked = new URL(request.url).searchParams.get('provider')
+  const provider = PROVIDERS.find((each) => each === asked)
+
+  const found = await listSimOptions({
+    businessId: device.businessId,
+    deviceId: device.deviceId,
+    provider,
+  })
   if (!found) throw ApiError.notFound('This phone is not paired to a business.')
 
   return {

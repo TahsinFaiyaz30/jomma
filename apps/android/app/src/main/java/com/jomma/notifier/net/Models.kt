@@ -189,6 +189,45 @@ data class ProvisionResponse(
 )
 
 /**
+ * A SIM as the *server* sees it, which is not quite as the phone does.
+ *
+ * The phone knows what is in the tray; the server knows which of those numbers
+ * are already spoken for, and for which wallet. Asking it rather than working
+ * it out locally keeps this screen and the dashboard from disagreeing about
+ * what can be added.
+ */
+@Serializable
+data class AddableSim(
+    @SerialName("subscription_id") val subscriptionId: Int,
+    @SerialName("slot_index") val slotIndex: Int,
+    @SerialName("carrier_name") val carrierName: String,
+    val msisdn: String? = null,
+    /** Why this one cannot be chosen, or null when it can. */
+    @SerialName("blocked_reason") val blockedReason: String? = null,
+)
+
+@Serializable
+data class AddableSimsResponse(val sims: List<AddableSim> = emptyList())
+
+@Serializable
+data class AddAccountRequest(
+    /**
+     * A subscription, never a number.
+     *
+     * The server re-reads the msisdn from what this phone last reported, so a
+     * phone cannot claim a number it cannot see.
+     */
+    @SerialName("subscription_id") val subscriptionId: Int,
+    val provider: String,
+)
+
+@Serializable
+data class AddAccountResponse(
+    val msisdn: String,
+    val provider: String,
+)
+
+/**
  * What the dashboard encodes into the provisioning QR: `https://host/pair/CODE`.
  *
  * A URL and not JSON, because a general-purpose QR scanner can open a URL and

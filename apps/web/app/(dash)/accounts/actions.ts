@@ -68,14 +68,17 @@ export async function pairPhoneAction(): Promise<DeviceActionResult> {
 }
 
 /** The SIMs a paired phone last reported, with the unusable ones explained. */
-export async function listSimsAction(deviceId: string): Promise<{
+export async function listSimsAction(
+  deviceId: string,
+  provider?: 'bkash' | 'nagad',
+): Promise<{
   ok: boolean
   message: string
   sims: SimOption[]
 }> {
   const { business } = await requireWriteAccess()
 
-  const found = await listSimOptions({ businessId: business.id, deviceId })
+  const found = await listSimOptions({ businessId: business.id, deviceId, provider })
   if (!found) return { ok: false, message: 'That phone is not paired here.', sims: [] }
 
   return {
