@@ -3,7 +3,8 @@ import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db, pool } from '@/lib/db/client'
 import { businesses, devices, users } from '@/lib/db/schema'
-import { revokeDevice } from '@/lib/services/devices'
+import { assertOwnsDevice } from '@/lib/services/businesses'
+import { approveDevice, revokeDevice } from '@/lib/services/devices'
 import { getSetupState } from '@/lib/services/onboarding'
 
 /**
@@ -133,5 +134,33 @@ describe('the first step of setup', () => {
     await scanned('awaiting_approval')
 
     expect((await getSetupState(randomUUID())).pendingPhones).toHaveLength(0)
+  })
+
+  it('lets the owner act on a phone that has no number yet', async () => {
+    /*
+     * The whole flow, end to end, because the two halves passed separately
+     * while the pair was broken.
+     *
+     * `getSetupState` listed the phone and `assertOwnsDevice` rejected it: the
+     * guard scoped through `receiving_accounts`, and a phone waiting for
+     * approval has no account by design — it pairs to the business and picks
+     * its number afterwards. So the operator saw a row, pressed Approve, and
+     * was told the phone was no longer waiting while it stayed on screen.
+     *
+     * Asserting on the guard alone would not have caught it either; it was
+     * already proved against a device *with* an account. The null is the case.
+     */
+    const deviceId = await scanned('awaiting_approval')
+    const row = await db.query.devices.findFirst({ where: eq(devices.id, deviceId) })
+    expect(row?.receivingAccountId).toBeNull()
+
+    await expect(assertOwnsDevice(businessId, deviceId)).resolves.toBeUndefined()
+    await expect(assertOwnsDevice(randomUUID(), deviceId)).rejects.toThrow(/unknown device/i)
+
+    await approveDevice({ deviceId, actorId })
+
+    const state = await getSetupState(businessId)
+    expect(state.pendingPhones).toHaveLength(0)
+    expect(state.steps.find((s) => s.id === 'phone')?.done).toBe(true)
   })
 })

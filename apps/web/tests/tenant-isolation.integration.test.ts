@@ -249,6 +249,32 @@ describe('assertOwnsNotifierEvent', () => {
       .returning({ id: notifierEvents.id })
     await expect(assertOwnsNotifierEvent(victim.business, orphan?.id ?? '')).rejects.toThrow()
   })
+
+  it('reaches an event raised against a phone that has no number yet', async () => {
+    /*
+     * "A phone scanned the pairing code and is waiting for approval" — the one
+     * alert that exists precisely because no number has been chosen. Scoping
+     * only through `receiving_accounts` made it unreachable: the account is
+     * null by design, so the alert about the un-approved phone was the one
+     * alert nobody could acknowledge.
+     *
+     * Owned via the device, so the refusal has to hold there too.
+     */
+    const [phone] = await db
+      .insert(devices)
+      .values({ businessId: victim.business, name: 'unapproved', status: 'awaiting_approval' })
+      .returning({ id: devices.id })
+
+    const [waiting] = await db
+      .insert(notifierEvents)
+      .values({ deviceId: phone?.id, kind: 'service_restarted', detail: 'waiting for approval' })
+      .returning({ id: notifierEvents.id })
+
+    await expect(
+      assertOwnsNotifierEvent(victim.business, waiting?.id ?? ''),
+    ).resolves.toBeUndefined()
+    await expect(assertOwnsNotifierEvent(attacker.business, waiting?.id ?? '')).rejects.toThrow()
+  })
 })
 
 describe('assertOwnsIntent and assertOwnsIncomingPayment', () => {

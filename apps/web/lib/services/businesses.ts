@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { BusinessStatus, MembershipRole } from '@jomma/shared'
-import { and, asc, count, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, or, sql } from 'drizzle-orm'
 import { type Database, db, type Tx } from '@/lib/db/client'
 import {
   apiKeys,
@@ -131,11 +131,24 @@ export async function assertOwnsDevice(
   deviceId: string,
   client: Database | Tx = db,
 ): Promise<void> {
+  /*
+   * Scoped on the device's own business, not through an account.
+   *
+   * A phone pairs to a *business* now and gets its number afterwards, so
+   * `receiving_account_id` is null for exactly the phones that matter most
+   * here — the ones waiting to be approved. An inner join drops every one of
+   * them, so this threw "Unknown device" for a device sitting in front of the
+   * operator, and approving or declining a newly scanned phone could not work
+   * at all.
+   *
+   * `devices.business_id` has been the direct owner since the pairing flow
+   * changed; joining through an account was left over from when a phone could
+   * only exist attached to one.
+   */
   const [row] = await client
     .select({ id: devices.id })
     .from(devices)
-    .innerJoin(receivingAccounts, eq(devices.receivingAccountId, receivingAccounts.id))
-    .where(and(eq(devices.id, deviceId), eq(receivingAccounts.businessId, businessId)))
+    .where(and(eq(devices.id, deviceId), eq(devices.businessId, businessId)))
     .limit(1)
 
   if (!row) throw new Error('Unknown device')
@@ -153,11 +166,25 @@ export async function assertOwnsNotifierEvent(
   eventId: string,
   client: Database | Tx = db,
 ): Promise<void> {
+  /*
+   * Through the device as well as through the account, for the same reason.
+   *
+   * "A phone scanned the pairing code and is waiting for approval" is raised
+   * against a device with no account, so it has no `receiving_account_id` — and
+   * an inner join on one made precisely the alerts about un-approved phones
+   * impossible to acknowledge.
+   */
   const [row] = await client
     .select({ id: notifierEvents.id })
     .from(notifierEvents)
-    .innerJoin(receivingAccounts, eq(notifierEvents.receivingAccountId, receivingAccounts.id))
-    .where(and(eq(notifierEvents.id, eventId), eq(receivingAccounts.businessId, businessId)))
+    .leftJoin(receivingAccounts, eq(notifierEvents.receivingAccountId, receivingAccounts.id))
+    .leftJoin(devices, eq(notifierEvents.deviceId, devices.id))
+    .where(
+      and(
+        eq(notifierEvents.id, eventId),
+        or(eq(receivingAccounts.businessId, businessId), eq(devices.businessId, businessId)),
+      ),
+    )
     .limit(1)
 
   if (!row) throw new Error('Unknown alert')

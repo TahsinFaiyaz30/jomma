@@ -169,19 +169,25 @@ export async function setupApproveDeviceAction(deviceId: string): Promise<SetupR
     return reply(true, 'Approved. It will report its SIMs on the next heartbeat.')
   } catch (error) {
     /*
-     * A row that is no longer there is not a failure worth a red toast.
-     *
-     * The wizard holds its state until an action runs, so a phone approved in
-     * another tab, superseded by a fresh scan, or removed with the whole
-     * business is still on screen with live buttons. Pressing one produced
-     * "Unknown device", which names a database row rather than anything the
-     * person did. `reply` recomputes the state either way, so the stale entry
+     * A phone that has already stopped waiting is not a failure worth a red
+     * toast. The wizard holds its state until an action runs, so one approved
+     * in another tab or retired by a fresh scan is still on screen with live
+     * buttons; `reply` recomputes the state either way, so the stale entry
      * disappears as the message is shown.
+     *
+     * Deliberately *not* "Unknown device". That is what `assertOwnsDevice`
+     * throws for a phone belonging to somebody else, and forgiving it reports
+     * an ownership failure as a success. It also hid a real bug for a release:
+     * the guard scoped through a receiving account, so every phone waiting for
+     * approval — which by definition has none — looked like another
+     * business's, and the operator was told the list had been updated while
+     * the row sat there untouched. A wrong green is worse than a blunt red.
      */
-    const missing =
-      error instanceof Error && /unknown device|not waiting for approval/i.test(error.message)
+    const alreadyHandled = error instanceof Error && /not waiting for approval/i.test(error.message)
 
-    if (missing) return reply(true, 'That phone is no longer waiting — the list has been updated.')
+    if (alreadyHandled) {
+      return reply(true, 'That phone is no longer waiting — the list has been updated.')
+    }
 
     return reply(false, error instanceof Error ? error.message : 'Could not approve it.')
   }
@@ -209,19 +215,25 @@ export async function setupDeclineDeviceAction(deviceId: string): Promise<SetupR
     return reply(true, 'Turned away. Show a new code when the right phone is in front of you.')
   } catch (error) {
     /*
-     * A row that is no longer there is not a failure worth a red toast.
-     *
-     * The wizard holds its state until an action runs, so a phone approved in
-     * another tab, superseded by a fresh scan, or removed with the whole
-     * business is still on screen with live buttons. Pressing one produced
-     * "Unknown device", which names a database row rather than anything the
-     * person did. `reply` recomputes the state either way, so the stale entry
+     * A phone that has already stopped waiting is not a failure worth a red
+     * toast. The wizard holds its state until an action runs, so one approved
+     * in another tab or retired by a fresh scan is still on screen with live
+     * buttons; `reply` recomputes the state either way, so the stale entry
      * disappears as the message is shown.
+     *
+     * Deliberately *not* "Unknown device". That is what `assertOwnsDevice`
+     * throws for a phone belonging to somebody else, and forgiving it reports
+     * an ownership failure as a success. It also hid a real bug for a release:
+     * the guard scoped through a receiving account, so every phone waiting for
+     * approval — which by definition has none — looked like another
+     * business's, and the operator was told the list had been updated while
+     * the row sat there untouched. A wrong green is worse than a blunt red.
      */
-    const missing =
-      error instanceof Error && /unknown device|not waiting for approval/i.test(error.message)
+    const alreadyHandled = error instanceof Error && /not waiting for approval/i.test(error.message)
 
-    if (missing) return reply(true, 'That phone is no longer waiting — the list has been updated.')
+    if (alreadyHandled) {
+      return reply(true, 'That phone is no longer waiting — the list has been updated.')
+    }
 
     return reply(false, error instanceof Error ? error.message : 'Could not decline it.')
   }
