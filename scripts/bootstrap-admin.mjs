@@ -62,13 +62,7 @@ function prompt(question, secret = false) {
   return new Promise((done, fail) => {
     abort = () => fail(new Error('Input ended before every question was answered.'))
 
-    if (secret) {
-      // The prompt stays visible; only the typing is hidden.
-      process.stdout.write(question)
-      muted = true
-    }
-
-    rl.question(secret ? '' : question, (answer) => {
+    rl.question(question, (answer) => {
       abort = null
       if (secret) {
         muted = false
@@ -77,6 +71,23 @@ function prompt(question, secret = false) {
       }
       done(answer.trim())
     })
+
+    /*
+     * Muted *after* the question is asked, which is the whole trick.
+     *
+     * `rl.question` writes its prompt through the same `_writeToOutput` this
+     * mutes, so muting first hides the prompt as well as the typing. Writing
+     * the prompt by hand beforehand does not rescue it either: on a real
+     * terminal readline redraws the line and wipes anything already there. The
+     * result was a cursor sitting on a blank line with no indication that
+     * anything was being waited for — it reads as a hang, and the only way
+     * through is to type a password you cannot see into a prompt that is not
+     * there.
+     *
+     * Asking first and muting immediately after leaves the prompt on screen and
+     * hides only what is typed into it.
+     */
+    if (secret) muted = true
   })
 }
 
