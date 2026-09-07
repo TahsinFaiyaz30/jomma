@@ -124,7 +124,9 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
     {
       id: 'enable',
       title: 'Turn the account on',
-      blurb: 'Accounts start off so checkout cannot route to a number nobody watches.',
+      blurb:
+        'Accounts start off so checkout cannot route to a number nobody watches. ' +
+        'Turning one on makes it live to buyers.',
       done: enabled.length > 0,
       required: true,
       detail: enabled.length > 0 ? `${enabled.length} routable` : null,

@@ -33,15 +33,6 @@ import type { SimOption } from '@/lib/services/sim-accounts'
  * database after every action, so nothing here can mark itself done.
  */
 
-const HINT: Record<SetupStepId, string> = {
-  phone: 'Install the Jomma app on the phone holding your SIM, then scan this code.',
-  account: 'The number is read from the SIM. Nothing to type, nothing to mistype.',
-  enable: 'Only once the phone is connected — an enabled account is live to buyers.',
-  app: 'The storefront you are taking payments for.',
-  key: 'Your server sends this with every request. Store it somewhere safe.',
-  endpoint: 'Where Jomma POSTs when a payment lands. Skip it if you would rather poll.',
-}
-
 export function SetupWizard({ initial }: { initial: SetupState }) {
   const [state, setState] = useState(initial)
   const [pending, startTransition] = useTransition()
@@ -115,75 +106,35 @@ export function SetupWizard({ initial }: { initial: SetupState }) {
       </header>
 
       <ol className="space-y-2">
-        {state.steps.map((step, index) => {
-          const isCurrent = step.id === state.currentStepId
-          const locked = !step.done && !isCurrent
-
-          return (
-            <li
-              key={step.id}
-              className={`rounded-xl border px-4 py-3 transition-colors ${
-                isCurrent ? 'border-foreground/35 bg-card' : 'border-border'
-              } ${locked ? 'opacity-55' : ''}`}
-            >
-              <div className="flex items-start gap-3">
-                <span
-                  className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-micro ${
-                    step.done
-                      ? 'bg-matched text-background'
-                      : isCurrent
-                        ? 'bg-foreground text-background'
-                        : 'border border-border text-muted-foreground'
-                  }`}
-                >
-                  {step.done ? '✓' : index + 1}
-                </span>
-
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-small">
-                    {step.title}
-                    {!step.required ? (
-                      <span className="ml-2 text-micro text-muted-foreground">optional</span>
-                    ) : null}
-                  </p>
-                  <p className="mt-0.5 text-micro text-muted-foreground">
-                    {step.done && step.detail ? step.detail : step.blurb}
-                  </p>
-
-                  {isCurrent ? (
-                    <div className="mt-3">
-                      <p className="mb-2 text-micro text-muted-foreground">{HINT[step.id]}</p>
-                      <StepForm
-                        step={step.id}
-                        state={state}
-                        pending={pending}
-                        run={run}
-                        fields={{
-                          msisdn,
-                          setMsisdn,
-                          msisdnValid,
-                          label,
-                          setLabel,
-                          provider,
-                          setProvider,
-                          deviceName,
-                          setDeviceName,
-                          appName,
-                          setAppName,
-                          endpointUrl,
-                          setEndpointUrl,
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </li>
-          )
-        })}
+        {state.steps.map((step, index) => (
+          <StepRow
+            key={step.id}
+            step={step}
+            index={index}
+            isCurrent={step.id === state.currentStepId}
+            state={state}
+            pending={pending}
+            run={run}
+            secret={secret}
+            onDismissSecret={() => setSecret(null)}
+            fields={{
+              msisdn,
+              setMsisdn,
+              msisdnValid,
+              label,
+              setLabel,
+              provider,
+              setProvider,
+              deviceName,
+              setDeviceName,
+              appName,
+              setAppName,
+              endpointUrl,
+              setEndpointUrl,
+            }}
+          />
+        ))}
       </ol>
-
-      {secret ? <SecretCard secret={secret} onDismiss={() => setSecret(null)} /> : null}
 
       {state.complete ? (
         <a
@@ -315,6 +266,94 @@ function SimPicker({
         ))}
       </div>
     </div>
+  )
+}
+
+/**
+ * One step in the list: its number, its copy, and — when it is the current one
+ * — its form and anything that form produced.
+ *
+ * Extracted from the `map` that used to hold all of this inline. Not only for
+ * the complexity rule: a provisioning QR is rendered *inside* the step now, and
+ * the branch that does it belongs next to the branch that decides whether the
+ * step is current, rather than a hundred lines away at the foot of the page.
+ */
+function StepRow({
+  step,
+  index,
+  isCurrent,
+  state,
+  pending,
+  run,
+  secret,
+  onDismissSecret,
+  fields,
+}: {
+  step: SetupState['steps'][number]
+  index: number
+  isCurrent: boolean
+  state: SetupState
+  pending: boolean
+  run: (fn: () => Promise<SetupResult>) => void
+  secret: SetupResult['secret'] | null
+  onDismissSecret: () => void
+  fields: Fields
+}) {
+  const locked = !step.done && !isCurrent
+
+  return (
+    <li
+      className={`rounded-xl border px-4 py-3 transition-colors ${
+        isCurrent ? 'border-foreground/35 bg-card' : 'border-border'
+      } ${locked ? 'opacity-55' : ''}`}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-micro ${
+            step.done
+              ? 'bg-matched text-background'
+              : isCurrent
+                ? 'bg-foreground text-background'
+                : 'border border-border text-muted-foreground'
+          }`}
+        >
+          {step.done ? '✓' : index + 1}
+        </span>
+
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-small">
+            {step.title}
+            {!step.required ? (
+              <span className="ml-2 text-micro text-muted-foreground">optional</span>
+            ) : null}
+          </p>
+          <p className="mt-0.5 text-micro text-muted-foreground">
+            {step.done && step.detail ? step.detail : step.blurb}
+          </p>
+
+          {isCurrent ? (
+            <div className="mt-3">
+              <StepForm step={step.id} state={state} pending={pending} run={run} fields={fields} />
+
+              {/*
+               * Here, not after the list.
+               *
+               * A provisioning QR rendered at the foot of the page is detached
+               * from the button that produced it — on a short viewport it lands
+               * below the fold, so pressing "Show pairing code" looks like it
+               * did nothing. It belongs to the step it came from, directly
+               * under the control.
+               */}
+              {secret ? (
+                <div className="mt-3">
+                  <SecretCard secret={secret} onDismiss={onDismissSecret} />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </li>
   )
 }
 
