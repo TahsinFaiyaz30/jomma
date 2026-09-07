@@ -92,6 +92,19 @@ data class SimReport(
 data class DeviceCommand(
     val type: String,
     val since: String? = null,
+
+    /**
+     * For `add_account`: where to redeem the number that was chosen on the
+     * dashboard.
+     *
+     * A pairing URL and never a token. The phone claims it exactly as it claims
+     * a scanned QR, so the credential is issued to whoever is holding the
+     * handset over a path that is already single-use, expiring and rate
+     * limited — rather than pushed down this channel and hoped about.
+     */
+    @SerialName("pair_url") val pairUrl: String? = null,
+    val msisdn: String? = null,
+    val provider: String? = null,
 )
 
 /**

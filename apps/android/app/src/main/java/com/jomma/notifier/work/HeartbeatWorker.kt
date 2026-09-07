@@ -18,6 +18,7 @@ import com.jomma.notifier.capture.NotificationListener
 import com.jomma.notifier.data.CaptureRepository
 import com.jomma.notifier.data.Pairing
 import com.jomma.notifier.data.Prefs
+import com.jomma.notifier.net.PairingLink
 import com.jomma.notifier.data.SimInventory
 import com.jomma.notifier.net.HeartbeatRequest
 import com.jomma.notifier.net.JommaApi
@@ -71,6 +72,46 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                 ExistingPeriodicWorkPolicy.KEEP,
                 request,
             )
+        }
+
+        /**
+         * Redeems a number the dashboard chose for this phone.
+         *
+         * The same call the scanner makes, deliberately. Adding a number from a
+         * browser and adding one by scanning a code end at the same claim, so
+         * there is one place where a pairing code is burned and one definition
+         * of what a new pairing looks like — including that it starts waiting
+         * for approval like any other.
+         *
+         * Refusals are silent because the command has already been drained: a
+         * code that was claimed on a previous beat, or has expired, is not a
+         * thing to alarm anybody about. The dashboard shows the account as
+         * still pending, which is the honest signal and is already on screen.
+         */
+        private suspend fun claimAddedAccount(context: Context, link: PairingLink) {
+            val prefs = Prefs.get(context)
+            when (val result = JommaApi(context).pair(link)) {
+                is JommaApi.Result.Ok -> {
+                    val msisdn = result.value.account.msisdn
+                    // Guard the same way the scanner does: a second pairing for
+                    // a number this phone already watches would double every
+                    // capture from it.
+                    if (prefs.watches(msisdn)) return
+
+                    prefs.upsertPairing(
+                        Pairing(
+                            deviceId = result.value.deviceId,
+                            deviceToken = result.value.deviceToken,
+                            serverUrl = link.serverUrl,
+                            accountMsisdn = msisdn,
+                            provider = result.value.account.provider,
+                            awaitingApproval = true,
+                        ),
+                    )
+                }
+
+                else -> Unit
+            }
         }
 
         /**
@@ -159,6 +200,24 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                         // every number on the phone.
                         "stop" ->
                             prefs.updatePairing(pairing.deviceId) { it.copy(revoked = true) }
+
+                        /*
+                         * A number was chosen for this phone on the dashboard.
+                         *
+                         * Claimed here rather than waiting for somebody to open
+                         * the app: the whole point is that choosing a SIM in a
+                         * browser sets the phone up, and a phone in a drawer is
+                         * exactly the phone this has to work for.
+                         *
+                         * Nothing is trusted from the command but the URL, and
+                         * that goes through the same parse and the same claim
+                         * as a scanned code. A duplicate delivery finds the code
+                         * already burned and fails harmlessly.
+                         */
+                        "add_account" -> {
+                            val link = command.pairUrl?.let { PairingLink.parse(it) }
+                            if (link != null) claimAddedAccount(context, link)
+                        }
 
                         else -> Unit // Unknown command — ignore, do not crash.
                     }
