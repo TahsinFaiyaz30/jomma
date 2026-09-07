@@ -230,11 +230,32 @@ than one you ran yourself.
 
 ```bash
 git pull
-DATABASE_URL='postgres://...' pnpm db:migrate   # from your machine
-git push                                        # Render deploys on commit
+pnpm db:migrate:remote     # prompts for the URL, confirms the host
+git push                   # Render deploys on commit
 ```
 
 Check `apps/web/drizzle/` for what a release will apply before you run it.
+
+`db:migrate:remote` asks for the connection string rather than taking it as an
+environment variable, for two reasons. The variable form is shell-specific —
+
+```bash
+DATABASE_URL='postgres://...' pnpm db:migrate        # bash
+$env:DATABASE_URL='postgres://...'; pnpm db:migrate  # PowerShell
+```
+
+— and the bash form typed into PowerShell fails with *"is not recognized as a
+name of a cmdlet"*, which reads as a broken command rather than the wrong shell.
+Unquoted, PowerShell also swallows the `?` and `&` that every hosted Postgres
+URL carries. Either way the URL ends up on screen and in history. The prompt
+avoids all of it, and echoes back only the host so pasting the wrong
+environment's string is caught before anything runs.
+
+**Forgetting this is not obvious from the outside.** Deployed code expecting a
+column the database does not have fails only on the pages that touch it:
+`/api/health` and `/login` answer normally while `/setup` returns a bare "a
+server error occurred". If a page 500s after a deploy and the rest of the site
+is fine, run this first.
 
 ---
 

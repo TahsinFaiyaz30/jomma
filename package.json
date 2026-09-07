@@ -25,6 +25,7 @@
     "db:migrate": "pnpm --filter @jomma/web db:migrate",
     "db:seed": "pnpm --filter @jomma/web db:seed",
     "bootstrap:admin": "node scripts/bootstrap-admin.mjs",
+    "db:migrate:remote": "node scripts/migrate-remote.mjs",
     "db:studio": "pnpm --filter @jomma/web db:studio",
     "db:reset": "docker compose down -v && docker compose up -d postgres && sleep 4 && pnpm db:migrate && pnpm db:seed",
     "smoke": "node scripts/smoke.mjs",
