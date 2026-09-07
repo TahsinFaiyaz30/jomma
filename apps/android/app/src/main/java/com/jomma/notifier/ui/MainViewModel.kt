@@ -27,6 +27,8 @@ import java.io.File
 import com.jomma.notifier.work.FlushWorker
 import com.jomma.notifier.work.HeartbeatWorker
 import com.jomma.notifier.work.WatchdogWorker
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -144,9 +146,18 @@ data class UiState(
         }
 }
 
+/** How often to beat while somebody is watching a phone finish setting up. */
+private const val SETUP_POLL_MS = 4_000L
+
+/** How often to re-read the pairing file while nothing is waiting. No request. */
+private const val IDLE_RECHECK_MS = 30_000L
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = Prefs.get(app)
+
+    /** The foreground poll, held so it can be stopped when the screen goes. */
+    private var polling: Job? = null
     private val dao = JommaDatabase.get(app).captureDao()
     private val repository = CaptureRepository(app)
 
@@ -450,9 +461,49 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun heartbeatNow() {
         viewModelScope.launch {
-            for (pairing in prefs.livePairings) HeartbeatWorker.beat(getApplication(), pairing)
+            // Not `livePairings`. A phone waiting for approval is exactly the
+            // one somebody presses this for, and filtering it out made the
+            // button unable to resolve the only thing it was wanted for.
+            for (pairing in prefs.beatingPairings) HeartbeatWorker.beat(getApplication(), pairing)
             refresh()
         }
+    }
+
+    /**
+     * Beats every few seconds while a phone is mid-setup and this screen is on.
+     *
+     * The periodic worker runs every fifteen minutes, which is the right
+     * interval for a phone that is simply reporting for duty and the wrong one
+     * for somebody holding the handset in one hand and the dashboard in the
+     * other. Approving on the web and waiting a quarter of an hour for the app
+     * to notice reads as a broken app, and the same gap sits in front of the
+     * next step: choosing the SIM needs the phone to have reported its SIMs,
+     * which it only does on a beat.
+     *
+     * Bounded on both sides. It runs only while something is actually waiting —
+     * unapproved, or approved with no number yet — and only between [onVisible]
+     * and [onHidden], so nothing polls in the background or once setup is done.
+     */
+    fun onVisible() {
+        if (polling?.isActive == true) return
+        polling = viewModelScope.launch {
+            while (true) {
+                if (!prefs.settingUp) {
+                    // Cheap and local: no request, just a re-read of the file,
+                    // waiting for a scan that may never happen on this screen.
+                    delay(IDLE_RECHECK_MS)
+                    continue
+                }
+                for (pairing in prefs.beatingPairings) HeartbeatWorker.beat(getApplication(), pairing)
+                refresh()
+                delay(SETUP_POLL_MS)
+            }
+        }
+    }
+
+    fun onHidden() {
+        polling?.cancel()
+        polling = null
     }
 
     /**

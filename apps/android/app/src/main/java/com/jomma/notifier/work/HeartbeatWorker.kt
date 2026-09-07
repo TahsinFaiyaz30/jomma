@@ -40,7 +40,16 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
 
     override suspend fun doWork(): Result {
         val prefs = Prefs.get(applicationContext)
-        if (prefs.livePairings.isEmpty()) return Result.success()
+        /*
+         * Everything unrevoked, including what is still waiting for approval.
+         *
+         * This filtered on `livePairings` and deadlocked: a phone that had
+         * scanned had no live pairing, so the worker returned here without
+         * sending anything — and [beat] is the only thing that clears
+         * `awaitingApproval`. The phone waited forever while the dashboard
+         * showed it connected, and no button on either screen could resolve it.
+         */
+        if (prefs.beatingPairings.isEmpty()) return Result.success()
 
         /*
          * Every number beats, and one failing does not stop the rest. A silent
@@ -49,7 +58,7 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
          * only one is.
          */
         var retry = false
-        for (pairing in prefs.livePairings) {
+        for (pairing in prefs.beatingPairings) {
             val outcome = beat(applicationContext, pairing)
             if (outcome is JommaApi.Result.Failed && outcome.retryable) retry = true
         }

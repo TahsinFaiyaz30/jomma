@@ -251,6 +251,15 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Permission self-check on every launch, per docs/android.md.
         viewModel.refresh()
+        // And, while a phone is mid-setup, beat often enough that approving on
+        // the dashboard shows up here in seconds rather than on the next
+        // fifteen-minute worker run.
+        viewModel.onVisible()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        viewModel.onHidden()
     }
 
     /**

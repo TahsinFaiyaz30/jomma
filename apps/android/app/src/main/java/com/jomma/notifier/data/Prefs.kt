@@ -56,6 +56,28 @@ class Prefs internal constructor(private val prefs: SharedPreferences) {
     /** The ones that can actually report right now. */
     val livePairings: List<Pairing> get() = pairings.filter { it.live }
 
+    /**
+     * The ones whose credential is still worth spending — approved, or still
+     * waiting to be.
+     *
+     * Which is what the heartbeat wants, and [livePairings] is not. Approval is
+     * answered over the heartbeat: the server refuses one from a phone that is
+     * still `awaiting_approval` and accepts it the moment somebody says yes, and
+     * that first success is the only thing that clears the flag. Beating only
+     * the live ones meant a phone that had scanned never beat at all, so it
+     * could never find out it had been approved — the dashboard said connected
+     * and the phone said waiting, forever, with nothing able to break the tie.
+     */
+    val beatingPairings: List<Pairing> get() = pairings.filter { !it.revoked }
+
+    /**
+     * Whether any pairing is still mid-setup: waiting for approval, or approved
+     * with no number chosen for it yet. Both are resolved by heartbeating, and
+     * both are somebody standing there watching two screens disagree.
+     */
+    val settingUp: Boolean
+        get() = beatingPairings.any { it.awaitingApproval || it.accountMsisdn == null }
+
     fun pairing(deviceId: String): Pairing? = pairings.firstOrNull { it.deviceId == deviceId }
 
     /** Adds a new pairing, or replaces one for the same device id. */

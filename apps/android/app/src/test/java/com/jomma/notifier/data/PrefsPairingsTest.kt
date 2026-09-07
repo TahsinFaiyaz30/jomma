@@ -225,6 +225,64 @@ class PrefsPairingsTest {
         prefs.removePairing("dev1")
         assertTrue(!prefs.isProvisioned)
     }
+
+    /* ── What the heartbeat is allowed to beat ───────────────────────────── */
+
+    @Test
+    fun `a phone waiting for approval still beats, or it can never learn it was approved`() {
+        /*
+         * The deadlock, and the reason this list exists at all.
+         *
+         * Approval is answered over the heartbeat: the server refuses one from a
+         * device that is still `awaiting_approval` and accepts it the moment
+         * somebody says yes, and `HeartbeatWorker.beat` clears the flag on that
+         * first success. It is the only thing that clears it.
+         *
+         * `HeartbeatWorker.doWork` swept `livePairings`, which excludes exactly
+         * these — so a phone that had scanned sent nothing, learned nothing, and
+         * sat on "Approve this phone on the dashboard" while the dashboard said
+         * it was connected. Neither screen was lying and no button on either
+         * could break the tie.
+         */
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(pairing("scanned").copy(awaitingApproval = true))
+
+        assertEquals("nothing is live yet", emptyList<String>(), prefs.livePairings.map { it.deviceId })
+        assertEquals(
+            "but it must still be beaten",
+            listOf("scanned"),
+            prefs.beatingPairings.map { it.deviceId },
+        )
+    }
+
+    @Test
+    fun `a revoked pairing is not beaten`() {
+        // The other edge. Its credential no longer verifies, so beating it just
+        // spends battery on a 401 -- and unlike waiting for approval, nothing
+        // about the answer can ever change.
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(pairing("dev1"))
+        prefs.upsertPairing(pairing("dev2").copy(revoked = true))
+
+        assertEquals(listOf("dev1"), prefs.beatingPairings.map { it.deviceId })
+    }
+
+    @Test
+    fun `settingUp covers both halves of getting a phone going`() {
+        // Approval, then choosing the SIM. Both are resolved by beating and both
+        // leave somebody watching two screens disagree, so both poll faster.
+        val prefs = Prefs(FakePrefs())
+
+        prefs.upsertPairing(pairing("scanned").copy(awaitingApproval = true))
+        assertTrue("waiting for approval", prefs.settingUp)
+
+        // Approved, and now waiting for a number to be chosen for it.
+        prefs.updatePairing("scanned") { it.copy(awaitingApproval = false, accountMsisdn = null) }
+        assertTrue("approved, no number yet", prefs.settingUp)
+
+        prefs.updatePairing("scanned") { it.copy(accountMsisdn = "8801711111111") }
+        assertTrue("done — stop polling", !prefs.settingUp)
+    }
 }
 
 /** A thread-safe in-memory stand-in that buffers edits until `apply`, as the real one does. */

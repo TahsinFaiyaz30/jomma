@@ -48,6 +48,21 @@ export function SetupWizard({ initial }: { initial: SetupState }) {
   const [appName, setAppName] = useState('')
   const [endpointUrl, setEndpointUrl] = useState('')
 
+  /*
+   * A step the operator is staying on, even though the server calls it done.
+   *
+   * `currentStepId` is the first unfinished step, and following it blindly
+   * meant approving a phone threw the screen forward to choosing a SIM. A
+   * business runs more than one handset — a till phone and a back-office phone,
+   * or one per SIM — so finishing the first one is not a reason to close the
+   * step that connects them. Approving pins it; moving on is a button.
+   *
+   * Only ever set to a step the person is looking at, so it cannot pin one
+   * whose dependency has not been created yet.
+   */
+  const [pinnedStepId, setPinnedStepId] = useState<SetupStepId | null>(null)
+  const openStepId = pinnedStepId ?? state.currentStepId
+
   const requiredDone = state.steps.filter((s) => s.required && s.done).length
   const requiredTotal = state.steps.filter((s) => s.required).length
 
@@ -71,12 +86,12 @@ export function SetupWizard({ initial }: { initial: SetupState }) {
    * would otherwise never change by itself.
    */
   useEffect(() => {
-    if (state.currentStepId !== 'phone' && state.currentStepId !== 'account') return
+    if (openStepId !== 'phone' && openStepId !== 'account') return
     const timer = setInterval(() => {
       startTransition(async () => setState((await refreshSetupAction()).state))
     }, 4000)
     return () => clearInterval(timer)
-  }, [state.currentStepId])
+  }, [openStepId])
 
   const digits = msisdn.replace(/\D/g, '')
   const msisdnValid = /^(880)?1[3-9]\d{8}$/.test(digits.startsWith('0') ? digits.slice(1) : digits)
@@ -113,7 +128,9 @@ export function SetupWizard({ initial }: { initial: SetupState }) {
             key={step.id}
             step={step}
             index={index}
-            isCurrent={step.id === state.currentStepId}
+            isCurrent={step.id === openStepId}
+            onStay={() => setPinnedStepId(step.id)}
+            onMoveOn={() => setPinnedStepId(null)}
             state={state}
             pending={pending}
             run={run}
@@ -289,6 +306,8 @@ function StepRow({
   run,
   secret,
   onDismissSecret,
+  onStay,
+  onMoveOn,
   fields,
 }: {
   step: SetupState['steps'][number]
@@ -299,6 +318,10 @@ function StepRow({
   run: (fn: () => Promise<SetupResult>) => void
   secret: SetupResult['secret'] | null
   onDismissSecret: () => void
+  /** Keep this step open even once the server considers it finished. */
+  onStay: () => void
+  /** Release it, so the list follows the server's next unfinished step. */
+  onMoveOn: () => void
   fields: Fields
 }) {
   const locked = !step.done && !isCurrent
@@ -335,7 +358,15 @@ function StepRow({
 
           {isCurrent ? (
             <div className="mt-3">
-              <StepForm step={step.id} state={state} pending={pending} run={run} fields={fields} />
+              <StepForm
+                step={step.id}
+                state={state}
+                pending={pending}
+                run={run}
+                onStay={onStay}
+                onMoveOn={onMoveOn}
+                fields={fields}
+              />
 
               {/*
                * Here, not after the list.
@@ -364,12 +395,16 @@ function StepForm({
   state,
   pending,
   run,
+  onStay,
+  onMoveOn,
   fields,
 }: {
   step: SetupStepId
   state: SetupState
   pending: boolean
   run: (fn: () => Promise<SetupResult>) => void
+  onStay: () => void
+  onMoveOn: () => void
   fields: Fields
 }) {
   const busy = pending ? <Spinner /> : null
@@ -407,7 +442,15 @@ function StepForm({
               <Button
                 size="sm"
                 disabled={pending}
-                onClick={() => run(() => setupApproveDeviceAction(phone.id))}
+                onClick={() => {
+                  // Pin before running. Approving satisfies the step, and
+                  // without this the screen jumped to choosing a SIM the moment
+                  // the first phone went through -- with the second handset
+                  // still in somebody's hand, unapproved, and the step that
+                  // approves it now closed.
+                  onStay()
+                  run(() => setupApproveDeviceAction(phone.id))
+                }}
               >
                 {busy}Approve
               </Button>
@@ -415,7 +458,10 @@ function StepForm({
                 size="sm"
                 variant="outline"
                 disabled={pending}
-                onClick={() => run(() => setupDeclineDeviceAction(phone.id))}
+                onClick={() => {
+                  onStay()
+                  run(() => setupDeclineDeviceAction(phone.id))
+                }}
               >
                 Not this phone
               </Button>
@@ -427,7 +473,10 @@ function StepForm({
               size="sm"
               variant={state.connectedPhones.length > 0 ? 'outline' : 'default'}
               disabled={pending}
-              onClick={() => run(() => setupPairPhoneAction())}
+              onClick={() => {
+                onStay()
+                run(() => setupPairPhoneAction())
+              }}
             >
               {busy}
               {state.connectedPhones.length > 0 ? 'Connect another phone' : 'Show pairing code'}
@@ -438,6 +487,27 @@ function StepForm({
                 : 'This checks itself every few seconds once you scan.'}
             </span>
           </div>
+
+          {/*
+           * The way out, once at least one phone is through.
+           *
+           * Deliberately a button rather than the step closing itself. Whoever
+           * is doing this is the only one who knows how many handsets are going
+           * behind the counter, and the screen guessing "one" was wrong often
+           * enough to be the bug.
+           */}
+          {state.connectedPhones.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 border-border/60 border-t pt-3">
+              <Button size="sm" disabled={pending} onClick={onMoveOn}>
+                Done — choose the SIM
+              </Button>
+              <span className="text-micro text-muted-foreground">
+                {state.connectedPhones.length === 1
+                  ? 'Or connect another phone first.'
+                  : `${state.connectedPhones.length} phones connected. Or connect another first.`}
+              </span>
+            </div>
+          ) : null}
         </div>
       )
 
