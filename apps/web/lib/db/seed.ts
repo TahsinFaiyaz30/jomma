@@ -193,9 +193,21 @@ Admin ready.
         monthlyLimitCents: 300_000_000,
         ...healthy,
       })
-      // Re-seeding is the documented way to get a development account back to
-      // healthy after the smoke test deliberately trips the drift detector.
-      .onConflictDoUpdate({ target: receivingAccounts.msisdn, set: healthy })
+      /*
+       * Re-seeding is the documented way to get a development account back to
+       * healthy after the smoke test deliberately trips the drift detector.
+       *
+       * The conflict target has to name the *whole* unique index. It was
+       * `msisdn` alone, which stopped matching one when the index became
+       * `(msisdn, provider)` so a SIM could hold both a bKash and a Nagad
+       * account — Postgres answers an `ON CONFLICT` it cannot resolve to an
+       * index with 42P10, which reads as a broken seed rather than a stale
+       * clause. It only surfaced on a database that had never been seeded.
+       */
+      .onConflictDoUpdate({
+        target: [receivingAccounts.msisdn, receivingAccounts.provider],
+        set: healthy,
+      })
       .returning()
     if (!account) throw new Error(`Failed to upsert receiving account ${spec.msisdn}`)
 
