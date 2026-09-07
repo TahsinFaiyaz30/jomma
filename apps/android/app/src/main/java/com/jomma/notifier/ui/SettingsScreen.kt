@@ -192,33 +192,22 @@ fun SettingsScreen(
             }
         }
 
-        SectionHeader(
-            when (state.pairings.size) {
-                0 -> "Numbers"
-                1 -> "Number"
-                else -> "Numbers (${state.pairings.size})"
-            },
-        )
-
         /*
-         * One card per watched number, each with its own capture settings.
+         * No list of numbers here.
          *
-         * Per number and not per app, because the settings live on the account
-         * on the server — two numbers on one phone are two accounts, and one of
-         * them keeping cash-in has nothing to do with the other.
+         * It used to be the bulk of this screen: a card per watched number,
+         * with that number's capture rules, its SIM binding and its pause
+         * switch. Wrong place, twice over. Settings is where things that are
+         * true of *this phone* live — permissions, keeping the service alive,
+         * updates — and a bKash account's capture rules are true of the
+         * account, not of the handset holding it. And it duplicated the wallet
+         * list on Status, so the same account appeared in two places with a
+         * different amount of detail in each and no way to tell which was
+         * authoritative.
+         *
+         * Each wallet now has its own screen, opened from Manage on Status.
+         * See [WalletScreen].
          */
-        for (pairing in state.pairings) {
-            NumberCard(
-                pairing = pairing,
-                saving = state.captureSavingFor == pairing.deviceId,
-                needsSim = Attribution.needsSubscriptionId(state.pairings, pairing),
-                sims = state.sims,
-                onCaptureChange = { onCaptureChange(pairing.deviceId, it) },
-                onSendingChange = { onSendingChange(pairing.deviceId, it) },
-                onRemove = { onRemovePairing(pairing.deviceId) },
-            )
-            Spacer(Modifier.height(8.dp))
-        }
 
         /*
          * What this phone can see, whether or not anything is bound to it.
@@ -294,6 +283,63 @@ fun SettingsScreen(
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier.clickable(onClick = onScan),
             )
+
+            /*
+             * Disconnecting the whole phone, which is a phone-level act and so
+             * belongs here rather than on a wallet's screen.
+             *
+             * A wallet's own Remove drops that one number. This drops the lot,
+             * including the account-less business pairing the phone scanned with
+             * — which has no screen of its own, so without this a phone could
+             * shed every wallet and still consider itself connected, with no way
+             * back but clearing the app's data.
+             *
+             * Local only, and it says so. Nothing here can revoke a credential
+             * on somebody else's server; the dashboard does that, and claiming
+             * otherwise would be the more dangerous lie.
+             */
+            if (state.pairings.isNotEmpty()) {
+                HorizontalDivider()
+                var confirming by remember { mutableStateOf(false) }
+
+                ListItem(
+                    leadingContent = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                    headlineContent = { Text("Disconnect this phone") },
+                    supportingContent = {
+                        Text("Forgets every wallet and the pairing itself. Revoke it on the dashboard too.")
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable { confirming = true },
+                )
+
+                if (confirming) {
+                    AlertDialog(
+                        onDismissRequest = { confirming = false },
+                        title = { Text("Disconnect this phone?") },
+                        text = {
+                            Text(
+                                "It stops capturing for " +
+                                    "${state.pairings.count { it.accountMsisdn != null }} wallet(s) " +
+                                    "and forgets its credentials. Anything not yet sent is lost. " +
+                                    "Revoke it on the dashboard as well, or the server will go on " +
+                                    "listing it until it does.",
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    confirming = false
+                                    // A snapshot: removing walks the same list.
+                                    for (id in state.pairings.map { it.deviceId }) onRemovePairing(id)
+                                },
+                            ) { Text("Disconnect") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { confirming = false }) { Text("Cancel") }
+                        },
+                    )
+                }
+            }
         }
 
         SectionHeader("Updates")
@@ -533,152 +579,7 @@ private fun UpdatesSection(
  * silently captures nothing — so it has to say so, and say what to do about it.
  */
 @Composable
-private fun NumberCard(
-    pairing: Pairing,
-    saving: Boolean,
-    needsSim: Boolean,
-    sims: List<SimCard>,
-    onCaptureChange: (CaptureSettings) -> Unit,
-    onSendingChange: (Boolean) -> Unit,
-    onRemove: () -> Unit,
-) {
-    SettingsCard {
-        ListItem(
-            leadingContent = {
-                Icon(
-                    if (pairing.live) Icons.Outlined.CheckCircle else Icons.Outlined.Schedule,
-                    contentDescription = null,
-                    tint = if (pairing.live) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.error,
-                )
-            },
-            headlineContent = { Text(pairing.label) },
-            supportingContent = {
-                Text(
-                    when {
-                        pairing.revoked ->
-                            "Revoked from the dashboard. Remove it and scan a new code."
-                        pairing.awaitingApproval ->
-                            "Scanned. Approve this phone on the dashboard to start capturing."
-                        !pairing.sendingEnabled -> "Paused on this phone. The dashboard is told."
-                        // Paired to the business, waiting for a SIM to be
-                        // chosen on the dashboard. It heartbeats — that is how
-                        // the SIM list gets there — and captures nothing.
-                        pairing.accountMsisdn == null ->
-                            "Paired. Choose which SIM this phone is paid on, in the dashboard."
-                        else -> pairing.provider?.replaceFirstChar { it.uppercase() } ?: ""
-                    },
-                )
-            },
-            trailingContent = {
-                TextButton(onClick = onRemove) { Text("Remove") }
-            },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        )
-
-        HorizontalDivider()
-        SwitchRow(
-            title = "Report for this number",
-            subtitle = if (pairing.sendingEnabled) {
-                "Messages for it are captured and sent."
-            } else {
-                "Paused. Nothing is captured, and nothing is held back to send later."
-            },
-            checked = pairing.sendingEnabled,
-            // Deliberately available even when the pairing is not live. Somebody
-            // whose approval is still pending should be able to decide in
-            // advance whether this phone will report at all.
-            enabled = !saving,
-            onChange = onSendingChange,
-            icon = Icons.Outlined.Sms,
-        )
-
-        /*
-         * Which SIM this number arrives on, when the phone knows.
-         *
-         * Shown rather than asked. The binding is made when the number is
-         * chosen, and this is how somebody checks the phone agrees with what
-         * the dashboard thinks — the case that used to fail silently.
-         */
-        val boundSim = sims.firstOrNull { it.subscriptionId == pairing.subscriptionId }
-        if (boundSim != null) {
-            HorizontalDivider()
-            ListItem(
-                leadingContent = { Icon(Icons.Outlined.SimCard, contentDescription = null) },
-                headlineContent = { Text("SIM ${boundSim.slotIndex + 1} · ${boundSim.carrierName}") },
-                supportingContent = {
-                    Text(
-                        if (boundSim.msisdn == pairing.accountMsisdn) {
-                            "Messages on this SIM belong to this number."
-                        } else {
-                            // The failsafe, surfaced. Captures are already being
-                            // refused; saying why beats silence.
-                            "This SIM now reports ${boundSim.msisdn ?: "no number"}, not " +
-                                "${pairing.accountMsisdn}. Captures are refused until it matches."
-                        },
-                    )
-                },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
-        }
-
-        if (needsSim) {
-            HorizontalDivider()
-            ListItem(
-                leadingContent = { Icon(Icons.Outlined.Warning, contentDescription = null) },
-                headlineContent = { Text("Which SIM is this?") },
-                supportingContent = {
-                    Text(
-                        "Two numbers here use the same provider, so an SMS cannot be told " +
-                            "apart by its sender alone.",
-                    )
-                },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
-        }
-
-        // Only a live number's settings can be written: the server refuses the
-        // call otherwise, and a switch that silently fails is worse than one
-        // that is visibly unavailable.
-        val editable = pairing.live && !saving
-
-        HorizontalDivider()
-        ListItem(
-            leadingContent = { Icon(Icons.Outlined.FilterAlt, contentDescription = null) },
-            headlineContent = { Text("Incoming Send Money") },
-            supportingContent = { Text("The only type that can settle an order.") },
-            trailingContent = { Text("always", style = MaterialTheme.typography.labelLarge) },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        )
-        HorizontalDivider()
-        SwitchRow(
-            title = "Cash In",
-            subtitle = "Top-ups from an agent or your bank.",
-            checked = pairing.capture.cashIn,
-            enabled = editable,
-            onChange = { onCaptureChange(pairing.capture.copy(cashIn = it)) },
-        )
-        HorizontalDivider()
-        SwitchRow(
-            title = "Money you sent",
-            subtitle = "A ledger of outgoing transfers. Never matched to an order.",
-            checked = pairing.capture.outgoing,
-            enabled = editable,
-            onChange = { onCaptureChange(pairing.capture.copy(outgoing = it)) },
-        )
-        HorizontalDivider()
-        SwitchRow(
-            title = "Everything else",
-            subtitle = "Promotions and balance notices. Usually noise.",
-            checked = pairing.capture.other,
-            enabled = editable,
-            onChange = { onCaptureChange(pairing.capture.copy(other = it)) },
-        )
-    }
-}
-
-@Composable
-private fun SectionHeader(text: String) {
+internal fun SectionHeader(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.labelLarge,
@@ -689,7 +590,7 @@ private fun SectionHeader(text: String) {
 }
 
 @Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
+internal fun SettingsCard(content: @Composable () -> Unit) {
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) { Column { content() } }
 }
 
@@ -737,7 +638,7 @@ private fun StatusRow(
 }
 
 @Composable
-private fun SwitchRow(
+internal fun SwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,

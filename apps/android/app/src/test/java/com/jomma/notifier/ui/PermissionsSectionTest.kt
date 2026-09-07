@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import com.jomma.notifier.data.Pairing
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -47,6 +48,7 @@ class PermissionsSectionTest {
         onPhone: () -> Unit = {},
         onNotifications: () -> Unit = {},
         onBattery: () -> Unit = {},
+        onRemovePairing: (String) -> Unit = {},
     ) {
         compose.setContent {
             JommaTheme(dynamicColor = false) {
@@ -60,7 +62,7 @@ class PermissionsSectionTest {
                     onScan = {},
                     onCaptureChange = { _, _ -> },
                     onSendingChange = { _, _ -> },
-                    onRemovePairing = {},
+                    onRemovePairing = onRemovePairing,
                     onIntervalChange = {},
                     onAutoDownloadChange = {},
                     onUnmeteredOnlyChange = {},
@@ -139,5 +141,55 @@ class PermissionsSectionTest {
 
         compose.onNodeWithText("Phone permission").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("SMS permission").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `a connected phone can be disconnected, and is told what that does not do`() {
+        /*
+         * The only way to shed the account-less business pairing.
+         *
+         * A wallet's Remove drops that one number, and the pairing the phone
+         * scanned with has no screen of its own — so without this a phone could
+         * lose every wallet and still consider itself connected, with no way
+         * back but clearing the app's data.
+         */
+        val removed = mutableListOf<String>()
+        show(
+            UiState(
+                pairings = listOf(
+                    Pairing(
+                        deviceId = "business",
+                        deviceToken = "t",
+                        serverUrl = "https://pay.example.com",
+                        accountMsisdn = null,
+                        provider = null,
+                        awaitingApproval = false,
+                    ),
+                    Pairing(
+                        deviceId = "bkash",
+                        deviceToken = "t",
+                        serverUrl = "https://pay.example.com",
+                        accountMsisdn = "8801714205878",
+                        provider = "bkash",
+                        awaitingApproval = false,
+                    ),
+                ),
+            ),
+            onRemovePairing = { removed += it },
+        )
+
+        compose.onNodeWithText("Disconnect this phone").performScrollTo().performClick()
+        // Named honestly: nothing on a phone can revoke a credential on a
+        // server somebody else runs, and pretending otherwise is the worse lie.
+        compose.onNodeWithText("Disconnect this phone?").assertIsDisplayed()
+        compose.onNodeWithText("Disconnect").performClick()
+
+        assertEquals(listOf("business", "bkash"), removed)
+    }
+
+    @Test
+    fun `an unpaired phone is not offered a disconnect`() {
+        show(UiState())
+        compose.onNodeWithText("Disconnect this phone").assertDoesNotExist()
     }
 }

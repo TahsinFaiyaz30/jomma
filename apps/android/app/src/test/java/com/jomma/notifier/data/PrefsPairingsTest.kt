@@ -283,6 +283,36 @@ class PrefsPairingsTest {
         prefs.updatePairing("scanned") { it.copy(accountMsisdn = "8801711111111") }
         assertTrue("done — stop polling", !prefs.settingUp)
     }
+
+    @Test
+    fun `the business pairing keeps no number of its own, and that is not setup`() {
+        /*
+         * The one that would have polled forever.
+         *
+         * Choosing a SIM does not replace the account-less business pairing; it
+         * adds a second one beside it. That first pairing never gets a number —
+         * it is the credential the phone beats and reports its SIMs with — so
+         * "any pairing without a number" is true for the entire life of the
+         * install, and a four-second poll would have run behind every screen
+         * for as long as the app was open.
+         */
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(pairing("business").copy(accountMsisdn = null, provider = null))
+        assertTrue("nothing chosen yet, so still setting up", prefs.settingUp)
+
+        prefs.upsertPairing(pairing("bkash", msisdn = "8801711111111"))
+        assertTrue(
+            "a wallet exists — the account-less one must not keep it polling",
+            !prefs.settingUp,
+        )
+    }
+
+    @Test
+    fun `a phone with nothing paired is not setting up`() {
+        // Nothing to poll for. The fast loop exists for somebody watching a
+        // handset finish, not for a fresh install sitting on the setup card.
+        assertTrue(!Prefs(FakePrefs()).settingUp)
+    }
 }
 
 /** A thread-safe in-memory stand-in that buffers edits until `apply`, as the real one does. */

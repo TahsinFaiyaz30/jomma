@@ -102,6 +102,15 @@ export async function createDeviceWithProvisioning(options: {
    */
   name?: string | null
   actorId: string | null
+  /**
+   * The handset this code is being minted for, when there is exactly one.
+   *
+   * Set on the `add_account` path, where the code is queued as a command and
+   * delivered over the heartbeat to one already-approved phone — so the row can
+   * be bound to that handset before anybody redeems it, and approval inherited
+   * rather than asked for a second time. See [claimProvisioning].
+   */
+  installId?: string | null
 }): Promise<{ deviceId: string; qrDataUrl: string; payload: ProvisioningPayload }> {
   const account = await db.query.receivingAccounts.findFirst({
     where: eq(receivingAccounts.id, options.receivingAccountId),
@@ -115,6 +124,7 @@ export async function createDeviceWithProvisioning(options: {
     receivingAccountId: account.id,
     name: options.name,
     actorId: options.actorId,
+    installId: options.installId,
   })
 }
 
@@ -124,6 +134,7 @@ async function issueProvisioning(options: {
   receivingAccountId: string | null
   name?: string | null
   actorId: string | null
+  installId?: string | null
 }): Promise<{ deviceId: string; qrDataUrl: string; payload: ProvisioningPayload }> {
   /*
    * 32 bytes, url-safe, no prefix.
@@ -147,6 +158,13 @@ async function issueProvisioning(options: {
       ...(options.name?.trim() ? { name: options.name.trim() } : {}),
       platform: 'android',
       status: 'pending',
+      /*
+       * Pre-bound, on the one path that knows which handset will redeem this.
+       *
+       * Null for a QR on a dashboard, which is shown to a room and could be
+       * scanned by anyone -- that one has to be approved. See [claimProvisioning].
+       */
+      ...(options.installId ? { installId: options.installId } : {}),
       provisioningHash: hash,
       pairingLookup: pairingLookup(plaintext),
       provisioningExpiresAt: expiresAt,
@@ -214,6 +232,8 @@ export async function claimPairingCode(options: {
    * shows and switches between. The account below is the optional half.
    */
   business: { id: string; name: string }
+  /** False when this handset was already approved here — see [claimProvisioning]. */
+  awaitingApproval: boolean
   /** Null when the phone paired to a business that has no number bound yet. */
   account: { msisdn: string; provider: string } | null
 }> {
@@ -285,6 +305,8 @@ async function claimProvisioning(options: {
    * shows and switches between. The account below is the optional half.
    */
   business: { id: string; name: string }
+  /** False when this handset was already approved here — see [claimProvisioning]. */
+  awaitingApproval: boolean
   /** Null when the phone paired to a business that has no number bound yet. */
   account: { msisdn: string; provider: string } | null
 }> {
@@ -304,6 +326,49 @@ async function claimProvisioning(options: {
 
   const issued = await generateDeviceToken()
 
+  /*
+   * Approval is about the handset, not about each number on it.
+   *
+   * Choosing a SIM mints a *second* device row -- one credential per number, so
+   * revoking one leaves the others reporting -- and that row was landing
+   * `awaiting_approval` like any other. So approving a phone, then picking its
+   * bKash number, threw the same handset back into the approval queue: the
+   * operator approved the phone in their hand, and the phone immediately said
+   * it was waiting for approval again. Nobody had changed their mind about it.
+   *
+   * Inherited only when all three hold:
+   *
+   *   - the row was bound to a handset when it was minted, which only
+   *     `addAccountFromSim` does, and only for a phone already helping this
+   *     business;
+   *   - the phone redeeming it reports that same handset;
+   *   - that handset already has an approved device here.
+   *
+   * A QR shown on a dashboard is unbound, so it still needs approving however
+   * many times it is scanned -- which is the case approval exists for, since
+   * that code is a bearer credential that gets screenshotted and forwarded. The
+   * `add_account` code is never shown to anyone: it is queued as a command and
+   * delivered over the heartbeat, so reading it already means holding the
+   * device token it was sent to.
+   */
+  const boundTo = device.installId
+  const inheritsApproval =
+    boundTo !== null && boundTo === options.installId
+      ? (
+          await db
+            .select({ id: devices.id })
+            .from(devices)
+            .where(
+              and(
+                eq(devices.businessId, device.businessId),
+                eq(devices.installId, boundTo),
+                eq(devices.status, 'active'),
+              ),
+            )
+            .limit(1)
+        ).length > 0
+      : false
+
   await db.transaction(async (tx) => {
     // Conditional on still being `pending`: two phones scanning the same QR must
     // not both end up holding a valid token.
@@ -313,11 +378,12 @@ async function claimProvisioning(options: {
         tokenPrefix: issued.prefix,
         tokenHash: issued.hash,
         /*
-         * Not `active`. Scanning proves someone holds the code; it does not
-         * prove they are the operator. The token is inert until the dashboard
-         * approves this phone — see DEVICE_STATUSES.
+         * Not `active`, unless this handset is already approved here. Scanning
+         * proves someone holds the code; it does not prove they are the
+         * operator, so the token is inert until the dashboard approves this
+         * phone — see DEVICE_STATUSES.
          */
-        status: 'awaiting_approval',
+        status: inheritsApproval ? 'active' : 'awaiting_approval',
         provisioningHash: null,
         // Cleared together. Leaving the lookup behind would keep a burned code
         // resolving to a row, and the unique index would then reject the next
@@ -369,26 +435,45 @@ async function claimProvisioning(options: {
         )
     }
 
-    await tx.insert(notifierEvents).values({
-      receivingAccountId: device.receivingAccountId,
-      deviceId: device.id,
-      kind: 'service_restarted',
-      // Medium, not low: this is a decision waiting on a human, and it is the
-      // signal the accounts screen raises its attention badge from.
-      severity: 'medium',
-      detail: 'A phone scanned the pairing code and is waiting for approval',
-    })
+    // Only when somebody actually has to do something. An inherited approval
+    // is not a decision waiting on a human, and raising the attention badge for
+    // it would train people to ignore the badge.
+    if (!inheritsApproval) {
+      await tx.insert(notifierEvents).values({
+        receivingAccountId: device.receivingAccountId,
+        deviceId: device.id,
+        kind: 'service_restarted',
+        // Medium, not low: this is a decision waiting on a human, and it is the
+        // signal the accounts screen raises its attention badge from.
+        severity: 'medium',
+        detail: 'A phone scanned the pairing code and is waiting for approval',
+      })
+    }
 
     await audit(tx, {
       action: 'device.provisioned',
       actorType: 'device',
-      payload: { device_id: device.id, stage: 'awaiting_approval' },
+      // Recorded either way, and distinguishable: a device that became active
+      // without anybody pressing Approve should say so in the trail.
+      payload: {
+        device_id: device.id,
+        stage: inheritsApproval ? 'approval_inherited' : 'awaiting_approval',
+        ...(inheritsApproval ? { inherited_from_install: boundTo } : {}),
+      },
     })
   })
 
   return {
     deviceToken: issued.plaintext,
     deviceId: device.id,
+    /*
+     * Told, rather than assumed.
+     *
+     * The app used to hardcode "waiting" for every pairing it created, so a
+     * credential that was live on arrival still showed as waiting until a
+     * heartbeat corrected it.
+     */
+    awaitingApproval: !inheritsApproval,
     business: { id: device.business.id, name: device.business.name },
     /*
      * Null for a phone paired to a business with nothing bound to it yet — it

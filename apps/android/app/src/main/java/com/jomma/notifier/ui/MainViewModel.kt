@@ -404,8 +404,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             accountMsisdn = msisdn,
                             provider = result.value.account?.provider,
                             // Scanning is no longer the last step: the phone is
-                            // inert until the dashboard approves it.
-                            awaitingApproval = true,
+                            // inert until the dashboard approves it. True for
+                            // every scanned QR — the server only says otherwise
+                            // for a code it bound to this handset itself.
+                            awaitingApproval = result.value.awaitingApproval,
                         ),
                     )
 
@@ -514,7 +516,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * per number would put a test message in every merchant's feed.
      */
     fun sendTestCapture() {
-        val pairing = prefs.livePairings.firstOrNull()
+        /*
+         * A live pairing that has a number, not merely a live pairing.
+         *
+         * The account-less business pairing is live — it is approved and it
+         * beats — but the capture endpoint refuses it with "No number is set up
+         * on this phone yet", because there is no account to file a capture
+         * against. Taking the first live pairing meant the test button reported
+         * a failure on a phone where everything worked.
+         */
+        val pairing = prefs.livePairings.firstOrNull { it.accountMsisdn != null }
         if (pairing == null) {
             _state.value = _state.value.copy(message = "No approved number to test with.")
             return

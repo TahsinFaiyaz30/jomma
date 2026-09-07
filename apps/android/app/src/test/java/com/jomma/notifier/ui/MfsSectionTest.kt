@@ -64,6 +64,9 @@ class MfsSectionTest {
         onPick: (Int) -> Unit = {},
         onCancel: () -> Unit = {},
         onDestination: (Int) -> Unit = {},
+        managing: String? = null,
+        onManage: (String) -> Unit = {},
+        onCloseManage: () -> Unit = {},
     ) {
         compose.setContent {
             JommaTheme(dynamicColor = false) {
@@ -73,6 +76,9 @@ class MfsSectionTest {
                     snackbarHost = SnackbarHostState(),
                     destination = 0,
                     onDestinationChange = onDestination,
+                    managingDeviceId = managing,
+                    onManage = onManage,
+                    onCloseManage = onCloseManage,
                     onScan = {},
                     onAddAccount = onAdd,
                     onPickSim = onPick,
@@ -131,14 +137,47 @@ class MfsSectionTest {
     }
 
     @Test
-    fun `Manage opens the settings tab, where that wallet's card lives`() {
-        // Rather than a second screen that has to be kept in step with it.
+    fun `Manage opens that wallet's own screen, naming which wallet`() {
+        /*
+         * It used to switch to the Settings tab, where a "Numbers" list held a
+         * card per wallet. Two problems in one gesture: Settings is for what is
+         * true of the phone, and the list shadowed this one — the same account
+         * in two places with different detail and nothing saying which to
+         * believe. Now Manage names a wallet and opens only that.
+         */
+        var asked: String? = null
         var destination = -1
-        show(UiState(pairings = listOf(pairing())), onDestination = { destination = it })
+        show(
+            UiState(pairings = listOf(pairing())),
+            onDestination = { destination = it },
+            onManage = { asked = it },
+        )
 
         compose.onNodeWithText("Manage").performScrollTo().performClick()
 
-        assertEquals(2, destination)
+        assertEquals("dev-1", asked)
+        assertEquals("and does not change tab underneath it", -1, destination)
+    }
+
+    @Test
+    fun `an open wallet shows its own settings instead of the wallet list`() {
+        show(UiState(pairings = listOf(pairing())), managing = "dev-1")
+
+        // Its own rules, on their own screen.
+        compose.onNodeWithText("Cash In").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Report for this number").performScrollTo().assertIsDisplayed()
+        // And not the list it was opened from.
+        compose.onNodeWithText("Add bKash").assertDoesNotExist()
+    }
+
+    @Test
+    fun `a wallet removed while its screen is open does not linger`() {
+        // The id is held, not the pairing, so state is the single source of
+        // truth — otherwise this screen would go on editing something gone.
+        show(UiState(pairings = emptyList()), managing = "dev-1")
+
+        compose.onNodeWithText("Cash In").assertDoesNotExist()
+        compose.onNodeWithText("Set this device up").performScrollTo().assertIsDisplayed()
     }
 
     @Test

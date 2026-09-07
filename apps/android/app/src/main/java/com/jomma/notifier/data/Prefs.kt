@@ -71,12 +71,22 @@ class Prefs internal constructor(private val prefs: SharedPreferences) {
     val beatingPairings: List<Pairing> get() = pairings.filter { !it.revoked }
 
     /**
-     * Whether any pairing is still mid-setup: waiting for approval, or approved
-     * with no number chosen for it yet. Both are resolved by heartbeating, and
-     * both are somebody standing there watching two screens disagree.
+     * Whether somebody is mid-setup and watching two screens disagree.
+     *
+     * True while a phone is waiting to be approved, and while an approved one
+     * still has no wallet at all. Both are resolved by heartbeating — approval
+     * arrives as the first successful beat, and the chosen SIM arrives as a
+     * command on one — so both are worth polling faster for.
+     *
+     * Deliberately not "any pairing without a number". A phone keeps its
+     * account-less business pairing for as long as it is paired: that is the
+     * credential it beats and reports its SIMs with, and it never gets a number
+     * of its own. Treating it as unfinished would leave the fast poll running
+     * for the life of the install, which is a four-second request forever.
      */
     val settingUp: Boolean
-        get() = beatingPairings.any { it.awaitingApproval || it.accountMsisdn == null }
+        get() = beatingPairings.any { it.awaitingApproval } ||
+            (beatingPairings.isNotEmpty() && beatingPairings.none { it.accountMsisdn != null })
 
     fun pairing(deviceId: String): Pairing? = pairings.firstOrNull { it.deviceId == deviceId }
 

@@ -89,8 +89,13 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
          * The same call the scanner makes, deliberately. Adding a number from a
          * browser and adding one by scanning a code end at the same claim, so
          * there is one place where a pairing code is burned and one definition
-         * of what a new pairing looks like — including that it starts waiting
-         * for approval like any other.
+         * of what a new pairing looks like.
+         *
+         * Approval is the one thing that differs, and the server decides it: a
+         * code that arrived down this channel was minted for *this* handset, so
+         * if it has been approved here before it stays approved. Choosing a SIM
+         * used to put the phone back in the approval queue, which asked the
+         * operator to vouch a second time for the handset in their hand.
          *
          * Refusals are silent because the command has already been drained: a
          * code that was claimed on a previous beat, or has expired, is not a
@@ -118,7 +123,17 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                             serverUrl = link.serverUrl,
                             accountMsisdn = msisdn,
                             provider = result.value.account?.provider,
-                            awaitingApproval = true,
+                            /*
+                             * What the server said, not an assumption.
+                             *
+                             * This code was queued as a command and delivered
+                             * over this phone's own heartbeat, so the server
+                             * already knows which handset is redeeming it — and
+                             * if it approved that handset once, it says so here
+                             * rather than sending the operator back to the
+                             * dashboard to approve a phone they just approved.
+                             */
+                            awaitingApproval = result.value.awaitingApproval,
                         ),
                     )
                 }

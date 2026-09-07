@@ -21,6 +21,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import com.jomma.notifier.data.Attribution
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.Bolt
@@ -95,6 +98,18 @@ fun JommaScreens(
     snackbarHost: SnackbarHostState,
     destination: Int,
     onDestinationChange: (Int) -> Unit,
+    /**
+     * The wallet whose own screen is open, or null for the tabs.
+     *
+     * A screen rather than a tab: it belongs to one account, it is reached from
+     * that account's Manage button, and it is left with the back arrow. Held as
+     * a device id so the pairing is re-read from state on every recomposition —
+     * a wallet removed from the dashboard closes the screen rather than leaving
+     * a stale copy of it on display.
+     */
+    managingDeviceId: String?,
+    onManage: (String) -> Unit,
+    onCloseManage: () -> Unit,
     onScan: () -> Unit,
     onAddAccount: (String) -> Unit,
     onPickSim: (Int) -> Unit,
@@ -119,10 +134,34 @@ fun JommaScreens(
     onSendingChange: (String, Boolean) -> Unit,
     onRemovePairing: (String) -> Unit,
 ) {
+    // Re-read rather than captured: a wallet that disappears takes its screen
+    // with it instead of leaving one that edits something no longer there.
+    val managing = managingDeviceId?.let { id -> state.pairings.firstOrNull { it.deviceId == id } }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (destination == 1) "Log" else if (destination == 2) "Settings" else "Jomma Notifier") },
+                title = {
+                    Text(
+                        when {
+                            managing != null ->
+                                managing.provider?.replaceFirstChar { it.uppercase() } ?: "Wallet"
+                            destination == 1 -> "Log"
+                            destination == 2 -> "Settings"
+                            else -> "Jomma Notifier"
+                        },
+                    )
+                },
+                navigationIcon = {
+                    if (managing != null) {
+                        IconButton(onClick = onCloseManage) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -130,6 +169,10 @@ fun JommaScreens(
             )
         },
         bottomBar = {
+            // Hidden while a wallet is open. The tabs are the top level and this
+            // is below it; showing both invites leaving sideways from a screen
+            // that has a back arrow.
+            if (managing != null) return@Scaffold
             NavigationBar {
                 NavigationBarItem(
                     selected = destination == 0,
@@ -154,6 +197,23 @@ fun JommaScreens(
         snackbarHost = { SnackbarHost(snackbarHost) },
     ) { padding ->
         Box(Modifier.padding(padding)) {
+            if (managing != null) {
+                WalletScreen(
+                    pairing = managing,
+                    saving = state.captureSavingFor == managing.deviceId,
+                    needsSim = Attribution.needsSubscriptionId(state.pairings, managing),
+                    sims = state.sims,
+                    onCaptureChange = { onCaptureChange(managing.deviceId, it) },
+                    onSendingChange = { onSendingChange(managing.deviceId, it) },
+                    onRemove = {
+                        onRemovePairing(managing.deviceId)
+                        // Nothing left to manage once it is gone.
+                        onCloseManage()
+                    },
+                )
+                return@Box
+            }
+
             when (destination) {
                 0 -> StatusScreen(
                     state = state,
@@ -164,11 +224,7 @@ fun JommaScreens(
                     onAddAccount = onAddAccount,
                     onPickSim = onPickSim,
                     onCancelAdd = onCancelAdd,
-                    // Everything about one wallet already lives on its card in
-                    // Settings — what it keeps, whether it reports, which SIM it
-                    // is bound to. Manage goes there rather than growing a
-                    // second screen that has to be kept in step with it.
-                    onManage = { onDestinationChange(2) },
+                    onManage = onManage,
                 )
                 1 -> LogScreen(captures)
                 else -> SettingsScreen(

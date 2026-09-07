@@ -258,6 +258,17 @@ export async function addAccountFromSim(options: {
     receivingAccountId: account.id,
     name: device.name,
     actorId: options.actorId,
+    /*
+     * Bound to the handset that is already helping here, so redeeming this does
+     * not ask for approval a second time.
+     *
+     * Somebody who approves a phone and then chooses its bKash number has not
+     * introduced a new phone; it is the same one, and it was already trusted.
+     * Null on a legacy install that has never reported which handset it is,
+     * which falls back to being approved again rather than to being trusted
+     * without evidence.
+     */
+    installId: device.installId,
   })
 
   const command: DeviceCommand = {

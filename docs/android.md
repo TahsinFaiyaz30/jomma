@@ -293,6 +293,26 @@ it with 403 until an operator approves it on the Accounts screen, where it
 appears the moment it scans. Scanning proves you hold the code; approving proves
 the operator recognises the phone.
 
+**Approval is about the handset, once.** Choosing a SIM afterwards mints a
+second device row — one credential per number, so revoking a bKash number
+leaves a Nagad one reporting — and that row used to arrive `awaiting_approval`
+like any other. So doing what the wizard asked put the same phone back in the
+approval queue, and the operator was told to vouch again for the handset in
+their hand.
+
+That code is different in kind from a QR: it is queued as a command and
+delivered over the heartbeat, so it never appears on a screen and reading it
+already means holding the device token it was sent to. It is bound to the
+handset it was minted for — the `install_id` that phone reports — and carries
+approval when, and only when, all three of these hold: the row was bound at
+mint, the redeeming phone reports that same handset, and that handset already
+has an approved device on the business.
+
+A QR is unbound and still needs approving however many times it is scanned,
+including by a handset already approved. That is the case approval exists for.
+A legacy install that reports no `install_id` is never inherited to; it is asked
+again, which is the safe direction.
+
 The token is issued at scan rather than at approval, which looks backwards and
 is not: handing it over afterwards would mean parking a plaintext credential
 somewhere in between, waiting to be collected. Issuing it immediately and
@@ -502,15 +522,25 @@ permission is missing. Red means captures are failing or permissions are gone.
 because when the parser breaks this is where you read what actually arrived. Long
 press to copy.
 
-**Settings.** Everything that is not "is it working?" or "what arrived?", in
-six labelled groups, each row carrying a Material icon and — where there is
-something to be right or wrong — a tick, a cross, or a neutral dot:
+**A wallet.** Not a tab. Manage on a wallet in the Status list opens that
+wallet's own screen: its status, the SIM it is bound to, its capture filters and
+its pause switch, with a back arrow.
+
+It used to be a "Numbers" group in Settings, which was wrong twice. Settings is
+for what is true of *this phone*; a bKash account's capture rules are true of
+the account. And the list shadowed the wallet list on Status — the same account
+in two places, different detail in each, nothing saying which to believe.
+
+**Settings.** Everything that is not "is it working?", "what arrived?" or one
+wallet's own rules, in labelled groups, each row carrying a Material icon and —
+where there is something to be right or wrong — a tick, a cross, or a neutral
+dot:
 
 | Group | What is in it |
 |---|---|
 | Permissions | Notification access, SMS. Live status, tap to open the system screen. |
 | Staying alive | Battery optimisation, and the vendor's own background-app screen on the ROMs that have one. |
-| Numbers | One card per watched number: its status, its own capture filters, and a plus to scan another. |
+| SIMs in this phone | What the tray holds, so it can be checked against the list the dashboard offers. |
 | Updates | Interval, pre-download, Wi-Fi only, and a manual check. |
 | About | Developer, version and variant, package, source code. |
 

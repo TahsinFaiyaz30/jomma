@@ -89,6 +89,16 @@ export const POST = route(async (request, context) => {
         business: result.business,
         /** Null until a SIM has been picked. See `createPhoneProvisioning`. */
         account: result.account,
+        /*
+         * Whether the credential the phone is holding works yet.
+         *
+         * False when this handset was already approved for this business and is
+         * only picking up a second number — choosing a SIM is not a reason to
+         * approve a phone that was approved five minutes ago. The app used to
+         * assume "waiting" for everything it paired, so a live credential still
+         * showed as waiting until a heartbeat corrected it.
+         */
+        awaiting_approval: result.awaitingApproval,
         request_id: context.requestId,
       },
     }

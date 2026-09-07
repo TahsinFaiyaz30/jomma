@@ -193,6 +193,19 @@ data class ProvisionResponse(
      * the reason.
      */
     val account: ProvisionAccount? = null,
+
+    /**
+     * Whether this credential still has to be approved before it works.
+     *
+     * False when the server recognises the handset as one already approved for
+     * this business — picking a second number on a phone somebody already said
+     * yes to is not a reason to ask them again.
+     *
+     * Defaulted to true for a server too old to send it, which is also the
+     * safe direction: a pairing wrongly shown as waiting corrects itself on the
+     * first heartbeat, one wrongly shown as live looks broken instead.
+     */
+    @SerialName("awaiting_approval") val awaitingApproval: Boolean = true,
 )
 
 /**

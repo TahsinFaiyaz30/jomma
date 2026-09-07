@@ -87,15 +87,42 @@ export interface SetupState {
  * `awaiting_approval` phone has scanned and is waiting to be let in, which is a
  * state the wizard has to offer an action for rather than merely describe.
  */
+/**
+ * One entry per handset, not one per credential.
+ *
+ * A phone holds a separate device row for each number it watches — that is what
+ * keeps revoking a bKash number from also killing a Nagad one — plus the
+ * account-less row it paired with. All of them are the same piece of glass, and
+ * counting rows meant one phone reported itself as "2 connected" the moment
+ * somebody chose a SIM for it, then three when they added a second wallet.
+ *
+ * `installId` is what a handset actually is; the row id is what a credential
+ * is. Falling back to the row id keeps a legacy phone that reports no handset
+ * counted exactly as it was before, rather than collapsing several into one.
+ */
+function byHandset(rows: (typeof devices.$inferSelect)[]) {
+  const seen = new Map<string, typeof devices.$inferSelect>()
+  for (const row of rows) {
+    const handset = row.installId ?? row.id
+    // Keep the earliest, so the entry the operator approved is the one named —
+    // and so the id stays put rather than moving each time a number is added.
+    const held = seen.get(handset)
+    if (!held || row.createdAt < held.createdAt) seen.set(handset, row)
+  }
+  return [...seen.values()]
+}
+
 function partitionPhones(all: (typeof devices.$inferSelect)[]) {
   const provisioned = all.filter(
     (device) => device.provisionedAt !== null && device.tokenHash !== null,
   )
 
+  const connected = byHandset(provisioned.filter((device) => device.status === 'active'))
+
   return {
-    phone: provisioned.find((device) => device.status === 'active') ?? null,
-    connected: provisioned.filter((device) => device.status === 'active'),
-    pending: all.filter((device) => device.status === 'awaiting_approval'),
+    phone: connected[0] ?? null,
+    connected,
+    pending: byHandset(all.filter((device) => device.status === 'awaiting_approval')),
   }
 }
 
