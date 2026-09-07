@@ -487,6 +487,45 @@ function StepForm({
  * API keys and signing secrets are hashed at rest and a provisioning QR is
  * burned on use, so this is genuinely the only time any of them is visible.
  */
+/**
+ * How long is left, ticking, rather than the wall-clock time it dies.
+ *
+ * "It expires 1:09:44 AM" makes the reader do arithmetic against a clock they
+ * have to go and find, while holding a phone up to the screen. A pairing code
+ * lasts fifteen minutes and the only question is whether there is time to walk
+ * to the till.
+ *
+ * Starts at null and fills in on mount. Computing it during render would make
+ * the first client render disagree with the server's — the same hydration
+ * mismatch the pay page's countdown had — and this one sits inside a card that
+ * appears after a server action, so the two are a round trip apart.
+ */
+function Countdown({ until }: { until?: string }) {
+  const [left, setLeft] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!until) return
+    const tick = () => setLeft(Date.parse(until) - Date.now())
+    tick()
+    const timer = setInterval(tick, 1000)
+    return () => clearInterval(timer)
+  }, [until])
+
+  if (!until) return <>It expires shortly.</>
+  if (left === null) return null
+  if (left <= 0) return <>It has expired — show a new one.</>
+
+  const total = Math.floor(left / 1000)
+  const minutes = Math.floor(total / 60)
+  const seconds = String(total % 60).padStart(2, '0')
+
+  return (
+    <>
+      Expires in {minutes}:{seconds}.
+    </>
+  )
+}
+
 function SecretCard({
   secret,
   onDismiss,
@@ -502,11 +541,13 @@ function SecretCard({
         <div className="min-w-0">
           <p className="font-medium text-small">{secret.label}</p>
           <p className="mt-0.5 text-micro opacity-90">
-            {secret.kind === 'qr'
-              ? `Scan it from the Jomma app. It expires ${
-                  secret.expiresAt ? new Date(secret.expiresAt).toLocaleTimeString() : 'shortly'
-                }.`
-              : 'Copy it now. It cannot be shown again.'}
+            {secret.kind === 'qr' ? (
+              <>
+                Scan it from the Jomma app. <Countdown until={secret.expiresAt} />
+              </>
+            ) : (
+              'Copy it now. It cannot be shown again.'
+            )}
           </p>
         </div>
         <button type="button" onClick={onDismiss} className="shrink-0 text-micro underline">
