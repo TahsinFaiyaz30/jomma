@@ -227,42 +227,41 @@ jobs:
   # unpublishing is restricted after 72 hours, so this must not run until the
   # GitHub release it belongs to has actually succeeded — hence `needs`.
   #
-  # ## Before this can work
+  # ## No token
   #
-  # **An npm organisation named `jomma`.** An `@scope/` prefix must be an org or
-  # a username, and the org is the one that reserves the whole namespace — with
-  # an unscoped `jomma-sdk` anyone could publish `jomma-cli` tomorrow and it
-  # would look official. An org is free for public packages and can have exactly
-  # one member; it is a name reservation, not a company.
+  # This publishes over OIDC — "trusted publishing". GitHub mints a short-lived
+  # identity token for this specific workflow in this specific repository, and
+  # npm checks it against what the package is configured to trust. Nothing is
+  # stored: no `NPM_TOKEN` secret, nothing to rotate, nothing that can leak out
+  # of a log or a shell history.
   #
-  # `publishConfig.access` in the package is not optional because of this:
-  # scoped packages default to `restricted`, which needs a paid account, so
-  # without it the first publish fails with a 402 that reads like a billing
-  # problem.
+  # That is not only tidier. A granular token expires within 90 days, so a
+  # release three months from now would fail on an expired credential; a classic
+  # automation token does not expire but npm is restricting the tokens that
+  # bypass 2FA, and 2FA is now required to publish. Both roads lead here.
   #
-  # **A token that can publish without a one-time code.** An ordinary login
-  # cannot: npm answers a plain `pnpm publish` with
+  # ## Configuring the npm side
   #
-  #     403 — Two-factor authentication or granular access token with bypass
-  #     2fa enabled is required to publish packages
+  # Once, on npmjs.com → the package → Settings → Trusted Publisher:
   #
-  # which reads like a permissions problem and is really a missing OTP. Either
-  # token type works:
+  #   Publisher:           GitHub Actions
+  #   Organization/user:   TahsinFaiyaz30
+  #   Repository:          jomma
+  #   Workflow filename:   release.yml
   #
-  #   - **Granular access token** — read and write on `@jomma/sdk`, with
-  #     **Bypass 2FA** switched on. Expires, so it needs rotating.
-  #   - **Classic automation token** — skips 2FA by design, never expires.
-  #
-  # Add it to the repository as the `NPM_TOKEN` secret. Publishing by hand
-  # instead needs the code appended: `--otp=123456`.
-  #
-  # Until that secret exists this job skips rather than failing, so adding npm
-  # publishing does not retroactively break releases that were fine without it.
+  # The workflow filename is matched literally. Renaming this file breaks
+  # publishing until the setting is updated to match.
   npm:
     name: Publish @jomma/sdk to npm
     needs: [release]
     runs-on: ubuntu-latest
     if: ${{ !failure() && !cancelled() }}
+
+    permissions:
+      contents: read
+      # The credential itself. Without this the OIDC token is never minted and
+      # npm has nothing to verify.
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -273,21 +272,20 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          # Writes the registry into .npmrc so NODE_AUTH_TOKEN is used.
           registry-url: https://registry.npmjs.org
+
+      # Node 22 ships npm 10, which has no idea what trusted publishing is and
+      # fails asking for credentials that were deliberately not supplied.
+      - name: npm new enough to publish over OIDC
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - run: pnpm install --frozen-lockfile
 
       - name: Publish, if this version is not already on npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-
-          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "No NPM_TOKEN secret set — skipping. See the comment above this job."
-            exit 0
-          fi
 
           v="$(cat VERSION)"
 
@@ -299,6 +297,18 @@ jobs:
             exit 0
           fi
 
-          # `--no-git-checks`: pnpm otherwise refuses to publish from a detached
-          # HEAD, which is exactly what a tag checkout is.
-          pnpm --filter @jomma/sdk publish --access public --no-git-checks
+          # From the package directory rather than through `pnpm --filter`:
+          # OIDC and provenance are npm's own features, and going through
+          # another client is a way to find out which parts it has not
+          # implemented yet.
+          #
+          # `--provenance` is free here — it needs the same `id-token: write`
+          # this job already has — and it publishes a signed attestation of
+          # which commit and which workflow built the tarball. On a package
+          # whose whole job is handling other people's payment credentials,
+          # being able to prove that is worth a flag.
+          cd packages/sdk
+          if ! npm publish --access public --provenance; then
+            echo "::error::Publish failed. If this is the first run after switching to trusted publishing, configure it on npmjs.com: package Settings → Trusted Publisher → GitHub Actions, TahsinFaiyaz30/jomma, workflow release.yml."
+            exit 1
+          fi
