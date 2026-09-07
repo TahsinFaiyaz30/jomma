@@ -229,14 +229,19 @@ jobs:
   #
   # ## Before this can work
   #
-  # `@jomma` is a scope, and npm only accepts a scoped publish from a scope you
-  # own. That means one of:
+  # **An npm organisation named `jomma`.** An `@scope/` prefix must be an org or
+  # a username, and the org is the one that reserves the whole namespace — with
+  # an unscoped `jomma-sdk` anyone could publish `jomma-cli` tomorrow and it
+  # would look official. An org is free for public packages and can have exactly
+  # one member; it is a name reservation, not a company.
   #
-  #   - an npm **organisation** named `jomma` (free for public packages), or
-  #   - renaming the package to `@<your-npm-username>/jomma-sdk`.
+  # `publishConfig.access` in the package is not optional because of this:
+  # scoped packages default to `restricted`, which needs a paid account, so
+  # without it the first publish fails with a 402 that reads like a billing
+  # problem.
   #
-  # Then create a token that is allowed to publish without a one-time code. A
-  # plain login cannot: npm answers an ordinary `pnpm publish` with
+  # **A token that can publish without a one-time code.** An ordinary login
+  # cannot: npm answers a plain `pnpm publish` with
   #
   #     403 — Two-factor authentication or granular access token with bypass
   #     2fa enabled is required to publish packages
@@ -244,8 +249,8 @@ jobs:
   # which reads like a permissions problem and is really a missing OTP. Either
   # token type works:
   #
-  #   - **Granular access token** — scoped to `@jomma`, read and write, with
-  #     **Bypass 2FA** switched on. Expires, so it has to be rotated.
+  #   - **Granular access token** — read and write on `@jomma/sdk`, with
+  #     **Bypass 2FA** switched on. Expires, so it needs rotating.
   #   - **Classic automation token** — skips 2FA by design, never expires.
   #
   # Add it to the repository as the `NPM_TOKEN` secret. Publishing by hand
@@ -296,4 +301,4 @@ jobs:
 
           # `--no-git-checks`: pnpm otherwise refuses to publish from a detached
           # HEAD, which is exactly what a tag checkout is.
-          pnpm publish --filter @jomma/sdk --access public --no-git-checks
+          pnpm --filter @jomma/sdk publish --access public --no-git-checks
