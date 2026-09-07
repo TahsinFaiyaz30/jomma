@@ -92,8 +92,9 @@ jobs:
         working-directory: apps/android
         run: ./gradlew testDebugUnitTest
 
-      # Assembling is the real check on the Compose and manifest work — most of
-      # this app is UI and resources, which unit tests never touch.
+      # Still worth doing after the tests. Robolectric covers a screen or two,
+      # but nothing above checks the manifest, the resources, or that the whole
+      # thing links — and this app is mostly those.
       - name: Build debug APK
         working-directory: apps/android
         run: ./gradlew assembleDebug

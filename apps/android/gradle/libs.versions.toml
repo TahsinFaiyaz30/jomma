@@ -31,6 +31,10 @@ camera = "1.6.2"
 mlkitBarcode = "17.3.0"
 serialization = "1.9.0"
 junit = "4.13.2"
+# Compose tests on the JVM, so CI runs them. `testDebugUnitTest` is the only
+# Android test task in the workflow -- there is no emulator on the runner -- so
+# an instrumented test would compile and never execute.
+robolectric = "4.16"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -63,6 +67,10 @@ androidx-camera-view = { group = "androidx.camera", name = "camera-view", versio
 mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+# Versionless: managed by the Compose BOM above, same as the runtime artifacts.
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

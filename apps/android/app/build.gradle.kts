@@ -176,6 +176,19 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    testOptions {
+        unitTests {
+            /*
+             * Robolectric reads the merged resources, and the settings screen is
+             * full of `stringResource(...)`. Without this every Compose test
+             * fails on the first string lookup rather than on anything it meant
+             * to assert.
+             */
+            isIncludeAndroidResources = true
+            all { it.systemProperty("robolectric.logging", "stdout") }
+        }
+    }
 }
 
 /*
@@ -235,6 +248,26 @@ dependencies {
     // Plain JVM tests. `PairingLink` is pure Kotlin on purpose so the rules
     // about what counts as a provisioning link can be tested without a device.
     testImplementation(libs.junit)
+
+    /*
+     * Compose tests, on the JVM.
+     *
+     * Robolectric rather than an instrumented `androidTest`, because CI runs
+     * `testDebugUnitTest` against a runner with no emulator on it: an
+     * instrumented test would compile, be reported as nothing, and rot.
+     *
+     * What this buys is the part of the settings screen no other test could
+     * reach. The per-number rows are drawn inside `for (pairing in
+     * state.pairings)`, so with no pairing the loop body never runs -- and a
+     * pairing can only be had by scanning a code, which `PairingLink.parse`
+     * requires to be https. There is no way to pair a phone against a local
+     * dev server, so those rows had never been rendered anywhere.
+     */
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
+    // Supplies the ComponentActivity that `createComposeRule()` launches into.
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
 /**
