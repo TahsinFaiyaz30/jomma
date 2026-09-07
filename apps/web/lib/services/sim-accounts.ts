@@ -78,6 +78,66 @@ function blockedReason(sim: SimCard, takenNumbers: Set<string>): string | null {
   return null
 }
 
+export interface PairedPhone {
+  id: string
+  name: string
+  /** How many SIMs it last reported, so a phone with none reads as needing help. */
+  simCount: number
+  /** Null for a phone that has never reported — an older app, or no permission. */
+  simsReportedAt: Date | null
+  /** False when the phone has switched this business off at its end. */
+  sendingEnabled: boolean
+  lastHeartbeatAt: Date | null
+}
+
+/**
+ * The phones paired to a business, whether or not they watch a number yet.
+ *
+ * By business rather than through an account, which is the whole point: a phone
+ * that has scanned the code and is reporting its SIMs has no account, and
+ * joining through one would hide exactly the phone somebody is about to pick a
+ * SIM from.
+ */
+export async function listPairedPhones(businessId: string): Promise<PairedPhone[]> {
+  const rows = await db
+    .select({
+      id: devices.id,
+      name: devices.name,
+      sims: devices.sims,
+      simsReportedAt: devices.simsReportedAt,
+      sendingEnabled: devices.sendingEnabled,
+      lastHeartbeatAt: devices.lastHeartbeatAt,
+    })
+    .from(devices)
+    .where(and(eq(devices.businessId, businessId), eq(devices.status, 'active')))
+
+  /*
+   * One row per handset, not per credential.
+   *
+   * A phone helping a business with both a bKash and a Nagad number holds a
+   * credential for each, which is two `devices` rows with the same name. Listing
+   * both would offer the same handset twice and show its SIMs twice, so they are
+   * folded by name and the one that has reported most recently wins.
+   */
+  const byName = new Map<string, PairedPhone>()
+  for (const row of rows) {
+    const phone: PairedPhone = {
+      id: row.id,
+      name: row.name,
+      simCount: row.sims?.length ?? 0,
+      simsReportedAt: row.simsReportedAt,
+      sendingEnabled: row.sendingEnabled,
+      lastHeartbeatAt: row.lastHeartbeatAt,
+    }
+    const seen = byName.get(row.name)
+    const fresher =
+      !seen || (phone.simsReportedAt?.getTime() ?? 0) > (seen.simsReportedAt?.getTime() ?? 0)
+    if (fresher) byName.set(row.name, phone)
+  }
+
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
+
 /**
  * Turns a chosen SIM into a receiving account, and tells the phone to claim it.
  *

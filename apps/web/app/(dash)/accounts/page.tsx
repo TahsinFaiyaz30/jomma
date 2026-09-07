@@ -1,10 +1,15 @@
 import type { Metadata } from 'next'
-import { AccountsView, type AccountView } from '@/components/dash/accounts-view'
+import {
+  AccountsView,
+  type AccountView,
+  type PairedPhoneView,
+} from '@/components/dash/accounts-view'
 import { PageHeader } from '@/components/dash/page-header'
 import { requireBusiness } from '@/lib/auth/tenancy'
 import { listAccountAlerts } from '@/lib/services/account-admin'
 import { listAccountHealth } from '@/lib/services/accounts'
 import { listDevices } from '@/lib/services/devices'
+import { listPairedPhones } from '@/lib/services/sim-accounts'
 
 export const metadata: Metadata = { title: 'Accounts' }
 export const dynamic = 'force-dynamic'
@@ -12,6 +17,14 @@ export const dynamic = 'force-dynamic'
 export default async function AccountsPage() {
   const { business } = await requireBusiness()
   const health = await listAccountHealth(business.id)
+
+  // Phones, not accounts: a handset that has paired and is reporting its SIMs
+  // has no account yet, and it is exactly the one somebody picks a SIM from.
+  const phones: PairedPhoneView[] = (await listPairedPhones(business.id)).map((phone) => ({
+    id: phone.id,
+    name: phone.name,
+    simCount: phone.simCount,
+  }))
 
   const accounts: AccountView[] = await Promise.all(
     health.map(async (account) => ({
@@ -51,7 +64,7 @@ export default async function AccountsPage() {
             : `${routable} of ${accounts.length} accepting payments`
         }
       />
-      <AccountsView accounts={accounts} />
+      <AccountsView accounts={accounts} phones={phones} />
     </div>
   )
 }

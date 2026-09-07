@@ -18,10 +18,12 @@ import {
 import {
   approveDevice,
   createDeviceWithProvisioning,
+  createPhoneProvisioning,
   renameDevice,
   requestTokenRotation,
   revokeDevice,
 } from '@/lib/services/devices'
+import { addAccountFromSim, listSimOptions, type SimOption } from '@/lib/services/sim-accounts'
 
 export interface DeviceActionResult {
   ok: boolean
@@ -30,6 +32,83 @@ export interface DeviceActionResult {
   secret?:
     | { kind: 'qr'; dataUrl: string; expiresAt: string; appLinksReady: boolean }
     | { kind: 'token'; value: string }
+}
+
+/**
+ * A code that pairs a phone to this business, with no number attached.
+ *
+ * How a phone is added now. Nothing about a bKash number is asked for here —
+ * the phone reports which SIMs it can see once it has paired, and the number is
+ * chosen from those rather than typed.
+ */
+export async function pairPhoneAction(): Promise<DeviceActionResult> {
+  const { user: admin, business } = await requireWriteAccess()
+
+  try {
+    const { qrDataUrl, payload } = await createPhoneProvisioning({
+      businessId: business.id,
+      actorId: admin.id,
+    })
+    return {
+      ok: true,
+      message: 'Scan this from the Jomma app on that phone.',
+      secret: {
+        kind: 'qr',
+        dataUrl: qrDataUrl,
+        expiresAt: payload.expires_at,
+        // Same caveat as the per-account code: without a published signing
+        // fingerprint a camera-app scan opens a browser instead of the app,
+        // silently, so the panel showing the QR has to say so.
+        appLinksReady: appLinksConfigured(),
+      },
+    }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not create it.' }
+  }
+}
+
+/** The SIMs a paired phone last reported, with the unusable ones explained. */
+export async function listSimsAction(deviceId: string): Promise<{
+  ok: boolean
+  message: string
+  sims: SimOption[]
+}> {
+  const { business } = await requireWriteAccess()
+
+  const found = await listSimOptions({ businessId: business.id, deviceId })
+  if (!found) return { ok: false, message: 'That phone is not paired here.', sims: [] }
+
+  return {
+    ok: true,
+    message:
+      found.sims.length === 0
+        ? 'This phone has not reported any SIMs. Open the app and allow the phone permission.'
+        : `${found.sims.length} SIM${found.sims.length === 1 ? '' : 's'} in ${found.deviceName}.`,
+    sims: found.sims,
+  }
+}
+
+/** Turns a chosen SIM into a number this business watches. */
+export async function addAccountFromSimAction(
+  deviceId: string,
+  subscriptionId: number,
+  provider: 'bkash' | 'nagad',
+): Promise<DeviceActionResult> {
+  const { user: admin, business } = await requireWriteAccess()
+
+  try {
+    const added = await addAccountFromSim({
+      businessId: business.id,
+      deviceId,
+      subscriptionId,
+      provider,
+      actorId: admin.id,
+    })
+    revalidatePath('/accounts')
+    return { ok: true, message: `${added.msisdn} added. The phone will pick it up shortly.` }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not add it.' }
+  }
 }
 
 export async function addAccountAction(

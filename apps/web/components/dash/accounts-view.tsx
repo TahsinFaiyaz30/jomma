@@ -1,13 +1,16 @@
 'use client'
 
 import type { CaptureSettings } from '@jomma/shared'
-import { useId, useState, useTransition } from 'react'
+import { useCallback, useEffect, useId, useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import {
   acknowledgeAlertAction,
-  addAccountAction,
+  addAccountFromSimAction,
   addDeviceAction,
   approveDeviceAction,
+  type DeviceActionResult,
+  listSimsAction,
+  pairPhoneAction,
   renameDeviceAction,
   revokeDeviceAction,
   rotateTokenAction,
@@ -16,13 +19,13 @@ import {
 } from '@/app/(dash)/accounts/actions'
 import { StatusDot } from '@/components/status'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { formatMsisdn } from '@/lib/i18n/format'
 import { useI18n } from '@/lib/i18n/provider'
 import type { DeviceRow } from '@/lib/services/devices'
+import type { SimOption } from '@/lib/services/sim-accounts'
 import { UTILIZATION_STOP, UTILIZATION_WARN } from '@/lib/thresholds'
 import { cn } from '@/lib/utils'
 
@@ -56,10 +59,23 @@ export interface AccountView {
   }>
 }
 
-export function AccountsView({ accounts }: { accounts: AccountView[] }) {
+/** A phone paired to this business, as the picker needs it. */
+export interface PairedPhoneView {
+  id: string
+  name: string
+  simCount: number
+}
+
+export function AccountsView({
+  accounts,
+  phones,
+}: {
+  accounts: AccountView[]
+  phones: PairedPhoneView[]
+}) {
   return (
     <div className="min-h-0 flex-1 space-y-6 overflow-auto p-6">
-      <NewAccount firstOne={accounts.length === 0} />
+      <NewAccount firstOne={accounts.length === 0} phones={phones} />
       {accounts.map((account) => (
         <AccountCard key={account.id} account={account} />
       ))}
@@ -68,28 +84,54 @@ export function AccountsView({ accounts }: { accounts: AccountView[] }) {
 }
 
 /**
- * Adding a number for Jomma to watch.
+ * Adding a number by choosing the SIM it lives on.
  *
- * Created disabled, and the copy says so. An active account is immediately
- * eligible for checkout routing, so enabling one before a phone is watching it
- * would send a buyer to a number nobody can see pay into.
+ * There is no number field, and that is the point. Somebody used to type a
+ * bKash number here and then, on a different screen, tell the app which SIM it
+ * belonged to — two facts entered by hand with nothing checking they agreed.
+ * When they disagreed, messages routed to the wrong account or to none, and the
+ * only symptom was payments quietly not arriving.
+ *
+ * So: pair a phone, and pick from what it can see.
  */
-function NewAccount({ firstOne }: { firstOne: boolean }) {
+function NewAccount({ firstOne, phones }: { firstOne: boolean; phones: PairedPhoneView[] }) {
   const [pending, startTransition] = useTransition()
   const [provider, setProvider] = useState<'bkash' | 'nagad'>('bkash')
-  const [msisdn, setMsisdn] = useState('')
-  const [label, setLabel] = useState('')
+  const [deviceId, setDeviceId] = useState(phones[0]?.id ?? '')
+  const [sims, setSims] = useState<SimOption[]>([])
+  const [note, setNote] = useState<string | null>(null)
+  const [qr, setQr] = useState<DeviceActionResult['secret'] | null>(null)
 
-  const digits = msisdn.replace(/\D/g, '')
-  const valid = /^(880)?1[3-9]\d{8}$/.test(digits.startsWith('0') ? digits.slice(1) : digits)
-
-  const submit = () =>
+  const loadSims = useCallback((id: string) => {
+    if (!id) return
     startTransition(async () => {
-      const result = await addAccountAction(provider, msisdn, label)
+      const result = await listSimsAction(id)
+      setSims(result.sims)
+      setNote(result.message)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (deviceId) loadSims(deviceId)
+  }, [deviceId, loadSims])
+
+  const pair = () =>
+    startTransition(async () => {
+      const result = await pairPhoneAction()
       if (result.ok) {
-        setMsisdn('')
-        setLabel('')
+        setQr(result.secret ?? null)
         toast.success(result.message)
+      } else {
+        toast.error(result.message)
+      }
+    })
+
+  const use = (subscriptionId: number) =>
+    startTransition(async () => {
+      const result = await addAccountFromSimAction(deviceId, subscriptionId, provider)
+      if (result.ok) {
+        toast.success(result.message)
+        loadSims(deviceId)
       } else {
         toast.error(result.message)
       }
@@ -101,60 +143,102 @@ function NewAccount({ firstOne }: { firstOne: boolean }) {
         {firstOne ? 'Add your first receiving account' : 'New receiving account'}
       </h2>
       <p className="mt-1 max-w-prose text-micro text-muted-foreground">
-        The number buyers send money to. It is added <strong>disabled</strong> — provision a phone
-        for it below, then enable it, so checkout never routes a buyer to a number nobody is
-        watching.
+        Pick the SIM the money arrives on — the number is read from it, so there is nothing to type.
+        It is added <strong>disabled</strong>, so checkout never routes a buyer to a number nobody
+        is watching yet.
       </p>
 
-      <div className="flex flex-wrap items-center gap-2 pt-3">
-        <select
-          value={provider}
-          onChange={(event) => setProvider(event.target.value as 'bkash' | 'nagad')}
-          className="h-7 rounded-md border border-border bg-background px-2 text-small"
-          aria-label="Provider"
-        >
-          <option value="bkash">bKash</option>
-          {/* Selectable so an account can be recorded ahead of the parser, but
-              checkout will not route to it until lib/parsers/nagad.ts is real. */}
-          <option value="nagad">Nagad (no parser yet)</option>
-        </select>
+      {phones.length === 0 ? (
+        <div className="pt-3">
+          <p className="text-small text-muted-foreground">
+            No phone is connected yet. Pair one and it will report the SIMs in it.
+          </p>
+          <Button size="sm" variant="outline" className="mt-2" disabled={pending} onClick={pair}>
+            {pending ? <Spinner /> : null}
+            Pair a phone
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2 pt-3">
+            <select
+              value={deviceId}
+              onChange={(event) => setDeviceId(event.target.value)}
+              className="h-7 rounded-md border border-border bg-background px-2 text-small"
+              aria-label="Phone"
+            >
+              {phones.map((phone) => (
+                <option key={phone.id} value={phone.id}>
+                  {phone.name}
+                  {phone.simCount === 0 ? ' — no SIMs reported' : ` — ${phone.simCount} SIM(s)`}
+                </option>
+              ))}
+            </select>
 
-        <Input
-          value={msisdn}
-          onChange={(event) => setMsisdn(event.target.value)}
-          placeholder="01712345678"
-          aria-label="Receiving number"
-          aria-invalid={msisdn.length > 0 && !valid}
-          className="figure h-7 max-w-44 text-small"
-        />
+            <select
+              value={provider}
+              onChange={(event) => setProvider(event.target.value as 'bkash' | 'nagad')}
+              className="h-7 rounded-md border border-border bg-background px-2 text-small"
+              aria-label="Provider"
+            >
+              <option value="bkash">bKash</option>
+              {/* Recordable ahead of the parser; checkout will not route to it
+                  until lib/parsers/nagad.ts is real. */}
+              <option value="nagad">Nagad (no parser yet)</option>
+            </select>
 
-        <Input
-          value={label}
-          onChange={(event) => setLabel(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && valid && label.trim()) submit()
-          }}
-          placeholder="Shop bKash"
-          aria-label="Label"
-          className="h-7 max-w-48 text-small"
-        />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => loadSims(deviceId)}
+            >
+              {pending ? <Spinner /> : null}
+              Refresh SIMs
+            </Button>
 
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={pending || !valid || !label.trim()}
-          onClick={submit}
-        >
-          {pending ? <Spinner /> : null}
-          Add account
-        </Button>
-      </div>
+            <Button size="sm" variant="ghost" disabled={pending} onClick={pair}>
+              Pair another phone
+            </Button>
 
-      {msisdn.length > 0 && !valid ? (
-        <p className="pt-2 text-micro text-muted-foreground">
-          Eleven digits starting 01, or the same number written 8801…
-        </p>
-      ) : null}
+            {note ? <span className="text-micro text-muted-foreground">{note}</span> : null}
+          </div>
+
+          <div className="space-y-2 pt-3">
+            {sims.map((sim) => (
+              <div
+                key={sim.subscription_id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-small">
+                    <span className="font-medium">SIM {sim.slot_index + 1}</span>
+                    {sim.carrier_name ? ` · ${sim.carrier_name}` : ''}
+                    <span className="text-muted-foreground"> · {sim.network_generation}</span>
+                  </p>
+                  <p className="figure text-micro text-muted-foreground">
+                    {sim.msisdn ?? 'Number not available from this SIM'}
+                    {sim.number_source ? ` · from ${sim.number_source}` : ''}
+                  </p>
+                  {sim.blockedReason ? (
+                    <p className="mt-0.5 text-micro text-muted-foreground">{sim.blockedReason}</p>
+                  ) : null}
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pending || sim.blockedReason !== null}
+                  onClick={() => use(sim.subscription_id)}
+                >
+                  Use this SIM
+                </Button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {qr ? <RevealPanel reveal={qr} onDismiss={() => setQr(null)} /> : null}
     </div>
   )
 }
