@@ -104,6 +104,19 @@ jobs:
       # for a container that lives and dies with this job — nothing here is a
       # credential for anything, and the run fails without them because
       # `packages/shared/src/env.ts` validates on import.
+      #
+      # Three files read rows the seed creates — `device-commands`,
+      # `statement-import` and `submission-account-scope` all say "run pnpm
+      # db:seed first" and mean it. Migrating alone passed on a developer
+      # machine, where the database had been seeded weeks ago, and failed on the
+      # first empty one CI ever gave it.
+      #
+      # The server is started because `cross-tenant-http` and `pairing-flow` are
+      # the two files that talk HTTP, and they skip when nothing is listening —
+      # so without it the suite went green while the checks that prove a route
+      # scopes to its own tenant never ran at all. `next dev` rather than a
+      # production build: these want the routes to answer, not to be fast, and a
+      # build would add minutes to every push.
       - name: Integration tests
         env:
           DATABASE_URL: postgres://jomma:jomma@localhost:5433/jomma
@@ -111,7 +124,25 @@ jobs:
           AUTH_SECRET: ci_only_0000000000000000000000000000000000000000000000000000000000
           WEBHOOK_SIGNING_SECRET: ci_only_1111111111111111111111111111111111111111111111111111
         run: |
+          set -euo pipefail
           pnpm db:migrate
+          pnpm db:seed
+
+          pnpm dev > /tmp/jomma-dev.log 2>&1 &
+
+          # Explicitly, rather than letting the tests skip. A server that never
+          # came up would otherwise be reported as a pass, which is the failure
+          # this whole step exists to stop.
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:3000/api/health > /dev/null && break
+            sleep 2
+          done
+          if ! curl -sf http://localhost:3000/api/health > /dev/null; then
+            echo "::error::dev server never became healthy; the HTTP tests would have skipped"
+            tail -50 /tmp/jomma-dev.log
+            exit 1
+          fi
+
           pnpm test:integration
 
   android:
