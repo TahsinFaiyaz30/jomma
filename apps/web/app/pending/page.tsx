@@ -19,10 +19,24 @@ import { requireBusiness } from '@/lib/auth/tenancy'
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Awaiting approval' }
 
+/**
+ * Two bodies for the two states that carry a reason.
+ *
+ * `reviewBusiness` insists on one, so through the dashboard there is always
+ * something to point at. Nothing else guarantees it — a suspension applied by a
+ * platform operator straight against the database, or by whatever tool comes
+ * next, arrives with `statusReason` null — and the reason block below is
+ * conditional while this sentence was not. That left the one screen whose whole
+ * job is explaining why a merchant is stopped telling them to read something
+ * that is not on it.
+ */
 const COPY = {
   pending: {
     title: 'Waiting for approval',
     body:
+      'Someone is reading your registration. You can add your bKash number, pair a phone and ' +
+      'create an API key in the meantime — everything except receiving real money.',
+    withoutReason:
       'Someone is reading your registration. You can add your bKash number, pair a phone and ' +
       'create an API key in the meantime — everything except receiving real money.',
     tone: 'text-amber-600 dark:text-amber-500',
@@ -30,11 +44,17 @@ const COPY = {
   rejected: {
     title: 'Registration declined',
     body: 'This business cannot take payments. The reason is below.',
+    withoutReason:
+      'This business cannot take payments. No reason was recorded — ask whoever administers ' +
+      'this instance.',
     tone: 'text-red-600 dark:text-red-500',
   },
   suspended: {
     title: 'Suspended',
     body: 'Payments to this business are stopped. The reason is below.',
+    withoutReason:
+      'Payments to this business are stopped. No reason was recorded — ask whoever administers ' +
+      'this instance.',
     tone: 'text-red-600 dark:text-red-500',
   },
 } as const
@@ -52,7 +72,9 @@ export default async function PendingPage() {
       <div className="space-y-2">
         <p className={`font-medium text-sm ${copy.tone}`}>{business.name}</p>
         <h1 className="font-semibold text-2xl tracking-tight">{copy.title}</h1>
-        <p className="text-muted-foreground text-sm">{copy.body}</p>
+        <p className="text-muted-foreground text-sm">
+          {business.statusReason ? copy.body : copy.withoutReason}
+        </p>
       </div>
 
       {business.statusReason ? (

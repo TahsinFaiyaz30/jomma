@@ -231,11 +231,20 @@ export async function getIntentFilterOptions(businessId: string) {
     .where(eq(receivingAccounts.businessId, businessId))
     .orderBy(receivingAccounts.label)
 
+  /*
+   * Qualified, because the join brings a second `status` into scope.
+   *
+   * `apps` has one as well as `payment_intents`, so a bare `status` is
+   * ambiguous and Postgres refuses the whole statement with 42702 — which took
+   * the entire intents page down with a 500, not just the counts. Written as
+   * raw SQL the column reference is not something the query builder can check,
+   * so nothing failed until it ran.
+   */
   const [counts] = await db
     .select({
-      open: sql<string>`count(*) filter (where status = 'open')`,
-      matched: sql<string>`count(*) filter (where status = 'matched')`,
-      partial: sql<string>`count(*) filter (where status = 'partial')`,
+      open: sql<string>`count(*) filter (where ${paymentIntents.status} = 'open')`,
+      matched: sql<string>`count(*) filter (where ${paymentIntents.status} = 'matched')`,
+      partial: sql<string>`count(*) filter (where ${paymentIntents.status} = 'partial')`,
       total: sql<string>`count(*)`,
     })
     .from(paymentIntents)

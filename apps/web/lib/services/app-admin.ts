@@ -84,11 +84,22 @@ export async function listApps(businessId: string): Promise<AppView[]> {
         .orderBy(desc(webhookDeliveries.createdAt))
         .limit(50)
 
+      /*
+       * Qualified even though nothing is joined here yet.
+       *
+       * The identical bare `status` in `getIntentFilterOptions` was fine until a
+       * join with `apps` — which has a `status` of its own — brought a second
+       * one into scope, and Postgres refuses an ambiguous reference outright
+       * (42702). That took the whole intents page down, because the count is
+       * awaited alongside the list. Raw SQL is invisible to the query builder
+       * and to `tsc`, so nothing catches it before somebody loads the page. One
+       * join away from the same outage is not a distance worth keeping.
+       */
       const [counts] = await db
         .select({
-          pending: sql<string>`count(*) filter (where status in ('pending','delivering'))`,
-          delivered: sql<string>`count(*) filter (where status = 'delivered')`,
-          failed: sql<string>`count(*) filter (where status = 'failed')`,
+          pending: sql<string>`count(*) filter (where ${webhookDeliveries.status} in ('pending','delivering'))`,
+          delivered: sql<string>`count(*) filter (where ${webhookDeliveries.status} = 'delivered')`,
+          failed: sql<string>`count(*) filter (where ${webhookDeliveries.status} = 'failed')`,
         })
         .from(webhookDeliveries)
         .where(eq(webhookDeliveries.appId, app.id))
