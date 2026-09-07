@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Hind_Siliguri, IBM_Plex_Mono, Instrument_Sans } from 'next/font/google'
+import { headers } from 'next/headers'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import { I18nProvider } from '@/lib/i18n/provider'
@@ -51,6 +52,14 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale()
 
+  /*
+   * Set by `proxy.ts`, one per request. Passed down so next-themes can
+   * stamp it on the flash-guard script it injects — inline script is otherwise
+   * refused by the CSP, and a blocked flash guard means a white flash on every
+   * cold load of a dark dashboard.
+   */
+  const nonce = (await headers()).get('x-nonce') ?? undefined
+
   return (
     <html
       lang={locale}
@@ -61,7 +70,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       className={cn(instrument.variable, plexMono.variable, hindSiliguri.variable)}
     >
       <body className="min-h-svh bg-background font-sans text-foreground antialiased">
-        <ThemeProvider>
+        <ThemeProvider nonce={nonce}>
           <I18nProvider locale={locale}>
             {children}
             <Toaster position="bottom-right" />

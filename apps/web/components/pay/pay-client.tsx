@@ -41,14 +41,32 @@ function taka(poisha: number): string {
   })}`
 }
 
-function useCountdown(expiresAt: string): string {
-  const [left, setLeft] = useState(() => Date.parse(expiresAt) - Date.now())
+/**
+ * Time left, or null until the browser has taken over.
+ *
+ * Null on purpose for the first render. Seeding the state with
+ * `Date.now()` reads naturally and is a hydration mismatch by construction:
+ * the server renders the clock at one instant, the browser re-renders it at
+ * another, and a page held open for a second between the two disagreed —
+ * `48:54` against `48:53`. React answers that by throwing away the
+ * server-rendered subtree and rebuilding it on the client, on the one page in
+ * this product where a buyer is waiting and the server HTML is worth the most.
+ *
+ * Returning null makes both first renders identical, and the effect fills the
+ * real figure in on the same tick it mounts. The caller reserves the space so
+ * nothing moves when it appears.
+ */
+function useCountdown(expiresAt: string): string | null {
+  const [left, setLeft] = useState<number | null>(null)
 
   useEffect(() => {
-    const timer = setInterval(() => setLeft(Date.parse(expiresAt) - Date.now()), 1000)
+    const tick = () => setLeft(Date.parse(expiresAt) - Date.now())
+    tick()
+    const timer = setInterval(tick, 1000)
     return () => clearInterval(timer)
   }, [expiresAt])
 
+  if (left === null) return null
   if (left <= 0) return '0:00'
   const total = Math.floor(left / 1000)
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
@@ -656,7 +674,17 @@ export function PayClient({ initial }: { initial: PayView }) {
 
       <div className="flex items-baseline justify-between gap-3">
         <h1 className="amount font-semibold text-display">{taka(view.shortfallCents)}</h1>
-        <span className="figure text-small text-muted-foreground">{countdown} left</span>
+        {/*
+         * Space held whether or not there is a figure yet, so the amount beside
+         * it does not shift when the first tick lands. `aria-hidden` while it is
+         * empty keeps a screen reader from announcing a bare "left".
+         */}
+        <span
+          className="figure min-w-[4.5rem] text-right text-small text-muted-foreground"
+          aria-hidden={countdown === null}
+        >
+          {countdown === null ? ' ' : `${countdown} left`}
+        </span>
       </div>
 
       {view.status === 'partial' ? <PartialNotice view={view} /> : null}
