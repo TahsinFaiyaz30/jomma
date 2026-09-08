@@ -548,7 +548,7 @@ function StepForm({
             value={fields.appName}
             onChange={(e) => fields.setAppName(e.target.value)}
             placeholder="My Shop"
-            aria-label="Business name"
+            aria-label="App name"
             className="h-8 max-w-56 text-small"
           />
           <Button
@@ -556,7 +556,7 @@ function StepForm({
             disabled={pending || !fields.appName.trim()}
             onClick={() => run(() => setupCreateAppAction(fields.appName))}
           >
-            {busy}Create business
+            {busy}Create app
           </Button>
         </div>
       )

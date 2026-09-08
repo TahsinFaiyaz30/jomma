@@ -209,8 +209,17 @@ export async function getSetupState(businessId: string): Promise<SetupState> {
     },
     {
       id: 'app',
-      title: 'Create your business',
-      blurb: 'One business is one storefront, with its own keys and payments.',
+      /*
+       * An app, called an app.
+       *
+       * This step said "Create your business", which is a different thing that
+       * already exists: the business is the merchant a phone pairs to and whose
+       * name every paired handset displays. Somebody who named an app here and
+       * then looked at their phone saw a name they had never typed, with no
+       * screen anywhere connecting the two.
+       */
+      title: 'Create an app',
+      blurb: 'One app is one storefront, with its own keys and payments.',
       done: app !== null,
       required: true,
       detail: app ? app.name : null,

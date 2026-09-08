@@ -2,6 +2,7 @@ import { ADAPTERS, type IngestAdapterId } from '@jomma/shared'
 import { env } from '@jomma/shared/env'
 import { eq, sql } from 'drizzle-orm'
 import type { Metadata } from 'next'
+import { BusinessName } from '@/components/dash/business-name'
 import { PageHeader } from '@/components/dash/page-header'
 import { LocaleSegmented } from '@/components/locale-toggle'
 import { StatusDot } from '@/components/status'
@@ -55,6 +56,15 @@ export default async function SettingsPage() {
       <PageHeader title="Settings" />
       <div className="min-h-0 flex-1 overflow-auto p-6">
         <div className="max-w-3xl space-y-8">
+          <section className="space-y-2">
+            <h2 className="text-title font-medium">Business</h2>
+            <BusinessName name={business.name} />
+            <p className="text-micro text-muted-foreground">
+              What this merchant is called. Every phone paired to it shows this name, which is how
+              somebody holding one handset for several shops tells them apart.
+            </p>
+          </section>
+
           <section className="space-y-2">
             <h2 className="text-title font-medium">Appearance</h2>
             <div className="flex flex-wrap items-center gap-3">
