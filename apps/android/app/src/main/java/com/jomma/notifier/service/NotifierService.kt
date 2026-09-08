@@ -46,16 +46,37 @@ class NotifierService : LifecycleService() {
                 val queued = runCatching { repository.pendingCount() }.getOrDefault(0)
                 updateNotification(queued)
 
-                // Every live number beats. One being revoked or waiting for
-                // approval leaves the others reporting.
-                for (pairing in prefs.livePairings) {
-                    runCatching { HeartbeatWorker.beat(applicationContext, pairing) }
-                }
+                /*
+                 * The sweep, whose membership is not this loop's to decide.
+                 *
+                 * It used to pick `livePairings`, and that is why a phone had to
+                 * be opened before the dashboard saw its SIMs. The sequence
+                 * everybody actually performs is: scan on the phone, walk to the
+                 * computer, approve. By then the app is in the background, so
+                 * this loop is the only thing still running — and it skipped the
+                 * one pairing that mattered, because a phone waiting for
+                 * approval is not `live`. Nothing beat, so nothing reported its
+                 * SIMs, and the SIM step showed an empty list until somebody
+                 * walked back to the handset and opened the app.
+                 *
+                 * A beat is also how a backgrounded phone learns it was
+                 * approved at all.
+                 */
+                HeartbeatWorker.beatAll(applicationContext)
                 if (queued > 0 && prefs.livePairings.isNotEmpty()) {
                     FlushWorker.enqueueNow(applicationContext)
                 }
 
-                delay(HEARTBEAT_INTERVAL_MS)
+                /*
+                 * Faster while somebody is mid-setup.
+                 *
+                 * Five minutes is right for a phone reporting for duty and much
+                 * too slow for somebody standing between a handset and a
+                 * dashboard waiting for one to notice the other. This is the
+                 * only beat running once the app is backgrounded, so the wait
+                 * for approval and for the SIM list is bounded by it.
+                 */
+                delay(if (prefs.settingUp) SETUP_INTERVAL_MS else HEARTBEAT_INTERVAL_MS)
             }
         }
     }
@@ -79,7 +100,9 @@ class NotifierService : LifecycleService() {
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         val prefs = Prefs.get(applicationContext)
-        if (prefs.livePairings.isNotEmpty()) {
+        // Unrevoked, not live: a phone swiped away while it waits for approval
+        // still has to come back, or it never finds out it was approved.
+        if (prefs.beatingPairings.isNotEmpty()) {
             RestartAlarm.schedule(applicationContext)
             runCatching { start(applicationContext) }
         }
@@ -156,6 +179,16 @@ class NotifierService : LifecycleService() {
         private const val CHANNEL_ID = "jomma_notifier"
         private const val NOTIFICATION_ID = 1001
         private const val HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000L
+
+        /**
+         * While a phone is waiting for approval, or approved with no wallet yet.
+         *
+         * Ten seconds, and it is not a poll that runs forever: `Prefs.settingUp`
+         * is false the moment the phone has a wallet, so this is the couple of
+         * minutes somebody spends between a handset and a dashboard and nothing
+         * more. The request is a few hundred bytes.
+         */
+        private const val SETUP_INTERVAL_MS = 10 * 1000L
 
         @Volatile
         var isRunning: Boolean = false

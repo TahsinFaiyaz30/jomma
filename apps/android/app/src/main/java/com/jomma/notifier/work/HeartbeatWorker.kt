@@ -38,36 +38,42 @@ import java.util.concurrent.TimeUnit
 class HeartbeatWorker(context: Context, params: WorkerParameters) :
     CoroutineWorker(context, params) {
 
-    override suspend fun doWork(): Result {
-        val prefs = Prefs.get(applicationContext)
-        /*
-         * Everything unrevoked, including what is still waiting for approval.
-         *
-         * This filtered on `livePairings` and deadlocked: a phone that had
-         * scanned had no live pairing, so the worker returned here without
-         * sending anything — and [beat] is the only thing that clears
-         * `awaitingApproval`. The phone waited forever while the dashboard
-         * showed it connected, and no button on either screen could resolve it.
-         */
-        if (prefs.beatingPairings.isEmpty()) return Result.success()
-
-        /*
-         * Every number beats, and one failing does not stop the rest. A silent
-         * device raises a critical alert on the server, so skipping the others
-         * because the first was offline would report two numbers as dead when
-         * only one is.
-         */
-        var retry = false
-        for (pairing in prefs.beatingPairings) {
-            val outcome = beat(applicationContext, pairing)
-            if (outcome is JommaApi.Result.Failed && outcome.retryable) retry = true
-        }
-
-        return if (retry) Result.retry() else Result.success()
-    }
+    override suspend fun doWork(): Result =
+        if (beatAll(applicationContext)) Result.retry() else Result.success()
 
     companion object {
         const val PERIODIC_NAME = "jomma-heartbeat"
+
+        /**
+         * Beats every pairing that should be beaten. The only such decision.
+         *
+         * There are four callers — this worker, the foreground service, the
+         * service's watchdog path and the screen — and each used to pick its own
+         * list. Every one of them picked `livePairings`, and every one was
+         * wrong in the same way, because `live` excludes a pairing that is still
+         * waiting for approval and [beat] is the only thing that clears that
+         * flag. So a phone that had scanned never beat from anywhere: it could
+         * not learn it had been approved, and it never reported the SIMs the
+         * dashboard needed in order to offer a number.
+         *
+         * That bug was fixed one call site at a time, twice, and reappeared from
+         * the site nobody had looked at yet. Now no caller chooses: they ask for
+         * a sweep and get the right set by construction.
+         *
+         * Returns whether anything failed in a way worth retrying. One number
+         * failing never stops the rest — a silent device raises a critical alert
+         * on the server, so giving up after the first offline one would report
+         * two numbers as dead when only one is.
+         */
+        suspend fun beatAll(context: Context): Boolean {
+            val prefs = Prefs.get(context)
+            var retry = false
+            for (pairing in prefs.beatingPairings) {
+                val outcome = runCatching { beat(context, pairing) }.getOrNull()
+                if (outcome is JommaApi.Result.Failed && outcome.retryable) retry = true
+            }
+            return retry
+        }
 
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<HeartbeatWorker>(15, TimeUnit.MINUTES)

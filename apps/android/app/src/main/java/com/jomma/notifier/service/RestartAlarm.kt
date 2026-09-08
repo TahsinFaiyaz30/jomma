@@ -88,7 +88,17 @@ object RestartAlarm {
     class Receiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val prefs = Prefs.get(context)
-            if (prefs.livePairings.isNotEmpty() && !NotifierService.isRunning) {
+            /*
+             * Unrevoked, not live.
+             *
+             * A phone that has scanned and is waiting for approval has nothing
+             * live, so this used to decline to restart the service for it — and
+             * that service is the only thing that beats once the app is in the
+             * background, which is where it is while somebody walks to the
+             * dashboard to approve. The recovery declined to recover exactly
+             * the phone that could not make progress without it.
+             */
+            if (prefs.beatingPairings.isNotEmpty() && !NotifierService.isRunning) {
                 Log.i(TAG, "service was not running — restarting it")
                 runCatching { NotifierService.start(context) }
             }

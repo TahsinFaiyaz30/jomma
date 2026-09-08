@@ -463,10 +463,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun heartbeatNow() {
         viewModelScope.launch {
-            // Not `livePairings`. A phone waiting for approval is exactly the
-            // one somebody presses this for, and filtering it out made the
-            // button unable to resolve the only thing it was wanted for.
-            for (pairing in prefs.beatingPairings) HeartbeatWorker.beat(getApplication(), pairing)
+            // Not this caller's list to choose. A phone waiting for approval is
+            // exactly the one somebody presses this for, and the old filter made
+            // the button unable to resolve the only thing it was wanted for.
+            HeartbeatWorker.beatAll(getApplication())
             refresh()
         }
     }
@@ -496,7 +496,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     delay(IDLE_RECHECK_MS)
                     continue
                 }
-                for (pairing in prefs.beatingPairings) HeartbeatWorker.beat(getApplication(), pairing)
+                HeartbeatWorker.beatAll(getApplication())
                 refresh()
                 delay(SETUP_POLL_MS)
             }

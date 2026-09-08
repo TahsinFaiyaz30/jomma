@@ -2,6 +2,7 @@ import { isServiceMode } from '@jomma/shared/env'
 import { redirect } from 'next/navigation'
 import { AppSidebar } from '@/components/dash/app-sidebar'
 import { CommandPalette } from '@/components/dash/command-palette'
+import { LiveRefresh } from '@/components/dash/live-refresh'
 import { NotPayableBanner } from '@/components/dash/not-payable-banner'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { listBusinessesFor, requireBusiness } from '@/lib/auth/tenancy'
@@ -85,6 +86,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {children}
       </SidebarInset>
       <CommandPalette />
+      {/*
+       * In the shell, so every page under it is live rather than each one
+       * having to remember. Most of what this dashboard shows is written by a
+       * phone rather than by the browser reading it, and a page that is quietly
+       * out of date is worse than one that admits it does not know.
+       */}
+      <LiveRefresh />
     </SidebarProvider>
   )
 }
