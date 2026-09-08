@@ -478,6 +478,59 @@ async function main() {
     qrMissing.headers.get('content-type') ?? 'no content-type',
   )
 
+  /* ── Handing the page to a phone ──────────────────────────────────────── */
+
+  section('Handoff')
+
+  /*
+   * The bug this closes: a phone that scanned the plain link opened a page that
+   * had never seen the buyer choose a wallet, and asked them again on the
+   * second device. Decoded rather than trusted, for the same reason as above —
+   * the failure happens in somebody's hand, not on the screen being tested.
+   */
+  const handoff = await fetch(`${BASE}/api/pay/${qrIntent.id}/handoff`, { method: 'POST' })
+  const { token } = await handoff.json()
+
+  check('a token is issued at the instructions', typeof token === 'string', `got ${token}`)
+
+  const carried = await fetch(`${BASE}/api/pay/${qrIntent.id}/qr?h=${encodeURIComponent(token)}`)
+  const carriedPng = PNG.sync.read(Buffer.from(await carried.arrayBuffer()))
+  const carriedCode = jsQR(
+    new Uint8ClampedArray(carriedPng.data),
+    carriedPng.width,
+    carriedPng.height,
+  )
+
+  check(
+    'and the QR carries it, so the scan skips the questions',
+    carriedCode?.data === `${BASE}/pay/${qrIntent.id}?h=${encodeURIComponent(token)}`,
+    `got ${carriedCode?.data}`,
+  )
+
+  const scanned = await fetch(`${BASE}/pay/${qrIntent.id}?h=${encodeURIComponent(token)}`)
+  const scannedHtml = await scanned.text()
+  check(
+    'the scanned page shows the number, not the wallet picker',
+    scannedHtml.includes('Send to') && !scannedHtml.includes('How would you like to pay?'),
+    'the picker came back on the phone',
+  )
+
+  // Going back on the first screen has to reach the second one.
+  await fetch(`${BASE}/api/pay/${qrIntent.id}/handoff`, { method: 'DELETE' })
+
+  const afterBack = await fetch(
+    `${BASE}/api/pay/${qrIntent.id}/status?h=${encodeURIComponent(token)}`,
+  )
+  const afterBackBody = await afterBack.json()
+  check(
+    'and revoking it tells the phone on its next poll',
+    afterBackBody.handoff_valid === false,
+    `got ${afterBackBody.handoff_valid}`,
+  )
+
+  const staleQr = await fetch(`${BASE}/api/pay/${qrIntent.id}/qr?h=${encodeURIComponent(token)}`)
+  check('a photographed code stops resolving', staleQr.status === 409, `got ${staleQr.status}`)
+
   /* ── Locked method ────────────────────────────────────────────────────── */
 
   section('A store that named the method')

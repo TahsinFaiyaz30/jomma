@@ -1,6 +1,8 @@
+import { fromPublicId } from '@jomma/shared'
 import { NextResponse } from 'next/server'
 import { clientIp } from '@/lib/api/handler'
 import { consume } from '@/lib/api/ratelimit'
+import { handoffIsLive } from '@/lib/services/handoff'
 import { getPayView } from '@/lib/services/pay-page'
 import { renderPayQrPng, requestOrigin } from '@/lib/services/qr'
 
@@ -13,6 +15,12 @@ export const dynamic = 'force-dynamic'
  * Public for the same reason the status endpoint is: the buyer is an anonymous
  * visitor holding a link, and this returns a picture of the link they are
  * already holding. It carries nothing the page itself does not.
+ *
+ * `?h=` is the handoff token the page minted before asking for this, and it is
+ * checked rather than interpolated. A stale one means the buyer went back after
+ * this `<img>` was written and the code in it would open a page that refuses to
+ * show a number — so it is a 409 and no image, which surfaces as a QR that
+ * failed to load rather than one that scans into a dead end.
  *
  * Written by hand rather than through `route()`, which serialises its result as
  * JSON. Everything that wrapper is there for still happens here — a rate limit,
@@ -37,7 +45,8 @@ export async function GET(request: Request): Promise<NextResponse> {
     )
   }
 
-  const segments = new URL(request.url).pathname.split('/').filter(Boolean)
+  const url = new URL(request.url)
+  const segments = url.pathname.split('/').filter(Boolean)
   const id = segments[segments.indexOf('pay') + 1] ?? ''
 
   const view = await getPayView(id)
@@ -64,7 +73,22 @@ export async function GET(request: Request): Promise<NextResponse> {
     )
   }
 
-  const png = await renderPayQrPng(view.id, requestOrigin(request))
+  /*
+   * Absent is fine — a plain pay link is still a useful thing to scan, and it
+   * is what a merchant printing this URL by hand would get. Present and wrong
+   * is not: it means the screen that asked for this image has since let go of
+   * the payment.
+   */
+  const handoff = url.searchParams.get('h') ?? ''
+  const uuid = fromPublicId('intent', view.id)
+  if (handoff.length > 0 && !(uuid && (await handoffIsLive(uuid, handoff)))) {
+    return NextResponse.json(
+      { error: { code: 'conflict', message: 'This code is no longer current.' } },
+      { status: 409, headers },
+    )
+  }
+
+  const png = await renderPayQrPng(view.id, requestOrigin(request), handoff || null)
 
   return new NextResponse(png as unknown as BodyInit, {
     status: 200,

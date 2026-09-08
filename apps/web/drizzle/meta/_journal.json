@@ -204,6 +204,13 @@
       "when": 1788874418947,
       "tag": "0028_nice_meltdown",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788891403142,
+      "tag": "0029_faithful_bullseye",
+      "breakpoints": true
     }
   ]
 }

@@ -519,6 +519,11 @@ Public, unauthenticated, polled by that page. Returns only what a buyer needs:
 No order id, no account id, no other payments. The intent id is a uuidv7 in 26
 base32 characters, so it is not guessable, and the endpoint is rate limited by IP.
 
+Add `?h=<token>` and the response also carries `handoff_valid`. That is how a
+phone that scanned the QR finds out that the screen it came from has gone back —
+see the handoff endpoints below. Without the parameter the field is `null`,
+which means "you presented no session", not "your session is dead".
+
 ### `POST /api/pay/:id/submit`
 
 `{ "trx_id": "9F2K1LM8QR" }` — the buyer proving a payment the automatic path
@@ -553,6 +558,29 @@ system. One open request per intent per reason.
 Write-once and only while the intent is open, because the caller holds a link
 rather than a credential. Setting it at intent creation from your server is
 authoritative and skips this entirely.
+
+### `POST /api/pay/:id/handoff` · `DELETE /api/pay/:id/handoff`
+
+Carrying the instructions to the phone that can act on them, and taking them
+back.
+
+The QR on the pay page encodes the page's own URL, so scanning it opens a
+browser that has never seen the buyer choose a wallet — and asks them again, on
+the second device, which is the thing they scanned the code to avoid. `POST`
+mints a token for that URL (`{ "token": "…" }`), and a page opened with a live
+one goes straight to the number, the amount and the reference, with no way back.
+
+`DELETE` is the half that matters more. The buyer can go back on the first
+screen and pick a different wallet, which re-routes the intent to a different
+receiving account — leaving the phone showing a number that is no longer this
+payment's. Revoking clears the token, so `GET /api/pay/:id/qr?h=…` returns 409
+and the phone's next status poll reads `handoff_valid: false` and stops showing
+the details.
+
+`POST` is idempotent: a second call returns the same token rather than
+invalidating a QR that is already on screen. The token is not a credential — it
+grants nothing the pay link does not — and both calls are refused for a merchant
+the platform has suspended.
 
 ### Building your own screen instead
 

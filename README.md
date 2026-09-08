@@ -198,8 +198,9 @@ https://your-jomma.example.com/pay/int_01M1PEP3ZZEEC99NQ5CM1H6W1Q
 
 That page shows the number, the exact amount and the reference; plays an
 animated walkthrough of bKash's Send Money flow with *those values in it*, for
-both the app and `*247#`; offers a QR to carry the page to a phone; and turns
-into a receipt the moment the money is matched. No polling code for you to write.
+both the app and `*247#`; offers a QR that carries the *instructions* to a phone,
+not the questions the buyer already answered on the laptop; and turns into a
+receipt the moment the money is matched. No polling code for you to write.
 
 Prefer your own checkout screen? [Skip the hosted page](#building-your-own-checkout-screen)
 — everything you need is in the response above.

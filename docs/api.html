@@ -254,7 +254,9 @@
       <tr><td><span class="badge post">POST</span> <code>/api/pay/:id/method</code></td><td>The buyer choosing a provider. Refused once money has arrived.</td></tr>
       <tr><td><span class="badge post">POST</span> <code>/api/pay/:id/submit</code></td><td>Manual TrxID verification.</td></tr>
       <tr><td><span class="badge post">POST</span> <code>/api/pay/:id/refund</code></td><td>Records a refund request. Jomma moves no money.</td></tr>
-      <tr><td><span class="badge get">GET</span> <code>/api/pay/:id/qr</code></td><td>A PNG QR of the pay page, for carrying it to a phone.</td></tr>
+      <tr><td><span class="badge get">GET</span> <code>/api/pay/:id/qr</code></td><td>A PNG QR of the pay page, for carrying it to a phone. Pass <code>?h=</code> to encode a live handoff token.</td></tr>
+      <tr><td><span class="badge post">POST</span> <code>/api/pay/:id/handoff</code></td><td>Mints the token the QR carries, so a scan lands on the instructions instead of the wallet question. Idempotent.</td></tr>
+      <tr><td><span class="badge del">DELETE</span> <code>/api/pay/:id/handoff</code></td><td>Revokes it, when the buyer goes back. The QR stops resolving and the scanned phone stops showing the number.</td></tr>
     </tbody>
   </table></div>
   <div class="note"><p>

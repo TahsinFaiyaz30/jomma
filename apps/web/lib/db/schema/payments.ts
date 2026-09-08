@@ -66,6 +66,28 @@ export const paymentIntents = pgTable(
     providerPreference: providerPreferenceEnum('provider_preference').notNull().default('any'),
 
     /**
+     * The code that carries the instructions from one screen to another.
+     *
+     * The pay page's QR encodes this page's own URL, and a phone that scans it
+     * opens a browser that has never seen the buyer answer anything. Without a
+     * token in that URL it starts at the top of the queue and asks the wallet
+     * question again — which is the whole reason somebody scanned it, asked a
+     * second time on a second device.
+     *
+     * So the QR carries this, and a page opened with it goes straight to the
+     * instructions and offers no way back. There is nothing to go back *to*
+     * over there: the answers were given on the other screen, and the phone
+     * changing them would be changing a payment the other screen is still
+     * showing.
+     *
+     * Null until the buyer reaches the instructions, and null again the moment
+     * they leave them. That second half is what makes it a handoff rather than
+     * a shortcut — see `revokeHandoff`. Not a credential: it grants nothing the
+     * link itself does not, and it is compared, never trusted.
+     */
+    handoffToken: text('handoff_token'),
+
+    /**
      * Where the hosted pay page sends the buyer afterwards.
      *
      * This is what lets Jomma sit in front of a storefront it knows nothing

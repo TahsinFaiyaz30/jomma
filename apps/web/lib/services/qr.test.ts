@@ -90,4 +90,30 @@ describe('payPageUrl', () => {
   it('falls back to the configured origin', () => {
     expect(payPageUrl(ID)).toBe(`https://configured.example/pay/${ID}`)
   })
+
+  it('carries the handoff token when there is one', () => {
+    // The whole point of the QR: the phone that scans this lands on the
+    // instructions rather than at the top of the queue.
+    expect(payPageUrl(ID, 'https://pay.merchant.com', 'abc123')).toBe(
+      `https://pay.merchant.com/pay/${ID}?h=abc123`,
+    )
+  })
+
+  it('escapes a token rather than pasting it into the query', () => {
+    // base64url never produces these, but the link is what a stranger's camera
+    // acts on and building it by concatenation is how that stops being true.
+    expect(payPageUrl(ID, 'https://pay.merchant.com', 'a&b=c d')).toBe(
+      `https://pay.merchant.com/pay/${ID}?h=a%26b%3Dc+d`,
+    )
+  })
+
+  it('leaves the link alone when there is no token', () => {
+    // A plain pay link is still a useful thing to scan; it just starts at the
+    // top of the queue, which is right for somebody who has answered nothing.
+    for (const handoff of [undefined, null, '']) {
+      expect(payPageUrl(ID, 'https://pay.merchant.com', handoff)).toBe(
+        `https://pay.merchant.com/pay/${ID}`,
+      )
+    }
+  })
 })

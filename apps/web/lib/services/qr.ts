@@ -31,17 +31,26 @@ import QRCode from 'qrcode'
  *
  * ## What it encodes instead
  *
- * This page's own URL. Which is the useful thing anyway, because the gap it
- * closes is real: a buyer standing at a laptop has bKash on a phone that has
- * none of this on it, and their alternative is copying eleven digits and an
+ * This page's own URL, plus the handoff token that says which screen the code
+ * was printed on. Which is the useful thing anyway, because the gap it closes
+ * is real: a buyer standing at a laptop has bKash on a phone that has none of
+ * this on it, and their alternative is copying eleven digits and an
  * eight-character code across by eye. Scanning moves the whole page — number,
  * amount, reference, Copy buttons and the walkthrough — onto the device that
  * can actually pay.
  *
+ * The token is what makes that a handoff rather than a fresh start. Without it
+ * the phone opens a page that has never seen the buyer choose a wallet and asks
+ * them again, on the second device, which is the thing they scanned the code to
+ * avoid. With it the phone lands on the instructions and cannot navigate away
+ * from them — the answers belong to the screen that asked. See
+ * `lib/services/handoff.ts`.
+ *
  * On a phone it is redundant, so the page does not show it there.
  *
- * Nothing is stored. The URL is derived from the intent id that was already in
- * the request, and the image is rendered per request from that.
+ * The image is still rendered per request and cached nowhere; the only stored
+ * part is the token, which the page that owns the QR minted before asking for
+ * it.
  */
 
 /** Big enough to scan off a laptop screen from arm's length, and no bigger. */
@@ -84,9 +93,22 @@ export function requestOrigin(request: Request): string {
   return `${proto}://${host}`
 }
 
-/** The buyer-facing link for an intent. Absolute, because a QR has no origin. */
-export function payPageUrl(publicId: string, origin: string = env().APP_URL): string {
-  return new URL(`/pay/${publicId}`, origin).toString()
+/**
+ * The buyer-facing link for an intent. Absolute, because a QR has no origin.
+ *
+ * `handoff` is appended when there is one, and omitted when there is not, so
+ * the plain link a merchant might paste into an email keeps working exactly as
+ * it did — it just starts at the top of the queue, which is right for somebody
+ * who has answered nothing yet.
+ */
+export function payPageUrl(
+  publicId: string,
+  origin: string = env().APP_URL,
+  handoff?: string | null,
+): string {
+  const url = new URL(`/pay/${publicId}`, origin)
+  if (handoff) url.searchParams.set('h', handoff)
+  return url.toString()
 }
 
 /**
@@ -99,8 +121,12 @@ export function payPageUrl(publicId: string, origin: string = env().APP_URL): st
  * Error correction stays at M: the payload is short, and the higher levels buy
  * resilience this will never need at the cost of a denser grid.
  */
-export function renderPayQrPng(publicId: string, origin?: string): Promise<Buffer> {
-  return QRCode.toBuffer(payPageUrl(publicId, origin), {
+export function renderPayQrPng(
+  publicId: string,
+  origin?: string,
+  handoff?: string | null,
+): Promise<Buffer> {
+  return QRCode.toBuffer(payPageUrl(publicId, origin, handoff), {
     type: 'png',
     errorCorrectionLevel: 'M',
     margin: 3,
