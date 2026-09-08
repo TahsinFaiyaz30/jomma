@@ -33,7 +33,15 @@ it('the dashboard can reach the switch that lives on the phone', async () => {
   const account = await createReceivingAccount({
     businessId: b!.id,
     provider: 'bkash',
-    msisdn: `8801${randomBytes(4).toString('hex').replace(/\D/g, '').padEnd(9, '7').slice(0, 9)}`,
+    /*
+     * A number the validator actually accepts, built rather than hoped for.
+     *
+     * Stripping letters out of hex leaves whatever digits happen to be there,
+     * and an operator prefix has to be 013–019 — so a run where the first digit
+     * came out 0, 1 or 2 was rejected. It passed locally and failed in CI,
+     * which is the worst way to find out.
+     */
+    msisdn: `88017${randomBytes(8).toString('hex').replace(/\D/g, '').padEnd(8, '4').slice(0, 8)}`,
     label: 'test',
     actorId,
   })
