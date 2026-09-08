@@ -77,6 +77,23 @@ export type Provider = (typeof PROVIDERS)[number]
 
 /** `any` lets an intent be satisfied by whichever healthy account is routed. */
 export const PROVIDER_PREFERENCES = ['bkash', 'nagad', 'any'] as const
+
+/**
+ * Who said the payer would be sending from that number.
+ *
+ * The two used to collapse into one non-null column, and they are not the same
+ * claim. A store collects a delivery phone at checkout; the number money
+ * actually arrives from is the payer's, and routinely a different person —
+ * a husband paying for a wife's order, a shop paying for a customer. Treating
+ * the store's value as settled skipped the question, and a wrong number there
+ * silently costs the matching signal with nothing in either system looking
+ * misconfigured.
+ *
+ * So a store-supplied number is a suggestion to confirm, and only a buyer's own
+ * answer is taken as fact.
+ */
+export const PAYER_MSISDN_SOURCES = ['store', 'buyer'] as const
+export type PayerMsisdnSource = (typeof PAYER_MSISDN_SOURCES)[number]
 export type ProviderPreference = (typeof PROVIDER_PREFERENCES)[number]
 
 export const ACCOUNT_STATUSES = ['active', 'degraded', 'disabled'] as const

@@ -341,6 +341,108 @@ function MethodStep({
 }
 
 /**
+ * Confirming the number the store already gave us.
+ *
+ * The store's value is a suggestion, not a fact — checkout collects a delivery
+ * phone, and the money arrives from whoever is paying. So this asks rather than
+ * assumes, which is one tap for the common case where the guess was right and
+ * the only way the wrong case gets caught at all.
+ *
+ * Shown after the wallet is chosen, because the question is about *that*
+ * wallet's number, and asked masked, because this page is visible to anyone
+ * holding the link.
+ *
+ * "Yes" writes, despite the value already being stored. It is not the number
+ * that changes but who vouched for it, and without recording that, a reload
+ * would put the buyer straight back here — which is the thing this whole flow
+ * is trying not to do to people mid-payment.
+ */
+function ConfirmPayerStep({
+  view,
+  methodLabel,
+  onConfirmed,
+  onUseDifferent,
+}: {
+  view: PayView
+  methodLabel: string
+  onConfirmed: () => void
+  onUseDifferent: () => void
+}) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function confirm() {
+    if (pending) return
+    setPending(true)
+    setError(null)
+
+    try {
+      /*
+       * Blocking, like the typed path, and for the same reason: a dropped
+       * request here would leave the intent looking unanswered and cost the
+       * matching signal, with nobody the wiser.
+       */
+      const response = await fetch(`/api/pay/${view.id}/payer/confirm`, { method: 'POST' })
+      if (!response.ok) {
+        setError('Could not save that. Try again.')
+        return
+      }
+      onConfirmed()
+    } catch {
+      setError('Could not reach us. Check your connection and try again.')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Shell merchant={view.merchantName}>
+      <div className="space-y-6">
+        <div>
+          <h1 className="amount font-semibold text-display">{taka(view.amountCents)}</h1>
+          <p className="mt-2 text-small text-muted-foreground">
+            Will you be sending from this {methodLabel} number? It helps us match your payment
+            faster.
+          </p>
+        </div>
+
+        <p className="figure rounded-xl border border-border bg-muted/40 px-4 py-3 text-title">
+          {view.payerSuggestion}
+        </p>
+
+        {error ? <p className="text-micro text-ambiguous">{error}</p> : null}
+
+        {/*
+          Stacked on a phone, side by side once there is room.
+          
+          Full-width buttons one above the other is the right shape at 360px and
+          a waste of a wide screen — and stacking makes the second option read
+          as an afterthought when both are ordinary answers to the question.
+        */}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={pending}
+            className="flex-1 rounded-xl bg-primary py-3 font-medium text-primary-foreground text-small disabled:opacity-50"
+          >
+            {pending ? 'Saving' : 'Yes, use this'}
+          </button>
+          <button
+            type="button"
+            onClick={onUseDifferent}
+            disabled={pending}
+            className="flex-1 rounded-xl border border-border py-3 font-medium text-small disabled:opacity-50"
+          >
+            Use a different number
+          </button>
+        </div>
+      </div>
+    </Shell>
+  )
+}
+
+/**
  * Required, not optional.
  *
  * The sender's number is worth 60 points to the scorer, so a buyer who gives it
@@ -474,7 +576,45 @@ function PartialNotice({ view }: { view: PayView }) {
 
 /* ── The page ─────────────────────────────────────────────────────────────── */
 
-type Step = 'method' | 'payer' | 'pay'
+type Step = 'method' | 'confirm' | 'payer' | 'pay'
+
+/**
+ * The screens that end the story, before any of the asking begins.
+ *
+ * Gathered into one place because they are one decision — is there still a
+ * payment to walk somebody through — and leaving them as separate early
+ * returns spread that decision through the middle of the component.
+ *
+ * Order matters. The terminal states come first deliberately: a payment that
+ * already completed still shows its receipt and an expired one still says so.
+ * Those are facts about the buyer's money, and a suspension arriving afterwards
+ * does not change them — it only replaces the part that asks for more.
+ */
+function settledView(view: PayView) {
+  if (view.status === 'matched') return <Receipt view={view} />
+  if (view.status === 'expired' || view.status === 'cancelled') return <Closed view={view} />
+  if (!view.acceptingPayments) return <NotAccepting view={view} />
+  return null
+}
+
+/**
+ * Where to go once the wallet is chosen.
+ *
+ * Three cases, and the middle one used to be missing. Nothing on record: ask.
+ * The buyer has already answered, here or on an earlier visit: go straight to
+ * the instructions, because re-asking somebody mid-payment reads as the page
+ * having lost their answer. The store supplied a number: confirm it.
+ *
+ * That last case used to be treated as the second, and it is not the same
+ * claim. A store collects a delivery phone at checkout; the money arrives from
+ * whoever is paying, routinely a different person. Taking the suggestion as
+ * settled skipped the question entirely, and a wrong number there costs the
+ * matching signal with nothing in either system looking misconfigured.
+ */
+function firstAfterMethod(view: PayView): Step {
+  if (view.payerConfirmed) return 'pay'
+  return view.payerSuggestion ? 'confirm' : 'payer'
+}
 
 export function PayClient({ initial }: { initial: PayView }) {
   const [view, setView] = useState(initial)
@@ -505,8 +645,7 @@ export function PayClient({ initial }: { initial: PayView }) {
    */
   const [step, setStep] = useState<Step>(() => {
     if (initial.canSwitchMethod && !initial.methodLocked) return 'method'
-    // Nothing to ask if the store already recorded who is paying.
-    return initial.payerKnown ? 'pay' : 'payer'
+    return firstAfterMethod(initial)
   })
 
   /*
@@ -589,15 +728,8 @@ export function PayClient({ initial }: { initial: PayView }) {
     return () => clearTimeout(timer)
   }, [])
 
-  if (view.status === 'matched') return <Receipt view={view} />
-  if (view.status === 'expired' || view.status === 'cancelled') return <Closed view={view} />
-  /*
-   * After the terminal states, deliberately. A payment that already completed
-   * still shows its receipt and an expired one still says so — those are facts
-   * about the buyer's money, and a suspension arriving afterwards does not
-   * change them. This only replaces the part that asks for money.
-   */
-  if (!view.acceptingPayments) return <NotAccepting view={view} />
+  const settled = settledView(view)
+  if (settled) return settled
 
   if (step === 'method') {
     return (
@@ -609,7 +741,22 @@ export function PayClient({ initial }: { initial: PayView }) {
           setView((current) => ({ ...current, provider }))
           void refresh()
         }}
-        onContinue={() => setStep(view.payerKnown ? 'pay' : 'payer')}
+        onContinue={() => setStep(firstAfterMethod(view))}
+      />
+    )
+  }
+
+  if (step === 'confirm') {
+    return (
+      <ConfirmPayerStep
+        view={view}
+        methodLabel={methods.find((method) => method.selected)?.label ?? ''}
+        onConfirmed={() => {
+          // Confirmed is answered: the page must not ask again on reload.
+          setView((current) => ({ ...current, payerConfirmed: true, payerSuggestion: null }))
+          setStep('pay')
+        }}
+        onUseDifferent={() => setStep('payer')}
       />
     )
   }

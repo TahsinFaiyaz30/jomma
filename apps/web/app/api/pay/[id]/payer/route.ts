@@ -1,5 +1,5 @@
 import { fromPublicId } from '@jomma/shared'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { ApiError } from '@/lib/api/errors'
 import { enforceRateLimit, parseBody, route } from '@/lib/api/handler'
@@ -54,12 +54,25 @@ export const POST = route(async (request, context) => {
 
   const updated = await db
     .update(paymentIntents)
-    .set({ payerMsisdn: body.msisdn })
+    .set({ payerMsisdn: body.msisdn, payerMsisdnSource: 'buyer' })
     .where(
       and(
         eq(paymentIntents.id, uuid),
         eq(paymentIntents.status, 'open'),
-        isNull(paymentIntents.payerMsisdn),
+        /*
+         * Write-once against a *buyer's* answer, not against a store's guess.
+         *
+         * This used to be "payer_msisdn is null", which meant a store that
+         * supplied a delivery phone locked the buyer out of correcting it — and
+         * that number is the one most likely to be wrong, since the person
+         * paying is routinely not the person the order ships to.
+         *
+         * So a suggestion may be overwritten and an answer may not. The worst
+         * anyone else holding the link can do is still to win a race with the
+         * real buyer before they answer, which is the bound the original guard
+         * was defending and is unchanged by this.
+         */
+        or(isNull(paymentIntents.payerMsisdn), eq(paymentIntents.payerMsisdnSource, 'store')),
       ),
     )
     .returning({ id: paymentIntents.id })

@@ -135,6 +135,15 @@ export async function createIntent(options: {
             amountCents: options.input.amount,
             clientReference: options.input.client_reference,
             payerMsisdn: options.input.payer_msisdn ?? null,
+            /*
+             * Recorded as a suggestion, because that is what it is.
+             *
+             * A store collects a delivery phone at checkout; the number money
+             * arrives from belongs to whoever is paying, routinely somebody
+             * else. The pay page confirms it with the buyer rather than acting
+             * on it, and only their answer is stored as 'buyer'.
+             */
+            payerMsisdnSource: options.input.payer_msisdn ? 'store' : null,
             providerPreference: options.input.provider,
             returnUrl: options.input.return_url ?? null,
             cancelUrl: options.input.cancel_url ?? null,

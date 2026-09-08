@@ -10,6 +10,7 @@ import {
   matchConfidenceEnum,
   matchedByEnum,
   parseStatusEnum,
+  payerMsisdnSourceEnum,
   paymentStatusEnum,
   providerEnum,
   providerPreferenceEnum,
@@ -46,6 +47,22 @@ export const paymentIntents = pgTable(
     /** Opaque to Jomma. Handed straight back on the webhook. */
     clientReference: text('client_reference').notNull(),
     payerMsisdn: text('payer_msisdn'),
+
+    /**
+     * Who supplied [payerMsisdn], and therefore how much it is worth.
+     *
+     * Null when nobody has. 'store' is a suggestion — checkout collects a
+     * delivery phone, and the number money arrives from belongs to whoever is
+     * paying, routinely somebody else. 'buyer' is the buyer's own answer,
+     * given on the pay page.
+     *
+     * Kept apart because the pay page has to act differently on each: a
+     * suggestion is confirmed, an answer is trusted. Collapsed into one non-null
+     * column they were indistinguishable, so the page skipped the question
+     * whenever the store had guessed — and a wrong guess quietly cost the
+     * matching signal with nothing anywhere looking misconfigured.
+     */
+    payerMsisdnSource: payerMsisdnSourceEnum('payer_msisdn_source'),
     providerPreference: providerPreferenceEnum('provider_preference').notNull().default('any'),
 
     /**

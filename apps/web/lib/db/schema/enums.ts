@@ -16,6 +16,7 @@ import {
   MEMBERSHIP_ROLES,
   NOTIFIER_EVENT_KINDS,
   PARSE_STATUSES,
+  PAYER_MSISDN_SOURCES,
   PAYMENT_STATUSES,
   PROVIDER_PREFERENCES,
   PROVIDERS,
@@ -36,6 +37,7 @@ import { pgEnum } from 'drizzle-orm/pg-core'
 
 export const providerEnum = pgEnum('provider', PROVIDERS)
 export const providerPreferenceEnum = pgEnum('provider_preference', PROVIDER_PREFERENCES)
+export const payerMsisdnSourceEnum = pgEnum('payer_msisdn_source', PAYER_MSISDN_SOURCES)
 export const accountStatusEnum = pgEnum('account_status', ACCOUNT_STATUSES)
 export const deviceStatusEnum = pgEnum('device_status', DEVICE_STATUSES)
 export const intentStatusEnum = pgEnum('intent_status', INTENT_STATUSES)

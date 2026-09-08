@@ -88,17 +88,30 @@ export interface PayView {
   methodLocked: boolean
 
   /**
-   * Whether the sender's number is already on record.
+   * Whether the *buyer* has told us which number they will send from.
    *
-   * A boolean, never the number itself: this view is public to anyone holding
-   * the link, and the payer's phone number is not theirs to read.
+   * Only their own answer counts. A store-supplied number is a suggestion —
+   * checkout collects a delivery phone, and the money arrives from whoever is
+   * paying, routinely somebody else — so acting on it skipped the question and
+   * a wrong guess silently cost the matching signal.
    *
-   * When it is true the page does not ask, which also settles a disagreement it
-   * would otherwise have no good answer to — the write is once-only, so a buyer
-   * typing a *different* number than the store recorded would have it quietly
-   * discarded and then be flagged as a sender mismatch when they paid.
+   * True here means the page may go straight to the instructions, because
+   * somebody who is actually paying has already answered.
    */
-  payerKnown: boolean
+  payerConfirmed: boolean
+
+  /**
+   * The store's suggestion, masked, or null when there is none.
+   *
+   * Masked rather than whole because this view is public to anyone holding the
+   * link, and the number is not theirs to read. Enough of it survives to answer
+   * "is that you?" — which is all the confirmation needs — and not enough to
+   * be worth harvesting from a forwarded link.
+   *
+   * Absent once the buyer has answered: at that point there is nothing left to
+   * confirm, and the page has no reason to show a number back to them at all.
+   */
+  payerSuggestion: string | null
 
   /**
    * Whether this merchant may still be sent money.
@@ -158,6 +171,20 @@ function deriveStatus(
 }
 
 /**
+ * Enough of a number to recognise, not enough to collect.
+ *
+ * The pay page is public to anyone holding the link, so it shows the store's
+ * suggestion back to the buyer masked: the operator prefix and the last three
+ * digits are plenty to answer "is that you?", and a forwarded link leaks a
+ * shape rather than a phone number.
+ */
+function maskMsisdn(raw: string): string {
+  const local = toLocalMsisdn(raw)
+  if (local.length < 8) return local
+  return `${local.slice(0, 5)}${'•'.repeat(local.length - 8)}${local.slice(-3)}`
+}
+
+/**
  * Whether this intent's merchant may still be sent money, by intent uuid.
  *
  * A narrow lookup for the buyer-facing writes that exist to help somebody pay —
@@ -200,6 +227,7 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
       refCode: paymentRefs.code,
       providerPreference: paymentIntents.providerPreference,
       payerMsisdn: paymentIntents.payerMsisdn,
+      payerMsisdnSource: paymentIntents.payerMsisdnSource,
       provider: receivingAccounts.provider,
       msisdn: receivingAccounts.msisdn,
       merchantName: apps.name,
@@ -256,7 +284,14 @@ export async function getPayView(publicId: string): Promise<PayView | null> {
     canSwitchMethod: accepting && applied.length === 0 && row.status === 'open',
     acceptingPayments: accepting,
     methodLocked: row.providerPreference !== 'any',
-    payerKnown: Boolean(row.payerMsisdn),
+    payerConfirmed: row.payerMsisdnSource === 'buyer',
+    /*
+     * Only worth showing while there is something to confirm. Once the buyer
+     * has answered there is nothing to ask, and the page has no business
+     * echoing a number back at whoever is holding the link.
+     */
+    payerSuggestion:
+      row.payerMsisdnSource === 'store' && row.payerMsisdn ? maskMsisdn(row.payerMsisdn) : null,
     expiresAt: row.expiresAt.toISOString(),
     returnUrl: safeRedirect(row.returnUrl, hosts),
     cancelUrl: safeRedirect(row.cancelUrl, hosts),
