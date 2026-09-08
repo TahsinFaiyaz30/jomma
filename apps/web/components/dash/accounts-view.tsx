@@ -16,6 +16,7 @@ import {
   rotateTokenAction,
   setAccountStatusAction,
   setCaptureSettingsAction,
+  setSendingAction,
 } from '@/app/(dash)/accounts/actions'
 import { StatusDot } from '@/components/status'
 import { Button } from '@/components/ui/button'
@@ -415,6 +416,7 @@ function AccountCard({ account }: { account: AccountView }) {
               onRevoke={() => run(() => revokeDeviceAction(device.id))}
               onApprove={() => run(() => approveDeviceAction(device.id))}
               onRename={(name) => run(() => renameDeviceAction(device.id, name))}
+              onToggleSending={() => run(() => setSendingAction(device.id, !device.sendingEnabled))}
             />
           ))
         )}
@@ -602,6 +604,14 @@ function DeviceDetail({
           {device.battery}%{device.charging ? ' charging' : ''}
         </span>
       ) : null}
+      {device.status === 'active' && !device.sendingEnabled ? (
+        /*
+         * A paused phone beats normally and sends nothing, so from here it was
+         * indistinguishable from a healthy one — a green row, no payments, and
+         * nothing anywhere naming the cause.
+         */
+        <span className="text-ambiguous-subtle-foreground text-micro">paused on the phone</span>
+      ) : null}
       {device.queueDepth ? (
         <span className="text-ambiguous-subtle-foreground text-micro">
           queue {device.queueDepth}
@@ -621,6 +631,7 @@ function DeviceActions({
   onRevoke,
   onApprove,
   onRename,
+  onToggleSending,
 }: {
   device: DeviceRow
   pending: boolean
@@ -628,6 +639,8 @@ function DeviceActions({
   onRevoke: () => void
   onApprove: () => void
   onRename: (name: string) => void
+  /** The same switch the phone has, reached from the other side. */
+  onToggleSending: () => void
 }) {
   if (device.status === 'awaiting_approval') {
     return (
@@ -670,6 +683,11 @@ function DeviceActions({
       <Button size="sm" variant="ghost" disabled={pending} onClick={onRotate}>
         Rotate token
       </Button>
+      {device.status === 'active' ? (
+        <Button size="sm" variant="ghost" disabled={pending} onClick={onToggleSending}>
+          {device.sendingEnabled ? 'Pause' : 'Resume'}
+        </Button>
+      ) : null}
       <Button size="sm" variant="ghost" disabled={pending} onClick={onRevoke}>
         Revoke
       </Button>
@@ -685,6 +703,7 @@ function DeviceRowView({
   onRevoke,
   onApprove,
   onRename,
+  onToggleSending,
 }: {
   device: DeviceRow
   pending: boolean
@@ -693,6 +712,7 @@ function DeviceRowView({
   onRevoke: () => void
   onApprove: () => void
   onRename: (name: string) => void
+  onToggleSending: () => void
 }) {
   const awaiting = device.status === 'awaiting_approval'
 
@@ -722,6 +742,7 @@ function DeviceRowView({
           onRevoke={onRevoke}
           onApprove={onApprove}
           onRename={onRename}
+          onToggleSending={onToggleSending}
         />
       </span>
     </div>

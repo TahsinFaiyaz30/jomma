@@ -499,6 +499,48 @@ async function claimProvisioning(options: {
  * So the old token stays valid until the device actually swaps. If the rotation
  * is because something leaked, revoke instead — that is immediate.
  */
+/**
+ * Turning a phone's reporting on or off from the dashboard.
+ *
+ * The switch belongs on the handset — somebody at the counter decides whether
+ * their phone reports — and that is useless when the handset is not in the
+ * room. A merchant whose phone was paused and then left in a drawer had no way
+ * to resume it, and this screen could only watch a device beating happily and
+ * sending nothing.
+ *
+ * Queued as a command rather than written straight to the column. The phone is
+ * the thing that must actually stop or start capturing; setting the flag here
+ * alone would have the dashboard claim resumed while the handset went on
+ * refusing, which is precisely the disagreement this flag exists to surface.
+ * The phone applies it and the next heartbeat writes the column back, so the
+ * two agree because the phone said so.
+ */
+export async function requestSending(options: {
+  deviceId: string
+  enabled: boolean
+  actorId: string
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(devices)
+      .set({ pendingCommands: [{ type: 'set_sending', enabled: options.enabled }] })
+      .where(and(eq(devices.id, options.deviceId), eq(devices.status, 'active')))
+      .returning({ id: devices.id })
+
+    if (!updated) throw new Error('That device is not active.')
+
+    await audit(tx, {
+      action: 'device.provisioned',
+      actorId: options.actorId,
+      actorType: 'admin',
+      payload: {
+        device_id: options.deviceId,
+        stage: options.enabled ? 'sending_resume_requested' : 'sending_pause_requested',
+      },
+    })
+  })
+}
+
 export async function requestTokenRotation(options: {
   deviceId: string
   actorId: string
@@ -715,6 +757,15 @@ export interface DeviceRow {
   network: string | null
   queueDepth: number | null
   permissions: Record<string, boolean> | null
+  /**
+   * Whether the phone is reporting for this number, as the phone last said.
+   *
+   * A paused device beats normally and sends nothing, which from here looked
+   * exactly like a healthy one — so a merchant whose phone had been switched
+   * off saw a green row and no payments, with nothing anywhere naming the
+   * cause.
+   */
+  sendingEnabled: boolean
   tokenIssuedAt: string | null
   provisioningExpiresAt: string | null
   createdAt: string
@@ -740,6 +791,7 @@ export async function listDevices(receivingAccountId: string): Promise<DeviceRow
     network: row.network,
     queueDepth: row.queueDepth,
     permissions: row.permissions,
+    sendingEnabled: row.sendingEnabled,
     tokenIssuedAt: row.tokenIssuedAt?.toISOString() ?? null,
     provisioningExpiresAt: row.provisioningExpiresAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),

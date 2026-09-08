@@ -57,6 +57,17 @@ class CaptureRepository(context: Context) {
     suspend fun pendingCount(): Int = dao.pendingCount()
 
     /**
+     * Throws away everything queued for one number.
+     *
+     * Pausing promises that nothing is held back to send later, and declining to
+     * flush would not deliver that: the queue would sit there growing, and the
+     * lot would arrive at once when somebody switched the business back on — a
+     * burst of hours-old payments landing in a merchant feed with no
+     * explanation of why they were late.
+     */
+    suspend fun clearFor(deviceId: String): Int = dao.deleteFor(deviceId)
+
+    /**
      * Steps 2 and 3. Sends the entire pending queue in one request, then marks
      * only what the server acknowledged.
      *
@@ -70,7 +81,17 @@ class CaptureRepository(context: Context) {
      * so.
      */
     suspend fun flush(): FlushOutcome {
-        val live = prefs.livePairings
+        /*
+         * `capturing`, not `live`. A paused number sends nothing.
+         *
+         * This swept `livePairings`, which says only that the credential works.
+         * So switching a business off stopped *new* messages being captured for
+         * it and went on delivering whatever was already queued: the switch
+         * promised "nothing is captured for it, and nothing is held" while the
+         * phone quietly emptied its backlog into the dashboard somebody had
+         * just turned off.
+         */
+        val live = prefs.capturingPairings
         if (live.isEmpty()) return FlushOutcome.NotReady
 
         /*

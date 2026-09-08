@@ -20,6 +20,7 @@ import {
   createDeviceWithProvisioning,
   createPhoneProvisioning,
   renameDevice,
+  requestSending,
   requestTokenRotation,
   revokeDevice,
 } from '@/lib/services/devices'
@@ -192,6 +193,37 @@ export async function addDeviceAction(
     }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Could not add device.' }
+  }
+}
+
+/**
+ * Resuming (or pausing) a phone's reporting from here.
+ *
+ * The control exists on the handset and this is the same switch reached from
+ * the other side, for the case the handset is not in the room. It is queued for
+ * the phone rather than written straight to the row: the phone is what actually
+ * captures, so it has to be the thing that agrees.
+ */
+export async function setSendingAction(
+  deviceId: string,
+  enabled: boolean,
+): Promise<DeviceActionResult> {
+  const { user: admin, business } = await requireWriteAccess()
+
+  try {
+    await assertOwnsDevice(business.id, deviceId)
+    await requestSending({ deviceId, enabled, actorId: admin.id })
+    revalidatePath('/accounts')
+    return {
+      ok: true,
+      // Says it is queued rather than done, because it is: the row here only
+      // changes once the phone has actually applied it and said so.
+      message: enabled
+        ? 'Queued. The phone resumes reporting on its next heartbeat.'
+        : 'Queued. The phone stops reporting on its next heartbeat.',
+    }
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Could not change it.' }
   }
 }
 

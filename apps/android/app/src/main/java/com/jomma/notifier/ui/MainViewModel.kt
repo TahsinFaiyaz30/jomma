@@ -562,17 +562,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun sendTestCapture() {
         /*
-         * A live pairing that has a number, not merely a live pairing.
+         * One that is actually capturing — approved, unpaused, with a number.
          *
-         * The account-less business pairing is live — it is approved and it
-         * beats — but the capture endpoint refuses it with "No number is set up
-         * on this phone yet", because there is no account to file a capture
-         * against. Taking the first live pairing meant the test button reported
-         * a failure on a phone where everything worked.
+         * Two separate traps. The account-less business pairing is `live` — it
+         * is approved and it beats — but the capture endpoint refuses it with
+         * "No number is set up on this phone yet", so taking the first live
+         * pairing reported a failure on a phone where everything worked.
+         *
+         * And `live` ignores the pause. A test capture is still a capture: it
+         * lands in a merchant's feed under their credential, so firing one at a
+         * business somebody has switched off is exactly the thing the switch
+         * says will not happen. Nothing is exempt.
          */
-        val pairing = prefs.livePairings.firstOrNull { it.accountMsisdn != null }
+        val pairing = prefs.capturingPairings.firstOrNull()
         if (pairing == null) {
-            _state.value = _state.value.copy(message = "No approved number to test with.")
+            _state.value = _state.value.copy(
+                message = if (prefs.livePairings.any { it.accountMsisdn != null }) {
+                    // Distinguished, because the fix is different: one needs
+                    // approval, the other needs a switch turning back on.
+                    "Reporting is paused. Turn it on for a business to test it."
+                } else {
+                    "No approved number to test with."
+                },
+            )
             return
         }
 
@@ -802,6 +814,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         val app = getApplication<Application>()
         viewModelScope.launch {
+            /*
+             * Held means held, so pausing throws the backlog away.
+             *
+             * The switch promises "nothing is held back to send later", and
+             * merely declining to flush would have made that false in the worst
+             * way: the queue would sit there growing, and everything in it would
+             * arrive at once the moment somebody switched the business back on —
+             * a burst of hours-old payments landing in a merchant's feed with no
+             * explanation.
+             */
+            if (!enabled) {
+                for (pairing in group.pairings) dao.deleteFor(pairing.deviceId)
+            }
+
             for (pairing in prefs.business(key)?.pairings.orEmpty()) {
                 if (pairing.live) HeartbeatWorker.beat(app, pairing)
             }

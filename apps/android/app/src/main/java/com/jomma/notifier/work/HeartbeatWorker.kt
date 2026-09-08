@@ -245,6 +245,26 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                             }
                         }
 
+                        /*
+                         * The dashboard reaching the switch that lives here.
+                         *
+                         * Somebody whose phone is paused and in a drawer has no
+                         * other way to resume it. Applied on the handset rather
+                         * than written straight to the server row, because the
+                         * phone is the thing that must actually stop or start
+                         * capturing — setting the column alone would have the
+                         * dashboard say resumed while this went on refusing.
+                         *
+                         * The next beat carries the new value back, so the two
+                         * agree without a second round trip.
+                         */
+                        "set_sending" -> command.enabled?.let { on ->
+                            prefs.updatePairing(pairing.deviceId) { it.copy(sendingEnabled = on) }
+                            // Paused means nothing is held, here as much as when
+                            // the switch is thrown on the phone itself.
+                            if (!on) repository.clearFor(pairing.deviceId)
+                        }
+
                         // Scoped to this number. The old app-wide flag stopped
                         // every number on the phone.
                         "stop" ->

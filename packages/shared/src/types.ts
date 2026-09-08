@@ -251,6 +251,21 @@ export const DEVICE_COMMANDS = [
    * instead of inventing a second way to hand out a device token.
    */
   'add_account',
+  /**
+   * Turn reporting for this phone back on, or off, from the dashboard.
+   *
+   * The switch lives on the handset, which is right — somebody at the counter
+   * decides whether their phone reports — and useless when the handset is not
+   * in the room. A merchant whose phone was paused and then left in a drawer
+   * had no way to resume it, and the dashboard could only watch a device that
+   * beat happily and sent nothing.
+   *
+   * Queued rather than written straight to the row, because the phone is the
+   * one that must actually stop capturing. Setting the column alone would make
+   * the dashboard say resumed while the handset went on refusing, which is the
+   * disagreement this whole flag exists to prevent.
+   */
+  'set_sending',
 ] as const
 export type DeviceCommandType = (typeof DEVICE_COMMANDS)[number]
 
@@ -260,6 +275,7 @@ export type DeviceCommand =
   | { type: 'rotate_token' }
   | { type: 'stop' }
   | { type: 'add_account'; pair_url: string; msisdn: string; provider: string }
+  | { type: 'set_sending'; enabled: boolean }
 
 /**
  * A SIM in a paired phone, as the phone reports it.

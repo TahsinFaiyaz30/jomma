@@ -57,6 +57,16 @@ class Prefs internal constructor(private val prefs: SharedPreferences) {
     val livePairings: List<Pairing> get() = pairings.filter { it.live }
 
     /**
+     * The ones that should be sending — approved, not revoked, not paused, and
+     * with a number to send for.
+     *
+     * What anything carrying a capture wants, and what [livePairings] is not:
+     * `live` says only that the credential works, so using it to decide what to
+     * upload delivered messages for a business somebody had switched off.
+     */
+    val capturingPairings: List<Pairing> get() = pairings.filter { it.capturing }
+
+    /**
      * The ones whose credential is still worth spending — approved, or still
      * waiting to be.
      *

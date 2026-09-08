@@ -94,6 +94,15 @@ data class DeviceCommand(
     val since: String? = null,
 
     /**
+     * For set_sending: whether this phone should report for its business.
+     *
+     * The switch belongs on the handset, and is useless when the handset is not
+     * in the room — so the dashboard can set it too. Nullable because every
+     * other command leaves it out.
+     */
+    val enabled: Boolean? = null,
+
+    /**
      * For `add_account`: where to redeem the number that was chosen on the
      * dashboard.
      *

@@ -25,6 +25,20 @@ import { createPhoneProvisioning } from '@/lib/services/devices'
 
 const BASE = process.env.JOMMA_URL ?? 'http://localhost:3000'
 
+/*
+ * One client address per file, so the suite does not throttle itself.
+ *
+ * Pairing is rate limited by IP — it must be, since a phone redeeming a code
+ * has no identity yet — and every test here calls it from the same machine. Run
+ * on their own the files stay under the limit; run together they share one
+ * bucket and the later ones get a 429, which surfaced as "that phone is not
+ * waiting for approval" from a test whose pairing had silently been refused.
+ *
+ * Faking the header is not weakening the check: a real deployment sits behind a
+ * proxy that sets it, and each of these files stands for a different phone.
+ */
+const CLIENT_IP = '10.9.0.106'
+
 let serverUp = false
 let businessId = ''
 let actorId = ''
@@ -84,7 +98,7 @@ beforeAll(async () => {
   const paired = await (
     await fetch(`${BASE}/device/v1/pair`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': CLIENT_IP },
       body: JSON.stringify({
         code: qr.payload.pair_url.split('/pair/')[1],
         device_name: 'Counter',

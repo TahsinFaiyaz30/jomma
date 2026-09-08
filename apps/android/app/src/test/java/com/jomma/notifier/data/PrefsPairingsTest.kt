@@ -397,6 +397,62 @@ class PrefsPairingsTest {
 
         assertTrue(prefs.business("b1")!!.pairings.all { it.sendingEnabled })
     }
+
+    /* ── What may actually be sent ───────────────────────────────────────── */
+
+    @Test
+    fun `a paused merchant is not something to send for`() {
+        /*
+         * The leak. Pausing set the flag and stopped *new* messages being
+         * captured, and the flush went on sweeping `livePairings` — which says
+         * only that the credential works. So a business somebody had switched
+         * off kept receiving whatever was already queued, and a test capture
+         * went to it too, while the switch promised neither would happen.
+         *
+         * Three lists with three meanings, and only one of them answers "what
+         * may be uploaded".
+         */
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(forBusiness("d1", "b1", "8801711111111"))
+        prefs.upsertPairing(forBusiness("d2", "b2", "8801722222222"))
+
+        prefs.setBusinessEnabled("b1", false)
+
+        assertEquals(
+            "only the merchant that is still on",
+            listOf("d2"),
+            prefs.capturingPairings.map { it.deviceId },
+        )
+        // Still live and still beating. The credential works and the dashboard
+        // is told it is paused, which is the entire point of pausing rather
+        // than disconnecting.
+        assertEquals(2, prefs.livePairings.size)
+        assertEquals(2, prefs.beatingPairings.size)
+    }
+
+    @Test
+    fun `a pairing with no number is never something to send for`() {
+        // The account-less business pairing beats and reports SIMs. It has no
+        // account to file a capture against, so the endpoint refuses it — and
+        // the test-capture button used to pick exactly this one.
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(forBusiness("d1", "b1", null))
+
+        assertEquals(emptyList<String>(), prefs.capturingPairings.map { it.deviceId })
+        assertEquals("but it is live, and it beats", 1, prefs.livePairings.size)
+    }
+
+    @Test
+    fun `resuming a merchant makes it sendable again`() {
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(forBusiness("d1", "b1", "8801711111111"))
+
+        prefs.setBusinessEnabled("b1", false)
+        assertTrue(prefs.capturingPairings.isEmpty())
+
+        prefs.setBusinessEnabled("b1", true)
+        assertEquals(listOf("d1"), prefs.capturingPairings.map { it.deviceId })
+    }
 }
 
 /** A thread-safe in-memory stand-in that buffers edits until `apply`, as the real one does. */
