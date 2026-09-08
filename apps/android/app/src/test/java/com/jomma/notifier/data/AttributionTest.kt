@@ -3,7 +3,6 @@ package com.jomma.notifier.data
 import com.jomma.notifier.net.CaptureSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -19,10 +18,14 @@ import org.junit.Test
  */
 class AttributionTest {
 
+    /** Device ids, in order, so each assertion reads as "who got it". */
+    private fun ids(found: List<Pairing>) = found.map { it.deviceId }
+
     private fun pairing(
         id: String,
         msisdn: String,
         provider: String,
+        businessId: String? = null,
         subscriptionId: Int? = null,
         simMsisdn: String? = null,
         revoked: Boolean = false,
@@ -31,6 +34,7 @@ class AttributionTest {
         deviceId = id,
         deviceToken = "jmd_$id",
         serverUrl = "https://pay.example.com",
+        businessId = businessId,
         accountMsisdn = msisdn,
         simMsisdn = simMsisdn,
         provider = provider,
@@ -48,19 +52,19 @@ class AttributionTest {
     @Test
     fun `a notification goes to the pairing for its provider`() {
         val chosen = Attribution.forNotification(listOf(bkash, nagad), "com.bKash.customerapp")
-        assertEquals(bkash.deviceId, chosen?.deviceId)
+        assertEquals(listOf(bkash.deviceId), ids(chosen))
     }
 
     @Test
     fun `nagad notifications are told apart from bkash`() {
         val chosen = Attribution.forNotification(listOf(bkash, nagad), "com.konasl.nagad")
-        assertEquals(nagad.deviceId, chosen?.deviceId)
+        assertEquals(listOf(nagad.deviceId), ids(chosen))
     }
 
     @Test
     fun `an unknown package is refused rather than guessed at`() {
-        assertNull(Attribution.forNotification(listOf(bkash, nagad), "com.whatsapp"))
-        assertNull(Attribution.forNotification(listOf(bkash, nagad), null))
+        assertEquals(emptyList<String>(), ids(Attribution.forNotification(listOf(bkash, nagad), "com.whatsapp")))
+        assertEquals(emptyList<String>(), ids(Attribution.forNotification(listOf(bkash, nagad), null)))
     }
 
     @Test
@@ -69,7 +73,7 @@ class AttributionTest {
         // accounts on one phone there is no honest answer. Refusing beats
         // crediting the wrong merchant.
         val second = pairing("c", "8801700000009", "bkash")
-        assertNull(Attribution.forNotification(listOf(bkash, second), "com.bKash.customerapp"))
+        assertEquals(emptyList<String>(), ids(Attribution.forNotification(listOf(bkash, second), "com.bKash.customerapp")))
     }
 
     @Test
@@ -77,8 +81,8 @@ class AttributionTest {
         val revoked = pairing("a", "8801700000001", "bkash", revoked = true)
         val waiting = pairing("a", "8801700000001", "bkash", awaiting = true)
 
-        assertNull(Attribution.forNotification(listOf(revoked), "com.bKash.customerapp"))
-        assertNull(Attribution.forNotification(listOf(waiting), "com.bKash.customerapp"))
+        assertEquals(emptyList<String>(), ids(Attribution.forNotification(listOf(revoked), "com.bKash.customerapp")))
+        assertEquals(emptyList<String>(), ids(Attribution.forNotification(listOf(waiting), "com.bKash.customerapp")))
     }
 
     /* ── SMS ─────────────────────────────────────────────────────────────── */
@@ -86,18 +90,14 @@ class AttributionTest {
     @Test
     fun `an sms goes by its sender when only one pairing could have it`() {
         val chosen = Attribution.forSms(listOf(bkash, nagad), "bKash", subscriptionId = -1)
-        assertEquals(bkash.deviceId, chosen?.deviceId)
+        assertEquals(listOf(bkash.deviceId), ids(chosen))
     }
 
     @Test
     fun `sender matching survives the decoration operators add`() {
         // Carriers deliver these as "bKash", "BKASH-BD", "16247-bKash" and worse.
         for (sender in listOf("bKash", "BKASH-BD", "16247-bKash", "bkash ")) {
-            assertEquals(
-                "sender $sender",
-                bkash.deviceId,
-                Attribution.forSms(listOf(bkash, nagad), sender, null)?.deviceId,
-            )
+            assertEquals("sender $sender", listOf(bkash.deviceId), ids(Attribution.forSms(listOf(bkash, nagad), sender, null)))
         }
     }
 
@@ -106,22 +106,19 @@ class AttributionTest {
         val first = pairing("a", "8801700000001", "bkash", subscriptionId = 1)
         val second = pairing("c", "8801700000009", "bkash", subscriptionId = 2)
 
-        assertEquals(
-            second.deviceId,
-            Attribution.forSms(listOf(first, second), "bKash", subscriptionId = 2)?.deviceId,
-        )
+        assertEquals(listOf(second.deviceId), ids(Attribution.forSms(listOf(first, second), "bKash", subscriptionId = 2)))
     }
 
     @Test
     fun `two pairings on one provider with no sim recorded are unattributable`() {
         val second = pairing("c", "8801700000009", "bkash")
-        assertNull(Attribution.forSms(listOf(bkash, second), "bKash", subscriptionId = -1))
+        assertEquals(emptyList<String>(), ids(Attribution.forSms(listOf(bkash, second), "bKash", subscriptionId = -1)))
     }
 
     @Test
     fun `an unknown sender is refused`() {
-        assertNull(Attribution.forSms(listOf(bkash, nagad), "DBBL", subscriptionId = -1))
-        assertNull(Attribution.forSms(listOf(bkash, nagad), null, subscriptionId = -1))
+        assertEquals(emptyList<String>(), ids(Attribution.forSms(listOf(bkash, nagad), "DBBL", subscriptionId = -1)))
+        assertEquals(emptyList<String>(), ids(Attribution.forSms(listOf(bkash, nagad), null, subscriptionId = -1)))
     }
 
     /* ── Asking about the SIM ────────────────────────────────────────────── */
@@ -164,7 +161,7 @@ class AttributionTest {
             subscriptionId = 1,
             sims = listOf(sim(1, "8801700000001")),
         )
-        assertEquals("a", found?.deviceId)
+        assertEquals(listOf("a"), ids(found))
     }
 
     @Test
@@ -183,7 +180,7 @@ class AttributionTest {
             subscriptionId = 1,
             sims = listOf(sim(1, "8801799999999")),
         )
-        assertNull(found)
+        assertEquals(emptyList<String>(), ids(found))
     }
 
     @Test
@@ -194,8 +191,8 @@ class AttributionTest {
         val second = pairing("b", "8801700000002", "bkash", subscriptionId = 2, simMsisdn = "8801700000002")
         val sims = listOf(sim(1, "8801700000001"), sim(2, "8801700000002"))
 
-        assertEquals("a", Attribution.forSms(listOf(first, second), "bKash", 1, sims)?.deviceId)
-        assertEquals("b", Attribution.forSms(listOf(first, second), "bKash", 2, sims)?.deviceId)
+        assertEquals(listOf("a"), ids(Attribution.forSms(listOf(first, second), "bKash", 1, sims)))
+        assertEquals(listOf("b"), ids(Attribution.forSms(listOf(first, second), "bKash", 2, sims)))
     }
 
     @Test
@@ -205,7 +202,7 @@ class AttributionTest {
         // has been working for months the moment it is upgraded.
         val bkash = pairing("a", "8801700000001", "bkash", subscriptionId = 1, simMsisdn = "8801700000001")
         val found = Attribution.forSms(listOf(bkash), "bKash", 1, listOf(sim(1, null)))
-        assertEquals("a", found?.deviceId)
+        assertEquals(listOf("a"), ids(found))
     }
 
     @Test
@@ -213,7 +210,7 @@ class AttributionTest {
         // No recorded number means nothing to compare, so nothing to refuse.
         val legacy = pairing("a", "8801700000001", "bkash", subscriptionId = 1)
         val found = Attribution.forSms(listOf(legacy), "bKash", 1, listOf(sim(1, "8801799999999")))
-        assertEquals("a", found?.deviceId)
+        assertEquals(listOf("a"), ids(found))
     }
 
     @Test
@@ -221,6 +218,85 @@ class AttributionTest {
         // Empty means "could not look" -- the permission has not been granted
         // yet -- which must not read as "the SIM is wrong".
         val bkash = pairing("a", "8801700000001", "bkash", subscriptionId = 1, simMsisdn = "8801700000001")
-        assertEquals("a", Attribution.forSms(listOf(bkash), "bKash", 1, emptyList())?.deviceId)
+        assertEquals(listOf("a"), ids(Attribution.forSms(listOf(bkash), "bKash", 1, emptyList())))
+    }
+
+    /* ── One number, several businesses ──────────────────────────────────── */
+
+    @Test
+    fun `a number watched for two businesses reports to both`() {
+        /*
+         * The arrangement this exists for: a shop and its online storefront are
+         * two businesses on the dashboard, paid on one bKash number, helped by
+         * one handset. Two pairings, same number, different merchants.
+         *
+         * The old code asked for `singleOrNull`, so this did not pick a winner —
+         * it dropped the message for *both*, silently, which is the failure this
+         * path is least able to notice. Nothing on either dashboard, no error
+         * anywhere, and a payment that simply never arrived.
+         */
+        val shop = pairing("a", "8801700000001", "bkash", businessId = "b1")
+        val online = pairing("b", "8801700000001", "bkash", businessId = "b2")
+
+        assertEquals(
+            listOf("a", "b"),
+            ids(Attribution.forNotification(listOf(shop, online), "com.bKash.customerapp")),
+        )
+        assertEquals(
+            listOf("a", "b"),
+            ids(Attribution.forSms(listOf(shop, online), "bKash", subscriptionId = -1)),
+        )
+    }
+
+    @Test
+    fun `sharing a sim reports to every business on it`() {
+        // Same, over the SMS path, where the subscription is what matched.
+        val shop = pairing("a", "8801700000001", "bkash", businessId = "b1", subscriptionId = 1)
+        val online = pairing("b", "8801700000001", "bkash", businessId = "b2", subscriptionId = 1)
+
+        assertEquals(
+            listOf("a", "b"),
+            ids(Attribution.forSms(listOf(shop, online), "bKash", 1, listOf(sim(1, "8801700000001")))),
+        )
+    }
+
+    @Test
+    fun `two different numbers are still refused rather than fanned out`() {
+        // The half that must not move. Fanning out is only ever right when the
+        // candidates are the *same* number; two bKash accounts on one phone are
+        // still unattributable from a notification, and sending to both would
+        // put one merchant's payment in the other's feed — the exact thing this
+        // file exists to prevent.
+        val first = pairing("a", "8801700000001", "bkash", businessId = "b1")
+        val second = pairing("b", "8801700000009", "bkash", businessId = "b2")
+
+        assertEquals(
+            emptyList<String>(),
+            ids(Attribution.forNotification(listOf(first, second), "com.bKash.customerapp")),
+        )
+    }
+
+    @Test
+    fun `a business that has been paused gets nothing, and the others still do`() {
+        // Pausing is per business and must not take the sharers down with it.
+        val shop = pairing("a", "8801700000001", "bkash", businessId = "b1")
+        val paused = pairing("b", "8801700000001", "bkash", businessId = "b2")
+            .copy(sendingEnabled = false)
+
+        assertEquals(
+            listOf("a"),
+            ids(Attribution.forNotification(listOf(shop, paused), "com.bKash.customerapp")),
+        )
+    }
+
+    @Test
+    fun `sharing a number is not a reason to ask which sim it is on`() {
+        // The question only makes sense when two *numbers* need telling apart.
+        // Counting pairings asked which SIM a number was on in order to
+        // distinguish it from itself.
+        val shop = pairing("a", "8801700000001", "bkash", businessId = "b1")
+        val online = pairing("b", "8801700000001", "bkash", businessId = "b2")
+
+        assertFalse(Attribution.needsSubscriptionId(listOf(shop, online), shop))
     }
 }

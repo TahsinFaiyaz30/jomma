@@ -87,6 +87,21 @@ class JommaApi(context: Context, private val pairing: Pairing? = null) {
      * stays valid right up until this succeeds, so a failed rotation leaves the
      * device working rather than locked out.
      */
+    /**
+     * Retires this credential on the server, before the phone forgets it.
+     *
+     * Disconnecting a business used to be local only: the pairing was dropped
+     * here and the dashboard went on listing an active device that no longer
+     * existed. The merchant saw a healthy phone until they noticed nothing had
+     * arrived, and the only remedy was for somebody to guess and revoke it.
+     *
+     * A phone is allowed to do this because it is giving something up rather
+     * than taking something — the credential it destroys is the one it
+     * authenticated with.
+     */
+    suspend fun revokeSelf(): Result<Unit> =
+        post("/device/v1/revoke", "{}") { }
+
     suspend fun rotateToken(): Result<RotateResponse> =
         post("/device/v1/rotate", "{}") { body ->
             json.decodeFromString(RotateResponse.serializer(), body)

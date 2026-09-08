@@ -93,6 +93,22 @@ export function SetupWizard({ initial }: { initial: SetupState }) {
     return () => clearInterval(timer)
   }, [openStepId])
 
+  /*
+   * A code that has been used stops being shown.
+   *
+   * A pairing code is single-use, so the QR on screen goes stale the instant
+   * somebody scans it — and it stayed up, inviting a second phone to scan
+   * something that could no longer work and giving no clue why. Watching for
+   * the device it was minted for is exact: no guessing from counts, and a code
+   * nobody has scanned stays up for as long as it is valid.
+   */
+  useEffect(() => {
+    const id = secret?.deviceId
+    if (!id) return
+    const used = [...state.pendingPhones, ...state.connectedPhones].some((p) => p.id === id)
+    if (used) setSecret(null)
+  }, [secret, state.pendingPhones, state.connectedPhones])
+
   const digits = msisdn.replace(/\D/g, '')
   const msisdnValid = /^(880)?1[3-9]\d{8}$/.test(digits.startsWith('0') ? digits.slice(1) : digits)
 

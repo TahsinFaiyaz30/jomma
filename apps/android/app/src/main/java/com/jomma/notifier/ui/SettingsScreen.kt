@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
@@ -63,6 +64,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -102,6 +105,12 @@ fun SettingsScreen(
     /** Keyed by device id: pausing is per number, never for the whole phone. */
     onSendingChange: (String, Boolean) -> Unit,
     onRemovePairing: (String) -> Unit,
+    /** Switches a whole merchant's reporting on or off. Keyed by business. */
+    onBusinessEnabledChange: (String, Boolean) -> Unit,
+    /** Leaves every business at once, telling each of their dashboards. */
+    onDisconnectEverything: () -> Unit,
+    /** Opens one merchant's own page. Does not change which one is showing. */
+    onManageBusiness: (String) -> Unit,
     onIntervalChange: (UpdateInterval) -> Unit,
     onAutoDownloadChange: (Boolean) -> Unit,
     onUnmeteredOnlyChange: (Boolean) -> Unit,
@@ -266,23 +275,94 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(8.dp))
 
+        SectionHeader(
+            when (state.businesses.size) {
+                0 -> "Businesses"
+                1 -> "Business"
+                else -> "Businesses (${state.businesses.size})"
+            },
+        )
+
         SettingsCard {
             ListItem(
                 leadingContent = { Icon(Icons.Outlined.Add, contentDescription = null) },
                 headlineContent = {
-                    Text(if (state.pairings.isEmpty()) "Pair this phone" else "Scan another code")
+                    Text(if (state.pairings.isEmpty()) "Pair this phone" else "Connect another business")
                 },
                 supportingContent = {
-                    // Says what scanning does. It connects the phone; the number
-                    // it watches is chosen afterwards, in the dashboard.
+                    // Says what scanning does. It connects the phone to a
+                    // business; the number it watches is chosen afterwards, in
+                    // that business's dashboard.
                     Text(
-                        "Scan the code from the Jomma dashboard. You choose which SIM it is " +
-                            "paid on there, so there is nothing to fill in here.",
+                        "Scan the code from a Jomma dashboard. One phone can help several " +
+                            "businesses at once, and each keeps its own numbers.",
                     )
                 },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier.clickable(onClick = onScan),
             )
+
+            /*
+             * Every business this phone helps, under the button that adds one.
+             *
+             * All of them report at the same time — the phone holds a separate
+             * credential per business and beats them all — so this is not a list
+             * of one live thing and several dormant ones. The switch is the only
+             * thing that stops a business being watched, and it is a switch
+             * rather than a Remove because the credential survives it: the phone
+             * keeps beating and says it is paused, so the dashboard shows "the
+             * phone has paused this" instead of a handset that went silent.
+             */
+            for (business in state.businesses) {
+                HorizontalDivider()
+                ListItem(
+                    leadingContent = {
+                        Icon(Icons.Outlined.Storefront, contentDescription = null)
+                    },
+                    headlineContent = { Text(business.name) },
+                    supportingContent = {
+                        Text(
+                            when {
+                                business.revoked ->
+                                    "Revoked from its dashboard. Scan a new code for it."
+                                business.awaitingApproval ->
+                                    "Waiting to be approved on its dashboard."
+                                !business.enabled ->
+                                    "Paused. Nothing is captured or held for it."
+                                business.wallets.isEmpty() ->
+                                    "Connected. Choose which SIM it is paid on, in its dashboard."
+                                else -> business.wallets.joinToString(", ") { it.label }
+                            },
+                        )
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = business.enabled,
+                            onCheckedChange = { onBusinessEnabledChange(business.key, it) },
+                            // Named, because a bare switch announces only
+                            // "on" — and this row has a merchant's name, its
+                            // numbers and its state in it, so a screen reader
+                            // landing on the control alone has no idea which
+                            // shop it is about to stop.
+                            modifier = Modifier.semantics {
+                                contentDescription = "Reporting for ${business.name}"
+                            },
+                        )
+                    },
+                    /*
+                     * Opens that merchant's page. It does *not* make it the one
+                     * the status screen is showing.
+                     *
+                     * Looking at a shop's settings is not the same as deciding
+                     * which shop you are watching, and conflating them meant a
+                     * glance at one quietly re-pointed the screen somebody would
+                     * come back to. Switching is the status card's dropdown, and
+                     * only that.
+                     */
+                    modifier = Modifier.clickable { onManageBusiness(business.key) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
 
             /*
              * Disconnecting the whole phone, which is a phone-level act and so
@@ -306,7 +386,7 @@ fun SettingsScreen(
                     leadingContent = { Icon(Icons.Outlined.Delete, contentDescription = null) },
                     headlineContent = { Text("Disconnect this phone") },
                     supportingContent = {
-                        Text("Forgets every wallet and the pairing itself. Revoke it on the dashboard too.")
+                        Text("Leaves every business at once and forgets all of their numbers.")
                     },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     modifier = Modifier.clickable { confirming = true },
@@ -318,19 +398,20 @@ fun SettingsScreen(
                         title = { Text("Disconnect this phone?") },
                         text = {
                             Text(
-                                "It stops capturing for " +
-                                    "${state.pairings.count { it.accountMsisdn != null }} wallet(s) " +
-                                    "and forgets its credentials. Anything not yet sent is lost. " +
-                                    "Revoke it on the dashboard as well, or the server will go on " +
-                                    "listing it until it does.",
+                                "It stops helping ${state.businesses.size} business(es), hands " +
+                                    "every credential back and forgets " +
+                                    "${state.pairings.count { it.accountMsisdn != null }} " +
+                                    "number(s). Each dashboard will show this phone as revoked, " +
+                                    "and anything not yet sent is lost.\n\n" +
+                                    "To leave one business and keep the rest, use Disconnect on " +
+                                    "the Status screen instead.",
                             )
                         },
                         confirmButton = {
                             TextButton(
                                 onClick = {
                                     confirming = false
-                                    // A snapshot: removing walks the same list.
-                                    for (id in state.pairings.map { it.deviceId }) onRemovePairing(id)
+                                    onDisconnectEverything()
                                 },
                             ) { Text("Disconnect") }
                         },

@@ -43,7 +43,19 @@ export interface SetupResult {
   message: string
   state: SetupState
   /** Shown once and never again: an API key, a webhook secret, a QR. */
-  secret?: { label: string; value: string; kind: 'text' | 'qr'; expiresAt?: string }
+  secret?: {
+    label: string
+    value: string
+    kind: 'text' | 'qr'
+    expiresAt?: string
+    /**
+     * Which device row a QR was minted for, so the screen can tell when it has
+     * been used. A code is single-use, and one left on display after a phone
+     * scanned it is an invitation to scan it again and wonder why nothing
+     * happens. Absent for secrets that are not codes.
+     */
+    deviceId?: string
+  }
 }
 
 async function reply(
@@ -91,6 +103,7 @@ export async function setupPairPhoneAction(): Promise<SetupResult> {
       value: qrDataUrl,
       kind: 'qr',
       expiresAt: payload.expires_at,
+      deviceId: payload.device_id,
     })
   } catch (error) {
     return reply(false, error instanceof Error ? error.message : 'Could not create the code.')

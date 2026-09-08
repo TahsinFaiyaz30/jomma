@@ -24,6 +24,25 @@ data class Pairing(
     val deviceToken: String,
     /** Taken from the QR that produced this pairing, so each may differ. */
     val serverUrl: String,
+
+    /**
+     * The merchant this credential reports to.
+     *
+     * The unit everything here is really about. A phone pairs to a *business*
+     * and then supplies it with what only a handset has — notifications, SMS,
+     * the SIMs in the tray. The numbers are the business's, not the phone's.
+     *
+     * The server has always answered with this and the app used to discard it,
+     * so a handset helping two shops could only show a list of numbers with
+     * nothing saying which shop each was for, and no way to act on one shop
+     * without touching the other.
+     *
+     * Null on a pairing made before this was stored. Backfilled on the next
+     * heartbeat, which now carries it too, so an install that upgrades does not
+     * have to be paired again.
+     */
+    val businessId: String? = null,
+    val businessName: String? = null,
     /**
      * The number this pairing watches, or null until one is chosen.
      *
@@ -124,4 +143,86 @@ data class Pairing(
 
     /** What to show when there is no nicer label — the number itself will do. */
     val label: String get() = accountMsisdn ?: "Waiting for a number"
+
+    /**
+     * What to call the merchant on screen.
+     *
+     * Falls back rather than showing an empty row: a pairing from before the
+     * name was stored is still a real pairing, and it will name itself on the
+     * next beat.
+     */
+    val businessLabel: String get() = businessName ?: "This business"
+
+    /**
+     * The key to group by.
+     *
+     * Falls back to the device id so pairings from before the business was
+     * stored each stand alone, rather than collapsing into one group called
+     * null and offering to disable all of them together.
+     */
+    val businessKey: String get() = businessId ?: "device:$deviceId"
+}
+
+/**
+ * One merchant this phone helps, and every credential it holds for them.
+ *
+ * The unit the screens work in. A phone pairs to a business and then supplies
+ * it with what only a handset has — notifications, SMS, the SIMs in the tray —
+ * so "which shop" is the first question every screen has to answer, and the
+ * numbers hang off that answer rather than the other way round.
+ *
+ * Derived from the pairing list on every read, never stored, so it cannot fall
+ * out of step with the credentials it describes.
+ */
+data class BusinessGroup(
+    /** [Pairing.businessKey]. Stable across the pairings that share it. */
+    val key: String,
+    /** Null only for a pairing made before the business was stored. */
+    val id: String?,
+    val name: String,
+    val pairings: List<Pairing>,
+) {
+    /** The numbers being watched for this merchant. */
+    val wallets: List<Pairing> get() = pairings.filter { it.accountMsisdn != null }
+
+    /**
+     * Whether the phone is reporting for this merchant at all.
+     *
+     * True unless *every* pairing has been switched off, so a business is only
+     * "disabled" when nothing is being sent for it. Half-off reads as on, which
+     * is the honest answer: something is still being captured.
+     */
+    val enabled: Boolean get() = pairings.any { it.sendingEnabled }
+
+    /** Waiting on somebody at the dashboard before anything can be captured. */
+    val awaitingApproval: Boolean get() = pairings.all { it.awaitingApproval }
+
+    val revoked: Boolean get() = pairings.all { it.revoked }
+
+    companion object {
+        /**
+         * Groups pairings into the merchants they belong to.
+         *
+         * The single definition, shared by the store and the screens. Holding a
+         * second, stored copy alongside the pairing list meant the two could
+         * disagree — and they did: a screen handed pairings without the matching
+         * group list showed no wallets at all, because the grouping it was
+         * asked for had never been computed.
+         *
+         * Ordered by when the phone first paired to each, so the list does not
+         * reshuffle as numbers are added.
+         */
+        fun from(pairings: List<Pairing>): List<BusinessGroup> = pairings
+            .groupBy { it.businessKey }
+            .map { (key, group) ->
+                BusinessGroup(
+                    key = key,
+                    id = group.firstNotNullOfOrNull { it.businessId },
+                    name = group.firstNotNullOfOrNull { it.businessName }
+                        ?: group.first().businessLabel,
+                    pairings = group,
+                )
+            }
+            .sortedBy { group -> group.pairings.minOf { it.pairedAt } }
+    }
 }

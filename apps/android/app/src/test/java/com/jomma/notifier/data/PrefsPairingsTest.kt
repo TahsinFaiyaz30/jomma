@@ -313,6 +313,90 @@ class PrefsPairingsTest {
         // handset finish, not for a fresh install sitting on the setup card.
         assertTrue(!Prefs(FakePrefs()).settingUp)
     }
+
+    /* ── Businesses ──────────────────────────────────────────────────────── */
+
+    private fun forBusiness(id: String, business: String, msisdn: String?) = Pairing(
+        deviceId = id,
+        deviceToken = "tok_$id",
+        serverUrl = "https://jomma.test",
+        businessId = business,
+        businessName = "Shop $business",
+        accountMsisdn = msisdn,
+        provider = if (msisdn == null) null else "bkash",
+        awaitingApproval = false,
+    )
+
+    @Test
+    fun `pairings gather into the merchants they belong to`() {
+        // The unit every screen works in. A phone pairs to a business and then
+        // supplies it with what only a handset has; the numbers are the
+        // business's, so "which shop" has to be answerable before anything else.
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(forBusiness("d1", "b1", null))
+        prefs.upsertPairing(forBusiness("d2", "b1", "8801711111111"))
+        prefs.upsertPairing(forBusiness("d3", "b2", "8801722222222"))
+
+        val businesses = prefs.businesses
+        assertEquals(2, businesses.size)
+        assertEquals(listOf("Shop b1", "Shop b2"), businesses.map { it.name })
+        // The account-less pairing is the credential the phone beats with. It
+        // belongs to the business but is not one of its wallets.
+        assertEquals(2, businesses.first().pairings.size)
+        assertEquals(listOf("8801711111111"), businesses.first().wallets.map { it.accountMsisdn })
+    }
+
+    @Test
+    fun `a pairing from before the business was stored stands on its own`() {
+        /*
+         * Upgrades. Such a pairing has no business id, and collapsing them all
+         * into one group would offer to disable several unrelated merchants
+         * with a single switch. Each stands alone until a heartbeat names it.
+         */
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(pairing("legacy1"))
+        prefs.upsertPairing(pairing("legacy2"))
+
+        assertEquals(2, prefs.businesses.size)
+    }
+
+    @Test
+    fun `disabling a merchant stops all of its numbers and none of anyone else's`() {
+        // Per business, because that is the decision somebody actually makes: a
+        // shop closes for the season. Doing it a number at a time left a
+        // business half-off whenever one was missed.
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(forBusiness("d1", "b1", null))
+        prefs.upsertPairing(forBusiness("d2", "b1", "8801711111111"))
+        prefs.upsertPairing(forBusiness("d3", "b2", "8801722222222"))
+
+        prefs.setBusinessEnabled("b1", false)
+
+        assertTrue("nothing is sent for it", !prefs.business("b1")!!.enabled)
+        assertTrue("the other is untouched", prefs.business("b2")!!.enabled)
+        /*
+         * And it is not an unpairing. The credentials survive, so the phone
+         * keeps beating for it and every beat carries the flag — which is how
+         * the dashboard shows "the phone has paused this" rather than a handset
+         * that has silently gone quiet. That difference is the whole reason
+         * this is a switch and not a Remove.
+         */
+        assertEquals(2, prefs.business("b1")!!.pairings.size)
+        assertTrue(prefs.business("b1")!!.pairings.none { it.revoked })
+        assertEquals("and it still beats", 3, prefs.beatingPairings.size)
+    }
+
+    @Test
+    fun `re-enabling a merchant turns every one of its numbers back on`() {
+        val prefs = Prefs(FakePrefs())
+        prefs.upsertPairing(forBusiness("d1", "b1", "8801711111111"))
+        prefs.upsertPairing(forBusiness("d2", "b1", "8801733333333"))
+
+        prefs.setBusinessEnabled("b1", false)
+        prefs.setBusinessEnabled("b1", true)
+
+        assertTrue(prefs.business("b1")!!.pairings.all { it.sendingEnabled })
+    }
 }
 
 /** A thread-safe in-memory stand-in that buffers edits until `apply`, as the real one does. */

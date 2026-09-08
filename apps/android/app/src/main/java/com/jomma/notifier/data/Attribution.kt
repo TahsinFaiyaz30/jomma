@@ -59,10 +59,39 @@ object Attribution {
      * the same provider on one phone are therefore watched over SMS, which is
      * why adding one now asks which SIM it is on.
      */
-    fun forNotification(pairings: List<Pairing>, pkg: String?): Pairing? {
-        val provider = providerForPackage(pkg) ?: return null
-        val candidates = pairings.filter { it.capturing && it.provider == provider }
-        return candidates.singleOrNull()
+    fun forNotification(pairings: List<Pairing>, pkg: String?): List<Pairing> {
+        val provider = providerForPackage(pkg) ?: return emptyList()
+        return fanOut(pairings.filter { it.capturing && it.provider == provider })
+    }
+
+    /**
+     * Every pairing a message belongs to, or none.
+     *
+     * The distinction that makes one phone able to serve several shops.
+     *
+     * Two candidates on **different numbers** is the ambiguity this file was
+     * written for: a notification names its provider and nothing else, so with
+     * two bKash accounts on one handset nothing can say which one it is about,
+     * and guessing puts one merchant's payment in another's feed. Refused.
+     *
+     * Two candidates on the **same number** is not ambiguous at all. It is one
+     * number that several businesses are being paid on, which is an ordinary
+     * arrangement — a shop and its online storefront — and the message is
+     * genuinely about all of them. Sending it to one and not the others was not
+     * caution; it was picking a winner. And because the old code asked for
+     * `singleOrNull`, it did not even do that: two businesses sharing a number
+     * meant the message was dropped for both, silently, which is the failure
+     * this is least able to notice.
+     *
+     * Each still goes under its own credential, so the server sees one report
+     * per business and nothing crosses between them.
+     */
+    private fun fanOut(candidates: List<Pairing>): List<Pairing> {
+        if (candidates.isEmpty()) return emptyList()
+        // Null msisdn cannot be compared, so it counts as its own number and a
+        // pairing with no number never shares one with anything.
+        val numbers = candidates.map { it.accountMsisdn }.distinct()
+        return if (numbers.size == 1 && numbers.first() != null) candidates else emptyList()
     }
 
     /**
@@ -88,18 +117,21 @@ object Attribution {
          * app is upgraded before the permission is granted.
          */
         sims: List<SimCard> = emptyList(),
-    ): Pairing? {
+    ): List<Pairing> {
         // `capturing`, not `live`: a business the phone has been switched off
         // for is not a candidate, though its credential still works.
         val live = pairings.filter { it.capturing }
 
         if (subscriptionId != null && subscriptionId >= 0) {
-            val bound = live.firstOrNull { it.subscriptionId == subscriptionId }
-            if (bound != null) return bound.takeIf { stillTheSameSim(it, sims) }
+            // Every pairing bound to that SIM, which is every business being
+            // paid on it. The swap check is per pairing because each recorded
+            // the number it was bound to at the time.
+            val bound = live.filter { it.subscriptionId == subscriptionId }
+            if (bound.isNotEmpty()) return bound.filter { stillTheSameSim(it, sims) }
         }
 
-        val provider = providerForSender(sender) ?: return null
-        return live.filter { it.provider == provider }.singleOrNull()
+        val provider = providerForSender(sender) ?: return emptyList()
+        return fanOut(live.filter { it.provider == provider })
     }
 
     /**
@@ -137,7 +169,20 @@ object Attribution {
         // not been given a number yet is paid on.
         val provider = pairing.provider ?: return false
 
+        /*
+         * Another *number* on the same provider, not merely another pairing.
+         *
+         * One number can be watched for several businesses, which is several
+         * pairings that are alike in every way this cares about. They do not
+         * need telling apart — a message on that number belongs to all of them —
+         * so counting rows here asked which SIM a number was on in order to
+         * distinguish it from itself.
+         */
         return pairing.subscriptionId == null &&
-            pairings.count { it.provider == provider && it.deviceId != pairing.deviceId } > 0
+            pairings.any {
+                it.provider == provider &&
+                    it.deviceId != pairing.deviceId &&
+                    it.accountMsisdn != pairing.accountMsisdn
+            }
     }
 }

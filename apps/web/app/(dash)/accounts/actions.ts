@@ -28,9 +28,16 @@ import { addAccountFromSim, listSimOptions, type SimOption } from '@/lib/service
 export interface DeviceActionResult {
   ok: boolean
   message: string
-  /** Shown once and never again — the QR image, or a rotated token. */
+  /**
+   * Shown once and never again — the QR image, or a rotated token.
+   *
+   * A QR carries `deviceId`: which row the code was minted for, so the screen
+   * can tell when it has been used. A pairing code is single-use, and one left
+   * on display after a phone scanned it invites a second scan of something that
+   * can no longer work — the server refuses it, and the screen said nothing.
+   */
   secret?:
-    | { kind: 'qr'; dataUrl: string; expiresAt: string; appLinksReady: boolean }
+    | { kind: 'qr'; dataUrl: string; expiresAt: string; appLinksReady: boolean; deviceId: string }
     | { kind: 'token'; value: string }
 }
 
@@ -56,6 +63,7 @@ export async function pairPhoneAction(): Promise<DeviceActionResult> {
         kind: 'qr',
         dataUrl: qrDataUrl,
         expiresAt: payload.expires_at,
+        deviceId: payload.device_id,
         // Same caveat as the per-account code: without a published signing
         // fingerprint a camera-app scan opens a browser instead of the app,
         // silently, so the panel showing the QR has to say so.
@@ -169,6 +177,7 @@ export async function addDeviceAction(
         kind: 'qr',
         dataUrl: qrDataUrl,
         expiresAt: payload.expires_at,
+        deviceId: payload.device_id,
         /*
          * Whether this instance publishes a usable signing fingerprint.
          *

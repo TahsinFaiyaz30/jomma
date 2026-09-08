@@ -21,6 +21,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import com.jomma.notifier.data.BusinessGroup
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.outlined.LinkOff
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.outlined.Storefront
 import com.jomma.notifier.data.Attribution
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -37,6 +50,7 @@ import androidx.compose.material.icons.outlined.Monitor
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
@@ -99,19 +113,31 @@ fun JommaScreens(
     destination: Int,
     onDestinationChange: (Int) -> Unit,
     /**
-     * The wallet whose own screen is open, or null for the tabs.
+     * The merchant whose own screen is open, or null for the tabs.
      *
-     * A screen rather than a tab: it belongs to one account, it is reached from
-     * that account's Manage button, and it is left with the back arrow. Held as
-     * a device id so the pairing is re-read from state on every recomposition —
-     * a wallet removed from the dashboard closes the screen rather than leaving
-     * a stale copy of it on display.
+     * Held as a key rather than the group so it is re-read from state on every
+     * recomposition: a business disconnected from anywhere else takes its
+     * screen with it rather than leaving one that edits something gone.
+     */
+    managingBusinessKey: String?,
+    onManageBusiness: (String) -> Unit,
+    onCloseBusiness: () -> Unit,
+    /**
+     * The wallet whose own screen is open, or null.
+     *
+     * One level below a business. Held as a device id so the pairing is re-read
+     * from state on every recomposition — a wallet removed elsewhere closes the
+     * screen rather than leaving a stale copy of it on display.
      */
     managingDeviceId: String?,
     onManage: (String) -> Unit,
     onCloseManage: () -> Unit,
+    onSwitchBusiness: (String) -> Unit,
+    onBusinessEnabledChange: (String, Boolean) -> Unit,
+    onDisconnectBusiness: (String) -> Unit,
+    onDisconnectEverything: () -> Unit,
     onScan: () -> Unit,
-    onAddAccount: (String) -> Unit,
+    onAddAccount: (String, String) -> Unit,
     onPickSim: (Int) -> Unit,
     onCancelAdd: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
@@ -137,6 +163,7 @@ fun JommaScreens(
     // Re-read rather than captured: a wallet that disappears takes its screen
     // with it instead of leaving one that edits something no longer there.
     val managing = managingDeviceId?.let { id -> state.pairings.firstOrNull { it.deviceId == id } }
+    val business = managingBusinessKey?.let { key -> state.businesses.firstOrNull { it.key == key } }
 
     Scaffold(
         topBar = {
@@ -146,6 +173,7 @@ fun JommaScreens(
                         when {
                             managing != null ->
                                 managing.provider?.replaceFirstChar { it.uppercase() } ?: "Wallet"
+                            business != null -> business.name
                             destination == 1 -> "Log"
                             destination == 2 -> "Settings"
                             else -> "Jomma Notifier"
@@ -153,8 +181,11 @@ fun JommaScreens(
                     )
                 },
                 navigationIcon = {
-                    if (managing != null) {
-                        IconButton(onClick = onCloseManage) {
+                    // A wallet closes back to its business; a business closes
+                    // back to the tabs. One level at a time, which is what the
+                    // system gesture does too.
+                    if (managing != null || business != null) {
+                        IconButton(onClick = if (managing != null) onCloseManage else onCloseBusiness) {
                             Icon(
                                 Icons.AutoMirrored.Outlined.ArrowBack,
                                 contentDescription = "Back",
@@ -169,10 +200,10 @@ fun JommaScreens(
             )
         },
         bottomBar = {
-            // Hidden while a wallet is open. The tabs are the top level and this
-            // is below it; showing both invites leaving sideways from a screen
-            // that has a back arrow.
-            if (managing != null) return@Scaffold
+            // Hidden below the top level. The tabs are the top level and both a
+            // business and a wallet sit under it; showing the bar invites
+            // leaving sideways from a screen that has a back arrow.
+            if (managing != null || business != null) return@Scaffold
             NavigationBar {
                 NavigationBarItem(
                     selected = destination == 0,
@@ -214,6 +245,25 @@ fun JommaScreens(
                 return@Box
             }
 
+            if (business != null) {
+                BusinessScreen(
+                    business = business,
+                    state = state,
+                    onEnabledChange = onBusinessEnabledChange,
+                    onDisconnect = { key ->
+                        onDisconnectBusiness(key)
+                        // Nothing left to manage once it is gone.
+                        onCloseBusiness()
+                    },
+                    onAddAccount = onAddAccount,
+                    onPickSim = onPickSim,
+                    onCancelAdd = onCancelAdd,
+                    onManageWallet = onManage,
+                    onScan = onScan,
+                )
+                return@Box
+            }
+
             when (destination) {
                 0 -> StatusScreen(
                     state = state,
@@ -225,6 +275,8 @@ fun JommaScreens(
                     onPickSim = onPickSim,
                     onCancelAdd = onCancelAdd,
                     onManage = onManage,
+                    onSwitchBusiness = onSwitchBusiness,
+                    onManageBusiness = onManageBusiness,
                 )
                 1 -> LogScreen(captures)
                 else -> SettingsScreen(
@@ -238,6 +290,9 @@ fun JommaScreens(
                     onCaptureChange = onCaptureChange,
                     onSendingChange = onSendingChange,
                     onRemovePairing = onRemovePairing,
+                    onBusinessEnabledChange = onBusinessEnabledChange,
+                    onManageBusiness = onManageBusiness,
+                    onDisconnectEverything = onDisconnectEverything,
                     onIntervalChange = onIntervalChange,
                     onAutoDownloadChange = onAutoDownloadChange,
                     onUnmeteredOnlyChange = onUnmeteredOnlyChange,
@@ -265,7 +320,8 @@ fun JommaScreens(
 @Composable
 private fun MfsSection(
     state: UiState,
-    onAddAccount: (String) -> Unit,
+    business: BusinessGroup,
+    onAddAccount: (String, String) -> Unit,
     onPickSim: (Int) -> Unit,
     onCancelAdd: () -> Unit,
     onManage: (String) -> Unit,
@@ -278,7 +334,13 @@ private fun MfsSection(
                 modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
             )
 
-            if (state.pairings.none { it.accountMsisdn != null }) {
+            // This merchant's, and only this merchant's. A phone helping two
+            // shops used to list both shops' numbers in one undifferentiated
+            // column, with each Manage button leading somewhere the row did not
+            // say it would.
+            val wallets = business.wallets
+
+            if (wallets.isEmpty()) {
                 Text(
                     "None yet. Add one below and pick the SIM it is paid on.",
                     style = MaterialTheme.typography.bodySmall,
@@ -287,7 +349,7 @@ private fun MfsSection(
                 )
             }
 
-            for (pairing in state.pairings.filter { it.accountMsisdn != null }) {
+            for (pairing in wallets) {
                 HorizontalDivider()
                 ListItem(
                     leadingContent = { Icon(Icons.Outlined.SimCard, contentDescription = null) },
@@ -321,7 +383,7 @@ private fun MfsSection(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(
-                        onClick = { onAddAccount("bkash") },
+                        onClick = { onAddAccount(business.key, "bkash") },
                         enabled = !state.addBusy,
                         modifier = Modifier.weight(1f),
                     ) { Text("Add bKash") }
@@ -392,10 +454,12 @@ private fun StatusScreen(
     onFlush: () -> Unit,
     onHeartbeat: () -> Unit,
     onTestCapture: () -> Unit,
-    onAddAccount: (String) -> Unit,
+    onAddAccount: (String, String) -> Unit,
     onPickSim: (Int) -> Unit,
     onCancelAdd: () -> Unit,
     onManage: (String) -> Unit,
+    onSwitchBusiness: (String) -> Unit,
+    onManageBusiness: (String) -> Unit,
 ) {
     val status = LocalStatusColors.current
 
@@ -425,6 +489,21 @@ private fun StatusScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        /*
+         * Which shop you are looking at, above everything it says.
+         *
+         * Only when there is more than one. A single-business phone should not
+         * be made to answer a question it does not have, and this is the screen
+         * somebody opens to check one thing.
+         */
+        if (state.provisioned) {
+            BusinessCard(
+                state = state,
+                onSwitch = onSwitchBusiness,
+                onManageBusiness = onManageBusiness,
+            )
+        }
+
         ElevatedCard(
             colors = CardDefaults.elevatedCardColors(containerColor = container),
             modifier = Modifier.fillMaxWidth(),
@@ -484,14 +563,6 @@ private fun StatusScreen(
             }
             return@Column
         }
-
-        MfsSection(
-            state = state,
-            onAddAccount = onAddAccount,
-            onPickSim = onPickSim,
-            onCancelAdd = onCancelAdd,
-            onManage = onManage,
-        )
 
         Card(Modifier.fillMaxWidth()) {
             Column {
@@ -674,3 +745,298 @@ private fun ago(timestamp: Long): String {
 
 private fun clock(timestamp: Long): String =
     SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
+
+/**
+ * Which merchant the screens are showing, and the way into it.
+ *
+ * Deliberately thin. It answers one question — which shop is this — and then
+ * hands over: everything *about* that shop lives behind Manage, one level down,
+ * because the status screen is what somebody opens to check whether money is
+ * arriving and should not become a settings page.
+ *
+ * The distinction this card works hardest at is between *showing* and
+ * *running*. Every enabled business is watched at the same time whatever is
+ * selected here: the phone holds a credential each and beats them all, so
+ * switching changes the view and nothing else. A shop is never left unwatched
+ * because somebody looked at another one, and the card says so out loud rather
+ * than leaving it to be inferred from a control that looks like a power button.
+ */
+@Composable
+private fun BusinessCard(
+    state: UiState,
+    onSwitch: (String) -> Unit,
+    onManageBusiness: (String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val active = state.activeBusiness ?: return
+    val others = state.businesses.size - 1
+
+    Card(Modifier.fillMaxWidth()) {
+        ListItem(
+            leadingContent = { Icon(Icons.Outlined.Storefront, contentDescription = null) },
+            overlineContent = { Text("Showing") },
+            headlineContent = { Text(active.name, fontWeight = FontWeight.SemiBold) },
+            supportingContent = {
+                Text(
+                    when {
+                        !active.enabled -> "Paused — nothing is captured for this one"
+                        others == 0 -> "The only business this phone helps"
+                        others == 1 -> "1 other also being watched"
+                        else -> "$others others also being watched"
+                    },
+                )
+            },
+            trailingContent = {
+                if (state.businesses.size > 1) {
+                    Box {
+                        TextButton(onClick = { open = true }) { Text("Switch") }
+                        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                            for (business in state.businesses) {
+                                DropdownMenuItem(
+                                    text = {
+                                        // Paused ones stay listed: hiding one you
+                                        // switched off is how you forget you did.
+                                        Text(
+                                            if (business.enabled) business.name
+                                            else business.name + " · paused",
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        if (business.key == active.key) {
+                                            Icon(
+                                                Icons.Filled.CheckCircle,
+                                                contentDescription = null,
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        open = false
+                                        onSwitch(business.key)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
+
+        HorizontalDivider()
+        ListItem(
+            leadingContent = { Icon(Icons.Outlined.Tune, contentDescription = null) },
+            headlineContent = { Text("Manage") },
+            supportingContent = {
+                Text(
+                    if (active.wallets.isEmpty()) {
+                        "Its numbers, reporting and connection."
+                    } else if (active.wallets.size == 1) {
+                        "1 number, reporting and connection."
+                    } else {
+                        active.wallets.size.toString() + " numbers, reporting and connection."
+                    },
+                )
+            },
+            trailingContent = {
+                Icon(Icons.AutoMirrored.Outlined.ArrowForward, contentDescription = null)
+            },
+            modifier = Modifier.clickable { onManageBusiness(active.key) },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
+    }
+}
+
+/**
+ * One merchant, and everything this phone does for them.
+ *
+ * The middle of three levels: the status screen says which shop, this says what
+ * the phone is doing for it, and a wallet's own screen says what it keeps for
+ * one number. Splitting them that way is what stopped the status screen turning
+ * into a settings page, and stopped a wallet's rules being edited from a list
+ * that never said which shop the row belonged to.
+ *
+ * Reached and left through [JommaScreens], which owns the back arrow. The
+ * business is re-read from state on every recomposition rather than captured,
+ * so one disconnected from elsewhere takes its screen with it instead of
+ * leaving a page that edits something no longer there.
+ */
+@Composable
+private fun BusinessScreen(
+    business: BusinessGroup,
+    state: UiState,
+    onEnabledChange: (String, Boolean) -> Unit,
+    onDisconnect: (String) -> Unit,
+    onAddAccount: (String, String) -> Unit,
+    onPickSim: (Int) -> Unit,
+    onCancelAdd: () -> Unit,
+    onManageWallet: (String) -> Unit,
+    onScan: () -> Unit,
+) {
+    var confirming by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        /*
+         * What the server thinks of this phone, said before anything else.
+         *
+         * A phone that has scanned and not been approved captures nothing, and
+         * the screen it was most likely to be checked from said only that
+         * reporting was on — technically true, useless, and the reason somebody
+         * would sit watching a dashboard that never filled. Worse for a phone
+         * that was turned away: "declined" and "not approved yet" look identical
+         * from here and want opposite reactions, one being wait and the other
+         * being ask again with a new code.
+         *
+         * So the state is named, and the thing to do about it is next to it.
+         */
+        if (business.awaitingApproval || business.revoked) {
+            Card(Modifier.fillMaxWidth()) {
+                ListItem(
+                    leadingContent = {
+                        Icon(
+                            if (business.revoked) Icons.Filled.Error else Icons.Outlined.Schedule,
+                            contentDescription = null,
+                            tint = if (business.revoked) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    headlineContent = {
+                        Text(
+                            if (business.revoked) "Declined" else "Waiting for approval",
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    },
+                    supportingContent = {
+                        Text(
+                            if (business.revoked) {
+                                // Named as a decision somebody made, not as a
+                                // fault: this phone is working, it was simply
+                                // not the one they meant to let in.
+                                "This phone was turned away on " + business.name + "'s Jomma " +
+                                    "dashboard, so nothing is being captured for it. Ask them " +
+                                    "for a new code and scan it below."
+                            } else {
+                                // Where, precisely. "Approve it on the dashboard"
+                                // is no help to somebody who has never seen one.
+                                "This phone has scanned " + business.name + "'s code and will " +
+                                    "capture nothing until somebody approves it. On their " +
+                                    "Jomma dashboard: Accounts, then Devices, then Approve."
+                            },
+                        )
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+
+                HorizontalDivider()
+                ListItem(
+                    leadingContent = {
+                        Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
+                    },
+                    headlineContent = { Text("Scan a new code") },
+                    supportingContent = {
+                        Text(
+                            // A pairing code is single use and expires, so
+                            // "try again" always means a fresh one — and after
+                            // a decline it is the only way back.
+                            "Codes are used once and expire. Ask for a fresh one and scan it " +
+                                "to connect this phone again.",
+                        )
+                    },
+                    modifier = Modifier.clickable(onClick = onScan),
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+        }
+
+        Card(Modifier.fillMaxWidth()) {
+            ListItem(
+                leadingContent = { Icon(Icons.Outlined.Sms, contentDescription = null) },
+                headlineContent = { Text("Report for this business") },
+                supportingContent = {
+                    Text(
+                        if (business.enabled) {
+                            "Messages for its numbers are captured and sent."
+                        } else {
+                            // The half people get wrong: off means dropped, not
+                            // queued to arrive in a burst when it goes back on.
+                            "Paused. Nothing is captured for it, and nothing is held."
+                        },
+                    )
+                },
+                trailingContent = {
+                    Switch(
+                        checked = business.enabled,
+                        onCheckedChange = { onEnabledChange(business.key, it) },
+                        // Named: a bare switch announces only "on", and this
+                        // screen can be showing any one of several merchants.
+                        modifier = Modifier.semantics {
+                            contentDescription = "Reporting for " + business.name
+                        },
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+        }
+
+        MfsSection(
+            state = state,
+            business = business,
+            onAddAccount = onAddAccount,
+            onPickSim = onPickSim,
+            onCancelAdd = onCancelAdd,
+            onManage = onManageWallet,
+        )
+
+        Card(Modifier.fillMaxWidth()) {
+            ListItem(
+                leadingContent = { Icon(Icons.Outlined.LinkOff, contentDescription = null) },
+                headlineContent = { Text("Disconnect this business") },
+                supportingContent = {
+                    Text("Hands its credentials back and forgets all of its numbers.")
+                },
+                modifier = Modifier.clickable { confirming = true },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+        }
+    }
+
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Disconnect from " + business.name + "?") },
+            text = {
+                Text(
+                    "This phone stops helping it and hands its credentials back" +
+                        // Counted properly. "forgets all 1 of its numbers" is the
+                        // kind of sentence that makes somebody wonder whether the
+                        // rest of the warning can be trusted either.
+                        when (business.wallets.size) {
+                            0 -> "."
+                            1 -> ", forgetting its number."
+                            else -> ", forgetting all " + business.wallets.size + " of its numbers."
+                        } +
+                        " That dashboard will show this phone as revoked, and anything not " +
+                        "yet sent is lost.\n\n" +
+                        "To stop reporting for a while without giving anything up, use the " +
+                        "switch above instead.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirming = false
+                        onDisconnect(business.key)
+                    },
+                ) { Text("Disconnect") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text("Cancel") }
+            },
+        )
+    }
+}

@@ -37,17 +37,24 @@ class NotificationListener : NotificationListenerService() {
              * the only evidence, and it is gone by the time the queue flushes.
              * No confident answer means no capture — see Attribution.
              */
-            val pairing = Attribution.forNotification(
+            // Every business being paid on that number, not one of them. Empty
+            // when nothing here can say which account it is about.
+            val pairings = Attribution.forNotification(
                 Prefs.get(applicationContext).pairings,
                 sbn.packageName,
-            ) ?: return@launch
-
-            val stored = repository.enqueue(
-                pairing = pairing,
-                source = "notification",
-                raw = text,
-                pkg = sbn.packageName,
             )
+            if (pairings.isEmpty()) return@launch
+
+            var stored = false
+            for (pairing in pairings) {
+                val written = repository.enqueue(
+                    pairing = pairing,
+                    source = "notification",
+                    raw = text,
+                    pkg = sbn.packageName,
+                )
+                if (written) stored = true
+            }
             // Flush immediately. The scheduled flush is the backstop, not the
             // primary path — a buyer is watching a pay page right now.
             if (stored) FlushWorker.enqueueNow(applicationContext)

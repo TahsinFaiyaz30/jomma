@@ -161,6 +161,16 @@ export const POST = route(async (request, context) => {
       ok: true,
       commands,
       capture,
+      /*
+       * Which merchant this credential is for, on every beat.
+       *
+       * The pair response has always carried it and the app threw it away, so a
+       * phone helping two shops had no way to say which pairing belonged to
+       * which — it could only list numbers. Sending it here as well as at
+       * pairing means a phone that was already set up learns the name on its
+       * next beat, rather than only after being paired again.
+       */
+      business: { id: device.businessId, name: device.businessName },
       server_time: now.toISOString(),
       request_id: context.requestId,
     },

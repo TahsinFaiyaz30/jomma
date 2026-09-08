@@ -115,6 +115,20 @@ function NewAccount({ firstOne, phones }: { firstOne: boolean; phones: PairedPho
     if (deviceId) loadSims(deviceId)
   }, [deviceId, loadSims])
 
+  /*
+   * A code that has been used stops being shown.
+   *
+   * A pairing code is single-use, so the QR goes stale the instant somebody
+   * scans it — and it stayed on screen, inviting a second phone to scan
+   * something that could no longer work and saying nothing about why. The page
+   * refreshes itself now, so the scanned phone appears in the paired list
+   * within a few seconds and the code retires itself.
+   */
+  useEffect(() => {
+    const id = qr?.kind === 'qr' ? qr.deviceId : null
+    if (id && phones.some((phone) => phone.id === id)) setQr(null)
+  }, [qr, phones])
+
   const pair = () =>
     startTransition(async () => {
       const result = await pairPhoneAction()
@@ -247,7 +261,7 @@ function AccountCard({ account }: { account: AccountView }) {
   const { amount, elapsed, percent } = useI18n()
   const [pending, startTransition] = useTransition()
   const [reveal, setReveal] = useState<
-    | { kind: 'qr'; dataUrl: string; expiresAt: string; appLinksReady: boolean }
+    | { kind: 'qr'; dataUrl: string; expiresAt: string; appLinksReady: boolean; deviceId: string }
     | { kind: 'token'; value: string }
     | null
   >(null)

@@ -643,7 +643,23 @@ export async function renameDevice(options: {
   })
 }
 
-export async function revokeDevice(options: { deviceId: string; actorId: string }): Promise<void> {
+export async function revokeDevice(options: {
+  deviceId: string
+  /** Null when the phone revoked itself. See `actorType`. */
+  actorId: string | null
+  /**
+   * Who did it.
+   *
+   * A phone may retire its own credential, and the dashboard has to be able to
+   * tell that apart from an operator revoking it: one means somebody at the
+   * counter chose to stop helping this merchant, the other means somebody at
+   * the dashboard withdrew their trust. Both end at a revoked device that
+   * verifies nothing, and they are not the same event to read about later.
+   */
+  actorType?: 'admin' | 'device'
+}): Promise<void> {
+  const byDevice = options.actorType === 'device'
+
   await db.transaction(async (tx) => {
     const [device] = await tx
       .update(devices)
@@ -653,7 +669,14 @@ export async function revokeDevice(options: { deviceId: string; actorId: string 
         // Clearing the hash means even a replayed token cannot verify.
         tokenHash: null,
         tokenPrefix: null,
-        pendingCommands: [{ type: 'stop' }],
+        /*
+         * Nothing to queue for a phone that has already gone.
+         *
+         * `stop` exists to tell a handset that is still beating to stand down.
+         * One that revoked itself has removed the pairing and will never beat
+         * again, so the command would sit unread forever.
+         */
+        pendingCommands: byDevice ? [] : [{ type: 'stop' }],
       })
       .where(eq(devices.id, options.deviceId))
       .returning()
@@ -665,14 +688,16 @@ export async function revokeDevice(options: { deviceId: string; actorId: string 
       deviceId: device.id,
       kind: 'error',
       severity: 'high',
-      detail: 'Device revoked from the dashboard',
+      detail: byDevice
+        ? 'The phone disconnected itself from this business'
+        : 'Device revoked from the dashboard',
     })
 
     await audit(tx, {
       action: 'device.revoked',
       actorId: options.actorId,
-      actorType: 'admin',
-      payload: { device_id: options.deviceId },
+      actorType: byDevice ? 'device' : 'admin',
+      payload: { device_id: options.deviceId, by: byDevice ? 'device' : 'admin' },
     })
   })
 }

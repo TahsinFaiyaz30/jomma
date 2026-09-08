@@ -133,6 +133,15 @@ data class HeartbeatResponse(
     val ok: Boolean = true,
     val commands: List<DeviceCommand> = emptyList(),
     val capture: CaptureSettings? = null,
+    /**
+     * Which merchant this credential reports to, on every beat.
+     *
+     * Here as well as on the pair response so that a phone set up before the
+     * app stored it learns the name without being paired again. Null from a
+     * server too old to send it, which reads as "not known yet" rather than as
+     * a change.
+     */
+    val business: ProvisionBusiness? = null,
     @SerialName("server_time") val serverTime: String? = null,
 )
 
@@ -176,6 +185,15 @@ data class PairRequest(
 @Serializable
 data class ProvisionAccount(val msisdn: String, val provider: String)
 
+/**
+ * The merchant a credential belongs to.
+ *
+ * Always present on a pairing — a phone pairs to a business, and the number is
+ * chosen afterwards — which is why this is not nullable while `account` is.
+ */
+@Serializable
+data class ProvisionBusiness(val id: String, val name: String)
+
 @Serializable
 data class ProvisionResponse(
     @SerialName("device_token") val deviceToken: String,
@@ -193,6 +211,16 @@ data class ProvisionResponse(
      * the reason.
      */
     val account: ProvisionAccount? = null,
+
+    /**
+     * Which merchant this phone now helps.
+     *
+     * The server has sent this since the pairing flow changed and the app threw
+     * it away, so a handset helping two shops could only show their numbers,
+     * with nothing saying which shop a row was for. Optional here only so that
+     * a server too old to send it still parses.
+     */
+    val business: ProvisionBusiness? = null,
 
     /**
      * Whether this credential still has to be approved before it works.

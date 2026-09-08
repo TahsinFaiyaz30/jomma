@@ -90,6 +90,40 @@ class Prefs internal constructor(private val prefs: SharedPreferences) {
 
     fun pairing(deviceId: String): Pairing? = pairings.firstOrNull { it.deviceId == deviceId }
 
+    /* ── Businesses ──────────────────────────────────────────────────────── */
+
+    /**
+     * The merchants this phone helps, each with its credentials gathered up.
+     *
+     * Derived rather than stored. A business exists here exactly when a pairing
+     * for it does, so there is no second list that can disagree with the first —
+     * no orphan business row surviving a removed pairing, and no pairing
+     * belonging to a business the phone has forgotten.
+     *
+     * Ordered by when the phone first paired to each, so the list does not
+     * reshuffle itself as numbers are added.
+     */
+    val businesses: List<BusinessGroup> get() = BusinessGroup.from(pairings)
+
+    fun business(key: String): BusinessGroup? = businesses.firstOrNull { it.key == key }
+
+    /**
+     * Switches reporting for one merchant on or off, in one act.
+     *
+     * Per business rather than per number, because that is the decision
+     * somebody actually makes: a shop closes for the season, or a storefront is
+     * handed to someone else. Doing it a number at a time meant a business was
+     * half-off whenever a number was missed.
+     *
+     * The credential is untouched, so this is not an unpairing. The phone keeps
+     * beating for the business and carries the flag in every beat, which is how
+     * the dashboard can say "the phone has paused this" rather than showing a
+     * merchant a handset that has silently stopped.
+     */
+    fun setBusinessEnabled(key: String, enabled: Boolean) = mutate { list ->
+        list.map { if (it.businessKey == key) it.copy(sendingEnabled = enabled) else it }
+    }
+
     /** Adds a new pairing, or replaces one for the same device id. */
     fun upsertPairing(pairing: Pairing) = mutate { list ->
         list.filterNot { it.deviceId == pairing.deviceId } + pairing

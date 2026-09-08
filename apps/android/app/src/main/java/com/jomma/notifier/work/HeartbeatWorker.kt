@@ -127,6 +127,8 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                             deviceId = result.value.deviceId,
                             deviceToken = result.value.deviceToken,
                             serverUrl = link.serverUrl,
+                            businessId = result.value.business?.id,
+                            businessName = result.value.business?.name,
                             accountMsisdn = msisdn,
                             provider = result.value.account?.provider,
                             /*
@@ -197,7 +199,20 @@ class HeartbeatWorker(context: Context, params: WorkerParameters) :
                 prefs.updatePairing(pairing.deviceId) {
                     // A successful beat is proof of approval, so this is also
                     // how a phone learns it was approved while it was waiting.
-                    it.copy(lastHeartbeatAt = now, awaitingApproval = false)
+                    it.copy(
+                        lastHeartbeatAt = now,
+                        awaitingApproval = false,
+                        /*
+                         * Backfilled, not overwritten with null.
+                         *
+                         * A phone paired before the app stored the business has
+                         * none, and this is how it gets one without being paired
+                         * again. A server too old to send it leaves what is
+                         * already there rather than erasing the name.
+                         */
+                        businessId = result.value.business?.id ?: it.businessId,
+                        businessName = result.value.business?.name ?: it.businessName,
+                    )
                 }
 
                 // Null when talking to a server too old to send them. Leaving the

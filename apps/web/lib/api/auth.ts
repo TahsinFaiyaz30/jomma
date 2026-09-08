@@ -40,6 +40,14 @@ export interface AuthenticatedDevice {
   /** The merchant this phone helps. Always present — a phone pairs to one. */
   businessId: string
   /**
+   * What that merchant is called, so the phone can say it.
+   *
+   * A handset can help several shops at once, and until it had this it could
+   * only list their numbers — which is no help at all when the question is
+   * "which shop is this row for".
+   */
+  businessName: string
+  /**
    * The number it watches, or null before one has been chosen.
    *
    * Null is a phone that has paired and is reporting its SIMs with nothing
@@ -171,12 +179,16 @@ export async function authenticateDevice(
       tokenHash: devices.tokenHash,
       status: devices.status,
       businessId: devices.businessId,
+      businessName: businesses.name,
       accountId: receivingAccounts.id,
       provider: receivingAccounts.provider,
       msisdn: receivingAccounts.msisdn,
       accountStatus: receivingAccounts.status,
     })
     .from(devices)
+    // Inner: `devices.business_id` is NOT NULL with a foreign key, so a device
+    // without a business cannot exist and this cannot drop a row.
+    .innerJoin(businesses, eq(devices.businessId, businesses.id))
     /*
      * Left, not inner.
      *
@@ -226,6 +238,7 @@ export async function authenticateDevice(
     deviceId: row.deviceId,
     deviceName: row.deviceName,
     businessId: row.businessId,
+    businessName: row.businessName,
     receivingAccountId: row.accountId,
     provider: row.provider,
     msisdn: row.msisdn,

@@ -59,11 +59,16 @@ class SmsReceiver : BroadcastReceiver() {
                      * separate two accounts with the same provider on one phone,
                      * which is the case the settings screen asks about.
                      */
-                    val pairing = Attribution.forSms(pairings, sender, subscriptionId, sims) ?: continue
+                    // All of them: one number can be watched for more than one
+                    // business, and the message is about every one of them.
+                    val matched = Attribution.forSms(pairings, sender, subscriptionId, sims)
+                    if (matched.isEmpty()) continue
 
                     val body = parts.joinToString("") { it.messageBody.orEmpty() }
-                    if (repository.enqueue(pairing = pairing, source = "sms", raw = body)) {
-                        stored = true
+                    for (pairing in matched) {
+                        if (repository.enqueue(pairing = pairing, source = "sms", raw = body)) {
+                            stored = true
+                        }
                     }
                 }
                 if (stored) FlushWorker.enqueueNow(appContext)

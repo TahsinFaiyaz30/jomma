@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jomma.notifier.capture.NotificationListener
+import com.jomma.notifier.data.BusinessGroup
 import com.jomma.notifier.data.Capture
 import com.jomma.notifier.data.CaptureRepository
 import com.jomma.notifier.data.JommaDatabase
@@ -50,6 +51,15 @@ data class UiState(
      * hold three of them.
      */
     val pairings: List<Pairing> = emptyList(),
+
+    /**
+     * Which merchant the screens are *showing*. Not which ones are running.
+     *
+     * Every enabled business reports at once, always — switching here changes
+     * what is on display and nothing else. Conflating the two would mean a shop
+     * stopped being watched because somebody looked at another one.
+     */
+    val activeBusinessKey: String? = null,
     val queueDepth: Int = 0,
     val lastCaptureAt: Long? = null,
     val lastHeartbeatAt: Long = 0,
@@ -82,6 +92,17 @@ data class UiState(
      * already has — which this phone may not be the one holding.
      */
     val addingProvider: String? = null,
+    /**
+     * Which merchant the wallet is being added *to*.
+     *
+     * Held rather than taken from [activeBusiness] at the moment of adding.
+     * A business can be managed without being the one on display — opening one
+     * from Settings does exactly that — and reading the active business here
+     * would create the account on whichever shop happened to be showing. The
+     * request goes under that shop's credential, so the server would file it
+     * there and nothing later could notice.
+     */
+    val addingBusinessKey: String? = null,
     val addableSims: List<AddableSim> = emptyList(),
     val addBusy: Boolean = false,
     val hasPhoneStatePermission: Boolean = false,
@@ -125,6 +146,23 @@ data class UiState(
     val pendingLink: PairingLink? = null,
 ) {
     val provisioned: Boolean get() = pairings.isNotEmpty()
+
+    /**
+     * The merchants this phone helps.
+     *
+     * Derived from [pairings] rather than carried beside them, so no screen can
+     * be handed one without the other. A phone supplies a business with what
+     * only a handset has; the numbers belong to the business, so this is what
+     * the screens are organised around.
+     */
+    val businesses: List<BusinessGroup> get() = BusinessGroup.from(pairings)
+
+    /** The merchant on display, falling back to the first this phone paired to. */
+    val activeBusiness: BusinessGroup?
+        get() = businesses.firstOrNull { it.key == activeBusinessKey } ?: businesses.firstOrNull()
+
+    /** Its pairings, which is what the wallet list and the status card show. */
+    val activePairings: List<Pairing> get() = activeBusiness?.pairings ?: emptyList()
     val livePairings: List<Pairing> get() = pairings.filter { it.live }
     val awaitingApproval: List<Pairing> get() = pairings.filter { it.awaitingApproval }
 
@@ -196,6 +234,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+
+
+
+
 
     /** Re-check permissions on every launch — an update can revoke them silently. */
     fun refresh() {
@@ -401,6 +444,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             deviceId = result.value.deviceId,
                             deviceToken = result.value.deviceToken,
                             serverUrl = link.serverUrl,
+                            businessId = result.value.business?.id,
+                            businessName = result.value.business?.name,
                             accountMsisdn = msisdn,
                             provider = result.value.account?.provider,
                             // Scanning is no longer the last step: the phone is
@@ -553,13 +598,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun removePairing(deviceId: String) {
         val pairing = prefs.pairing(deviceId) ?: return
+        val app = getApplication<Application>()
 
         viewModelScope.launch {
+            // Given back rather than merely dropped, so the dashboard stops
+            // showing an active device that no longer exists.
+            val told = pairing.revoked || JommaApi(app, pairing).revokeSelf() is JommaApi.Result.Ok
+
             dao.deleteFor(deviceId)
             prefs.removePairing(deviceId)
             _state.value = _state.value.copy(
                 pairings = prefs.pairings,
-                message = "${pairing.label} removed from this phone.",
+                message = if (told) {
+                    "${pairing.label} removed. The dashboard shows it as revoked."
+                } else {
+                    "${pairing.label} removed from this phone. " +
+                        "The dashboard could not be reached — revoke it there too."
+                },
             )
             refresh()
         }
@@ -588,8 +643,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * or not depending on what this *business* already watches, and the phone
      * holding it is not necessarily the phone that added the others.
      */
-    fun startAddingAccount(provider: String) {
-        val pairing = prefs.pairings.firstOrNull { it.live }
+    /**
+     * A working credential for the merchant currently on screen.
+     *
+     * Not simply the first live pairing. A handset can hold credentials for
+     * several shops, and taking whichever sorted first meant a wallet added
+     * while looking at one shop was created on another — the request goes under
+     * that credential, so the server files it against that business and there
+     * is nothing later to notice the mistake.
+     */
+    private fun credentialFor(key: String?): Pairing? {
+        val group = key?.let { prefs.business(it) }
+            ?: _state.value.activeBusiness
+            ?: prefs.businesses.firstOrNull()
+        return group?.pairings?.firstOrNull { it.live }
+    }
+
+    fun startAddingAccount(businessKey: String, provider: String) {
+        val pairing = credentialFor(businessKey)
         if (pairing == null) {
             _state.value = _state.value.copy(
                 message = "Connect this phone first, and have it approved.",
@@ -599,6 +670,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         _state.value = _state.value.copy(
             addingProvider = provider,
+            addingBusinessKey = businessKey,
             addableSims = emptyList(),
             addBusy = true,
         )
@@ -613,6 +685,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 else -> _state.value = _state.value.copy(
                     addBusy = false,
                     addingProvider = null,
+                    addingBusinessKey = null,
                     message = "Could not read the numbers. Check the connection and try again.",
                 )
             }
@@ -620,7 +693,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cancelAddingAccount() {
-        _state.value = _state.value.copy(addingProvider = null, addableSims = emptyList())
+        _state.value = _state.value.copy(
+            addingProvider = null,
+            addingBusinessKey = null,
+            addableSims = emptyList(),
+        )
     }
 
     /**
@@ -633,7 +710,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun addAccount(subscriptionId: Int) {
         val provider = _state.value.addingProvider ?: return
-        val pairing = prefs.pairings.firstOrNull { it.live } ?: return
+        // The business whose screen this was started from — not whichever one
+        // happens to be on display. See .
+        val pairing = credentialFor(_state.value.addingBusinessKey) ?: return
 
         _state.value = _state.value.copy(addBusy = true)
 
@@ -643,6 +722,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     _state.value = _state.value.copy(
                         addBusy = false,
                         addingProvider = null,
+                    addingBusinessKey = null,
                         addableSims = emptyList(),
                         message = "${result.value.msisdn} added for $provider. " +
                             "Enable it on the dashboard when you are ready to take payments.",
@@ -679,6 +759,149 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val app = getApplication<Application>()
         viewModelScope.launch {
             prefs.pairing(deviceId)?.takeIf { it.live }?.let { HeartbeatWorker.beat(app, it) }
+            refresh()
+        }
+    }
+
+    /**
+     * Which merchant the screens show. Purely a view.
+     *
+     * Every enabled business goes on reporting regardless of what is selected —
+     * the phone is watching all of them at once, and this only decides whose
+     * numbers and whose status card are in front of you. Somebody looking at
+     * one shop must never stop another from being watched.
+     */
+    fun setActiveBusiness(key: String) {
+        _state.value = _state.value.copy(activeBusinessKey = key)
+    }
+
+    /**
+     * Switches reporting for a whole merchant on or off.
+     *
+     * Not an unpairing: the credentials survive, the phone keeps beating, and
+     * every beat carries the flag — which is how the dashboard shows "the phone
+     * has paused this" rather than a handset that has simply gone quiet. That
+     * distinction is the whole reason this is a switch and not a Remove.
+     *
+     * Beat immediately, once per credential, so the merchant watching their own
+     * dashboard sees it while they are still watching rather than up to five
+     * minutes later.
+     */
+    fun setBusinessEnabled(key: String, enabled: Boolean) {
+        val group = prefs.business(key) ?: return
+        prefs.setBusinessEnabled(key, enabled)
+
+        _state.value = _state.value.copy(
+            pairings = prefs.pairings,
+            message = if (enabled) {
+                "Reporting resumed for ${group.name}."
+            } else {
+                "Paused for ${group.name}. Nothing is captured for it, and nothing is held."
+            },
+        )
+
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            for (pairing in prefs.business(key)?.pairings.orEmpty()) {
+                if (pairing.live) HeartbeatWorker.beat(app, pairing)
+            }
+            refresh()
+        }
+    }
+
+    /**
+     * Stops helping a merchant altogether, and says so on their dashboard.
+     *
+     * Distinct from the switch above, which pauses: this gives the credentials
+     * back. Every pairing for the business is revoked on the server first and
+     * only then forgotten here, so the dashboard shows the phone as revoked
+     * rather than as an active device that has mysteriously gone quiet.
+     *
+     * Forgetting happens even when the server could not be reached. The
+     * alternative — refusing to disconnect while offline — leaves somebody
+     * holding a phone that goes on capturing for a merchant they have finished
+     * with, which is worse than a stale row on a dashboard. The message says
+     * which of the two happened, because only one of them needs following up.
+     */
+    fun disconnectBusiness(key: String) {
+        val group = prefs.business(key) ?: return
+        val app = getApplication<Application>()
+
+        viewModelScope.launch {
+            var toldTheServer = true
+            for (pairing in group.pairings) {
+                /*
+                 * A pairing that was already revoked has nothing to give back,
+                 * and its token no longer authenticates — asking would answer
+                 * 401 and read as a failure that needs chasing.
+                 */
+                if (pairing.revoked) continue
+                if (JommaApi(app, pairing).revokeSelf() !is JommaApi.Result.Ok) toldTheServer = false
+            }
+
+            for (pairing in group.pairings) {
+                dao.deleteFor(pairing.deviceId)
+                prefs.removePairing(pairing.deviceId)
+            }
+
+            _state.value = _state.value.copy(
+                pairings = prefs.pairings,
+                // Do not go on showing a business that is gone.
+                activeBusinessKey = prefs.businesses.firstOrNull()?.key,
+                message = if (toldTheServer) {
+                    "Disconnected from ${group.name}. Its dashboard shows this phone as revoked."
+                } else {
+                    "Disconnected from ${group.name} on this phone. " +
+                        "Its dashboard could not be reached — revoke it there too."
+                },
+            )
+            refresh()
+        }
+    }
+
+    /**
+     * Stops helping every merchant at once, and tells each of them.
+     *
+     * The phone-level act, and deliberately not a loop over the per-business one
+     * at the call site: that produced a separate confirmation per shop, so
+     * somebody disconnecting a handset with four businesses on it was told four
+     * times and could not tell whether any had failed.
+     *
+     * Every dashboard learns independently. A handset going back in a drawer
+     * should not leave four merchants each showing an active phone that stopped
+     * reporting for reasons nobody wrote down.
+     */
+    fun disconnectEverything() {
+        val all = prefs.pairings
+        if (all.isEmpty()) return
+        val app = getApplication<Application>()
+        val shops = prefs.businesses.size
+
+        viewModelScope.launch {
+            var unreachable = 0
+            for (pairing in all) {
+                if (pairing.revoked) continue
+                if (JommaApi(app, pairing).revokeSelf() !is JommaApi.Result.Ok) unreachable++
+            }
+
+            for (pairing in all) {
+                dao.deleteFor(pairing.deviceId)
+                prefs.removePairing(pairing.deviceId)
+            }
+
+            _state.value = _state.value.copy(
+                pairings = prefs.pairings,
+                activeBusinessKey = null,
+                message = if (unreachable == 0) {
+                    "Disconnected from $shops business(es). Each dashboard shows this phone " +
+                        "as revoked."
+                } else {
+                    // Named rather than glossed: the ones that did not go through
+                    // are the only ones anybody has to act on.
+                    "Disconnected on this phone. $unreachable credential(s) could not be " +
+                        "handed back — revoke this phone on those dashboards too."
+                },
+            )
             refresh()
         }
     }

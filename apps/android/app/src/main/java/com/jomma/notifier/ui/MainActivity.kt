@@ -85,13 +85,19 @@ class MainActivity : ComponentActivity() {
                 val captures by viewModel.recentCaptures.collectAsState()
                 val snackbar = remember { SnackbarHostState() }
                 var scanning by remember { mutableStateOf(false) }
-                /* Which wallet's own screen is open. Null for the tabs. */
+                /* Which merchant's own screen is open. Null for the tabs. */
+                var managingBusiness by remember { mutableStateOf<String?>(null) }
+                /* And which of its wallets, one level below that. */
                 var managing by remember { mutableStateOf<String?>(null) }
 
-                // So the system gesture leaves the wallet screen rather than
-                // the app. Only registered while one is open, so ordinary back
-                // still exits from the tabs.
-                BackHandler(enabled = managing != null) { managing = null }
+                /*
+                 * One level at a time, matching the back arrow: a wallet closes
+                 * back to its business, a business back to the tabs, and only
+                 * then does back leave the app.
+                 */
+                BackHandler(enabled = managing != null || managingBusiness != null) {
+                    if (managing != null) managing = null else managingBusiness = null
+                }
 
                 LaunchedEffect(state.message) {
                     state.message?.let {
@@ -110,6 +116,13 @@ class MainActivity : ComponentActivity() {
                         managingDeviceId = managing,
                         onManage = { managing = it },
                         onCloseManage = { managing = null },
+                        onSwitchBusiness = viewModel::setActiveBusiness,
+                        managingBusinessKey = managingBusiness,
+                        onManageBusiness = { managingBusiness = it },
+                        onCloseBusiness = { managingBusiness = null },
+                        onBusinessEnabledChange = viewModel::setBusinessEnabled,
+                        onDisconnectBusiness = viewModel::disconnectBusiness,
+                        onDisconnectEverything = viewModel::disconnectEverything,
                         onScan = { scanning = true },
                         onAddAccount = viewModel::startAddingAccount,
                         onPickSim = viewModel::addAccount,
