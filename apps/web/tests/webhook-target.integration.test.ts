@@ -59,6 +59,28 @@ describe('as a service, where merchants are strangers', () => {
     await refuses('not a url')
   })
 
+  it('says which setting refused it, not just that something did', async () => {
+    /*
+     * The refusal is read by somebody whose URL is correct.
+     *
+     * A developer running Jomma and their shop on one laptop points a webhook
+     * at localhost, which is right, and gets told it must be public — true,
+     * unactionable, and pointing at the URL instead of at the mode. That cost a
+     * shop two days: every delivery was refused here at zero attempts while
+     * they concluded Jomma's webhooks did not work at all.
+     *
+     * Asserting the message rather than the type, because the type was never
+     * the part that was wrong.
+     */
+    mode.service = true
+    await expect(assertDeliverableUrl('http://localhost:3300/api/webhooks/jomma')).rejects.toThrow(
+      /JOMMA_MODE/,
+    )
+    await expect(assertDeliverableUrl('http://localhost:3300/api/webhooks/jomma')).rejects.toThrow(
+      /single/,
+    )
+  })
+
   it('still allows an ordinary public endpoint', async () => {
     // The check has to let real traffic through, or it has simply turned
     // webhooks off for everyone.
