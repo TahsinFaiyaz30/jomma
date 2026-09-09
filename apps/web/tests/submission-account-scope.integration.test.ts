@@ -1,4 +1,5 @@
-import { and, eq } from 'drizzle-orm'
+import { toPublicId } from '@jomma/shared'
+import { and, eq, sql } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { db, pool } from '@/lib/db/client'
 import {
@@ -7,6 +8,7 @@ import {
   paymentIntents,
   paymentSubmissions,
   receivingAccounts,
+  webhookDeliveries,
 } from '@/lib/db/schema'
 import { resolveSubmission } from '@/lib/services/submissions'
 
@@ -43,6 +45,25 @@ afterAll(async () => {
   for (const intent of intents) {
     await db.delete(orderPayments).where(eq(orderPayments.intentId, intent.id))
     await db.delete(paymentSubmissions).where(eq(paymentSubmissions.intentId, intent.id))
+    /*
+     * The queued webhooks too, which this used to leave behind.
+     *
+     * `webhook_deliveries` has no foreign key to the intent — the payload is a
+     * snapshot, so a delivery deliberately outlives the row it describes — and
+     * that meant every run of this test left a `payment.succeeded` in the
+     * queue pointing at an intent it had just deleted. On a developer machine
+     * with no worker they accumulate, and the first time anybody looked at the
+     * delivery queue to diagnose a real problem, twenty rows of test residue
+     * were the only thing in it.
+     *
+     * Matched on the payload rather than a column, because the intent id is
+     * the only link that exists between the two.
+     */
+    await db
+      .delete(webhookDeliveries)
+      .where(
+        sql`${webhookDeliveries.payload} -> 'data' ->> 'intent_id' = ${toPublicId('intent', intent.id)}`,
+      )
   }
   await db.delete(paymentIntents).where(eq(paymentIntents.clientReference, CLIENT_REF))
   await db.delete(incomingPayments).where(eq(incomingPayments.trxId, FOREIGN_TRX))

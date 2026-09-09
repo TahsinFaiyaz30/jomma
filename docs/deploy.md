@@ -54,6 +54,42 @@ Groups, if you want the cadences separately: `sweep` (every 30–60s), `webhooks
 (every minute), `health` (every 5 minutes), `maintenance` (hourly). One `all`
 call a minute is correct too, just more work than necessary.
 
+### If nothing is calling it, nothing happens — and it looks like something else
+
+One of these has to be running. Without it the API still accepts intents and the
+matcher still matches, so the deployment looks alive, and every consequence
+shows up somewhere that points away from the cause:
+
+- **Webhooks queue and never send.** The integrator's view is that Jomma never
+  called them. Delivery rows sit at `attempts: 0`, which is the tell — a row
+  that has been tried and failed looks completely different.
+- **Intents never expire.** `GET /v1/intents/:id` sweeps the one intent it is
+  asked about, so a client polling a specific order still gets the truth; every
+  intent nobody polls stays `open` forever, holding its reference code.
+- **No health alert can fire.** Heartbeat gaps, capture silence and parse
+  failures are all raised *by* these jobs, so a dead scheduler silences the
+  alerting along with everything else.
+
+That combination cost a shop two days: 20 webhooks queued at zero attempts, two
+orders holding stock against intents a day past their deadline, and nothing
+anywhere saying so. The dashboard now checks on every page load — a path that
+works precisely when the scheduler does not — and shows a banner naming which
+half is wrong. `job_runs` holds the last run of each group if you want to look
+directly.
+
+**Local development.** `pnpm dev` starts the web app only. Run `pnpm dev:worker`
+alongside it, or ping the endpoint by hand:
+
+```bash
+curl -X POST "http://localhost:3000/api/internal/sweep?group=all" \
+  -H "x-jomma-internal: $AUTH_SECRET"
+```
+
+**And check `JOMMA_MODE`.** In `service` mode webhook targets on `localhost` or
+any private address are refused as SSRF, which is correct for an instance
+holding several merchants' data and fatal for a laptop running a shop on
+`localhost:3300`. A self-hosted instance is `single`, and may deliver privately.
+
 ---
 
 ## 1. Database

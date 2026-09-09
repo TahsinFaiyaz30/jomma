@@ -240,6 +240,17 @@ export const NOTIFIER_EVENT_KINDS = [
   'balance_drift',
   'capture_silence',
   'heartbeat_gap',
+  /*
+   * The two that are about this deployment rather than about a phone.
+   *
+   * Every other kind here is raised *by* the scheduled jobs, which makes them
+   * useless for the one failure that hides all the others: the jobs not running
+   * at all. A dead scheduler raises no alerts, delivers no webhooks and expires
+   * no intents, and every symptom of it points somewhere else — so it is named
+   * here and detected on a read path that does not depend on it.
+   */
+  'jobs_silent',
+  'webhook_backlog',
 ] as const
 export type NotifierEventKind = (typeof NOTIFIER_EVENT_KINDS)[number]
 

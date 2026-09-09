@@ -1,10 +1,12 @@
 import { logger } from '@/lib/logger'
 import { expireDueIntents } from '@/lib/services/intents'
 import { retryOrphans } from '@/lib/services/match-runner'
+import { recordJobRun } from '@/lib/services/scheduler-health'
 import {
   checkCaptureSilence,
   checkHeartbeatGaps,
   checkParseFailures,
+  checkWebhookBacklog,
   pruneIdempotencyKeys,
 } from './health'
 import { deliverDueWebhooks, requeueStuckDeliveries } from './webhooks'
@@ -38,6 +40,7 @@ export interface JobRunResult {
   heartbeatGaps?: number
   captureSilence?: number
   parseFailures?: number
+  webhookBacklog?: number
   idempotencyPruned?: number
 }
 
@@ -60,6 +63,7 @@ async function attempt<T>(label: string, run: () => Promise<T>, fallback: T): Pr
 
 export async function runJobs(group: JobGroup = 'all'): Promise<JobRunResult> {
   const startedAt = Date.now()
+  const startedDate = new Date(startedAt)
   const result: JobRunResult = { group, ms: 0 }
 
   const wants = (name: Exclude<JobGroup, 'all'>) => group === 'all' || group === name
@@ -87,12 +91,13 @@ export async function runJobs(group: JobGroup = 'all'): Promise<JobRunResult> {
   }
 
   if (wants('health')) {
-    const [heartbeatGaps, captureSilence, parseFailures] = await Promise.all([
+    const [heartbeatGaps, captureSilence, parseFailures, webhookBacklog] = await Promise.all([
       attempt('checkHeartbeatGaps', checkHeartbeatGaps, 0),
       attempt('checkCaptureSilence', checkCaptureSilence, 0),
       attempt('checkParseFailures', checkParseFailures, 0),
+      attempt('checkWebhookBacklog', checkWebhookBacklog, 0),
     ])
-    Object.assign(result, { heartbeatGaps, captureSilence, parseFailures })
+    Object.assign(result, { heartbeatGaps, captureSilence, parseFailures, webhookBacklog })
   }
 
   if (wants('maintenance')) {
@@ -104,6 +109,29 @@ export async function runJobs(group: JobGroup = 'all'): Promise<JobRunResult> {
   }
 
   result.ms = Date.now() - startedAt
+
+  /*
+   * The stamp that makes a dead scheduler visible.
+   *
+   * Written last and through `attempt`, so a database blip here cannot be the
+   * reason a sweep is reported as failed — but written on *every* path,
+   * including one where every job above threw. "The jobs ran and all of them
+   * failed" and "the jobs are not running" need different people to do
+   * different things, and a timestamp is the only thing that separates them.
+   */
+  await attempt(
+    'recordJobRun',
+    () =>
+      recordJobRun({
+        group,
+        startedAt: startedDate,
+        finishedAt: new Date(),
+        durationMs: result.ms,
+        result: { ...result },
+      }),
+    undefined,
+  )
+
   return result
 }
 
@@ -115,6 +143,7 @@ export {
   checkCaptureSilence,
   checkHeartbeatGaps,
   checkParseFailures,
+  checkWebhookBacklog,
   pruneIdempotencyKeys,
 } from './health'
 // `replayDelivery` is deliberately not re-exported: `lib/services/app-admin.ts`

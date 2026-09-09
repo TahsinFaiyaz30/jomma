@@ -4,10 +4,12 @@ import { AppSidebar } from '@/components/dash/app-sidebar'
 import { CommandPalette } from '@/components/dash/command-palette'
 import { LiveRefresh } from '@/components/dash/live-refresh'
 import { NotPayableBanner } from '@/components/dash/not-payable-banner'
+import { SchedulerBanner } from '@/components/dash/scheduler-banner'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { listBusinessesFor, requireBusiness } from '@/lib/auth/tenancy'
 import { getAccountFooter, getSidebarCounts } from '@/lib/services/dashboard'
 import { canTakePayments, hasCompletedSetup } from '@/lib/services/onboarding'
+import { getSchedulerHealth, schedulerNeedsAttention } from '@/lib/services/scheduler-health'
 
 /**
  * The dashboard shell.
@@ -49,10 +51,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
    */
   const businesses = isServiceMode() ? await listBusinessesFor(admin.id) : []
 
-  const [counts, accounts, payable] = await Promise.all([
+  /*
+   * `scheduler` is instance-wide rather than per-business on purpose. A dead
+   * worker is not one merchant's problem — it stops every merchant's webhooks —
+   * and the person who can restart it is whoever is looking at any page.
+   */
+  const [counts, accounts, payable, scheduler] = await Promise.all([
     getSidebarCounts(business.id),
     getAccountFooter(business.id),
     canTakePayments(business.id),
+    getSchedulerHealth(),
   ])
 
   return (
@@ -82,6 +90,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         }))}
       />
       <SidebarInset className="min-w-0">
+        {/* Above the payability banner: a dead scheduler is the cause of more
+            symptoms than it looks like, and the one to read first. */}
+        {schedulerNeedsAttention(scheduler) ? <SchedulerBanner health={scheduler} /> : null}
         {payable ? null : <NotPayableBanner />}
         {children}
       </SidebarInset>

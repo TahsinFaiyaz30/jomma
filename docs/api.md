@@ -519,6 +519,14 @@ Public, unauthenticated, polled by that page. Returns only what a buyer needs:
 No order id, no account id, no other payments. The intent id is a uuidv7 in 26
 base32 characters, so it is not guessable, and the endpoint is rate limited by IP.
 
+**`status` is never a stale `open`.** `GET /v1/intents/:id` expires the intent it
+is asked about if the deadline has passed, so a read past `expires_at` reports
+`expired` and queues `payment.expired` even when no sweep has run. That used to
+be the scheduler's job alone, and an instance with no worker and no cron
+answered `open` indefinitely — long enough for integrators to hold stock against
+orders that could never be paid. Queuing is still not delivering: without a
+scheduler the event sits in the queue. See `docs/deploy.md`.
+
 Add `?h=<token>` and the response also carries `handoff_valid`. That is how a
 phone that scanned the QR finds out that the screen it came from has gone back —
 see the handoff endpoints below. Without the parameter the field is `null`,

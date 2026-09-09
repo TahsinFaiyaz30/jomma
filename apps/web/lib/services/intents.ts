@@ -452,8 +452,52 @@ export async function extendIntent(options: {
 /* ── Expiry ───────────────────────────────────────────────────────────────── */
 
 /**
- * The sweep. Called by the worker, and inline by the read path so a client
- * polling `GET /v1/intents/:id` never sees a stale `open`.
+ * Expire one intent, if it is due, on the way to reading it.
+ *
+ * The scheduled sweep is still what this system relies on — it is the only
+ * thing that expires an intent nobody is watching, which is most of them. This
+ * is the read path refusing to repeat a lie in the meantime.
+ *
+ * That lie was real and expensive. `getIntentView` returns the stored `status`
+ * column untouched, so an intent a day past its own `expires_at` answered
+ * `open` to every `GET /v1/intents/:id` for as long as nothing swept it. The
+ * hosted pay page had never had that problem, because it derives expiry from
+ * the deadline before rendering — so the buyer's screen and the merchant's API
+ * disagreed about whether the same payment was still alive, and the integrator
+ * on the wrong side of that held stock for orders that could never be paid.
+ *
+ * Deriving the status on read would have made the answer honest and left the
+ * rest of expiry undone: the reference code stays allocated and no
+ * `payment.expired` is queued, which is the event integrators release stock on.
+ * So this does the real thing, narrowly — one intent, conditional on it still
+ * being `open`, so concurrent readers cannot double-expire and a second read
+ * costs one no-op update.
+ *
+ * It does not deliver anything. Queuing an event and delivering it are separate
+ * jobs on purpose, and a deployment with no worker and no cron still gets no
+ * webhooks — see `lib/services/scheduler-health.ts` for how that now announces
+ * itself instead of being discovered a day later.
+ */
+export async function expireIntentIfDue(intentId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: paymentIntents.id, appId: paymentIntents.appId })
+    .from(paymentIntents)
+    .where(
+      and(
+        eq(paymentIntents.id, intentId),
+        eq(paymentIntents.status, 'open'),
+        sql`${paymentIntents.expiresAt} <= now()`,
+      ),
+    )
+    .limit(1)
+
+  if (!row) return false
+  return expireOne(row)
+}
+
+/**
+ * The sweep. Called by the worker on a cadence, and by `expireIntentIfDue` for
+ * the single intent a client is asking about right now.
  */
 export async function expireDueIntents(limit = 200): Promise<number> {
   const due = await db
@@ -463,45 +507,60 @@ export async function expireDueIntents(limit = 200): Promise<number> {
     .limit(limit)
 
   let expired = 0
-
   for (const row of due) {
-    await db.transaction(async (tx) => {
-      const now = new Date()
-      const [updated] = await tx
-        .update(paymentIntents)
-        .set({ status: 'expired', expiredAt: now })
-        .where(and(eq(paymentIntents.id, row.id), eq(paymentIntents.status, 'open')))
-        .returning()
-
-      if (!updated) return
-      expired += 1
-
-      await expireRefCode(tx, row.id)
-
-      await audit(tx, {
-        action: 'intent.expired',
-        appId: row.appId,
-        intentId: row.id,
-        payload: { amount_cents: updated.amountCents },
-      })
-
-      await queueEvent(tx, {
-        appId: row.appId,
-        type: 'payment.expired',
-        data: {
-          intent_id: toPublicId('intent', updated.id),
-          client_reference: updated.clientReference,
-          amount: updated.amountCents,
-          received_amount: updated.receivedAmountCents,
-          trx_id: null,
-          sender_msisdn: null,
-          match_confidence: null,
-          matched_by: null,
-          metadata: updated.metadata,
-        },
-      })
-    })
+    if (await expireOne(row)) expired += 1
   }
+
+  return expired
+}
+
+/**
+ * One intent, in one transaction: status, reference code, audit trail, event.
+ *
+ * Extracted so the sweep and the read path cannot drift. The conditional update
+ * is the concurrency control — two callers racing here produce one expiry and
+ * one queued `payment.expired`, because only the update that still saw `open`
+ * returns a row.
+ */
+async function expireOne(row: { id: string; appId: string }): Promise<boolean> {
+  let expired = false
+
+  await db.transaction(async (tx) => {
+    const now = new Date()
+    const [updated] = await tx
+      .update(paymentIntents)
+      .set({ status: 'expired', expiredAt: now })
+      .where(and(eq(paymentIntents.id, row.id), eq(paymentIntents.status, 'open')))
+      .returning()
+
+    if (!updated) return
+    expired = true
+
+    await expireRefCode(tx, row.id)
+
+    await audit(tx, {
+      action: 'intent.expired',
+      appId: row.appId,
+      intentId: row.id,
+      payload: { amount_cents: updated.amountCents },
+    })
+
+    await queueEvent(tx, {
+      appId: row.appId,
+      type: 'payment.expired',
+      data: {
+        intent_id: toPublicId('intent', updated.id),
+        client_reference: updated.clientReference,
+        amount: updated.amountCents,
+        received_amount: updated.receivedAmountCents,
+        trx_id: null,
+        sender_msisdn: null,
+        match_confidence: null,
+        matched_by: null,
+        metadata: updated.metadata,
+      },
+    })
+  })
 
   return expired
 }

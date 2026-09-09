@@ -46,6 +46,24 @@ import { isServiceMode } from '@jomma/shared/env'
 /** Hostnames that are a private target by name rather than by address. */
 const BLOCKED_SUFFIXES = ['.local', '.internal', '.localdomain', '.home.arpa']
 
+/**
+ * The refusal names the setting, because the setting is the whole reason.
+ *
+ * This message used to stop at "must point at a public address", which is true
+ * and tells the reader nothing they can act on. A developer running Jomma and
+ * their shop on one laptop reads it as a bug in their URL and goes looking in
+ * the wrong place — and they only ever see it if they think to open the
+ * delivery log, since from the shop's side an SSRF refusal and a webhook that
+ * was never sent are the same silence.
+ *
+ * That is not hypothetical. An instance ran two days in `service` mode against
+ * a shop on `localhost`, and every delivery was refused here, at zero attempts,
+ * while the integrator concluded Jomma's webhooks did not work at all.
+ */
+const PRIVATE_TARGET_MESSAGE =
+  'Webhooks must point at a public address, because JOMMA_MODE is "service". ' +
+  'A self-hosted instance (JOMMA_MODE=single) may deliver to localhost and other private addresses.'
+
 export class WebhookTargetError extends Error {}
 
 /**
@@ -72,14 +90,14 @@ export async function assertDeliverableUrl(raw: string): Promise<URL> {
   const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
 
   if (host === 'localhost' || BLOCKED_SUFFIXES.some((suffix) => host.endsWith(suffix))) {
-    throw new WebhookTargetError('Webhooks must point at a public address.')
+    throw new WebhookTargetError(PRIVATE_TARGET_MESSAGE)
   }
 
   // A literal address needs no lookup, and must not get one — `dns.lookup` on
   // an IP happily echoes it back, which would read as a successful resolution.
   if (isIP(host) !== 0) {
     if (isPrivateAddress(host)) {
-      throw new WebhookTargetError('Webhooks must point at a public address.')
+      throw new WebhookTargetError(PRIVATE_TARGET_MESSAGE)
     }
     return url
   }
@@ -95,7 +113,7 @@ export async function assertDeliverableUrl(raw: string): Promise<URL> {
   // private address would otherwise pass on the public one and connect to
   // whichever the request happens to pick.
   if (addresses.length === 0 || addresses.some((entry) => isPrivateAddress(entry.address))) {
-    throw new WebhookTargetError('Webhooks must point at a public address.')
+    throw new WebhookTargetError(PRIVATE_TARGET_MESSAGE)
   }
 
   return url

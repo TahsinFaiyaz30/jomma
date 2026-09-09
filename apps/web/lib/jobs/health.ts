@@ -2,8 +2,10 @@ import { env } from '@jomma/shared/env'
 import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
 import { db, schema } from '@/lib/db/client'
 import { logger } from '@/lib/logger'
+import { SCHEDULER_THRESHOLDS } from '@/lib/services/scheduler-health'
 
-const { idempotencyKeys, incomingPayments, notifierEvents, receivingAccounts } = schema
+const { idempotencyKeys, incomingPayments, notifierEvents, receivingAccounts, webhookDeliveries } =
+  schema
 
 /**
  * Health sweeps.
@@ -159,6 +161,66 @@ export async function checkParseFailures(): Promise<number> {
     logger.warn({ count }, 'parse failures in the last hour — a message format may have changed')
   }
   return count
+}
+
+/**
+ * Webhooks that are queued and not getting out.
+ *
+ * The sibling of the dashboard's scheduler banner, and it catches the case that
+ * banner cannot: a scheduler that is running perfectly while every delivery
+ * fails. That is not a hypothetical — an endpoint registered against the wrong
+ * port answers nothing, attempts climb, deliveries exhaust their seven retries
+ * and go `failed`, and the integrator's view of it is simply that Jomma never
+ * called them. Nothing in this system said a word about it.
+ *
+ * Deliberately counts `failed` as well as stale `pending`. A delivery that has
+ * given up is the loudest possible evidence that a client is missing events,
+ * and it is the one state nothing else here was watching.
+ *
+ * One open alert at a time, like the others — a backlog produces a row per
+ * sweep otherwise, which is how an alerts panel becomes something people close
+ * without reading.
+ */
+export async function checkWebhookBacklog(): Promise<number> {
+  const cutoff = new Date(Date.now() - SCHEDULER_THRESHOLDS.backlogStuckAfterMinutes * 60_000)
+
+  const [row] = await db
+    .select({
+      stale: sql<string>`count(*) filter (
+        where ${webhookDeliveries.status} = 'pending'
+          and coalesce(${webhookDeliveries.nextAttemptAt}, ${webhookDeliveries.createdAt}) <= ${cutoff.toISOString()}
+      )`,
+      failed: sql<string>`count(*) filter (where ${webhookDeliveries.status} = 'failed')`,
+    })
+    .from(webhookDeliveries)
+
+  const stale = Number(row?.stale ?? 0)
+  const failed = Number(row?.failed ?? 0)
+  if (stale === 0 && failed === 0) return 0
+
+  const existing = await db
+    .select({ id: notifierEvents.id })
+    .from(notifierEvents)
+    .where(and(eq(notifierEvents.kind, 'webhook_backlog'), isNull(notifierEvents.acknowledgedAt)))
+    .limit(1)
+
+  if (existing.length > 0) return stale + failed
+
+  await db.insert(notifierEvents).values({
+    // Not about any one phone. `receiving_account_id` is nullable precisely so
+    // an instance-level fault has somewhere to live.
+    receivingAccountId: null,
+    kind: 'webhook_backlog',
+    severity: 'critical',
+    detail:
+      failed > 0
+        ? `${failed} webhook ${failed === 1 ? 'delivery has' : 'deliveries have'} given up after every retry`
+        : `${stale} webhook ${stale === 1 ? 'delivery is' : 'deliveries are'} overdue and not getting out`,
+    payload: { stale, failed, cutoff_minutes: SCHEDULER_THRESHOLDS.backlogStuckAfterMinutes },
+  })
+
+  logger.error({ stale, failed }, 'webhook deliveries are not getting out')
+  return stale + failed
 }
 
 /** Expired idempotency records, so a key can be reused after its 24h window. */
